@@ -26,7 +26,7 @@ scripts/run.sh manage fetch-osm --state ohio --state indiana
 scripts/run.sh manage build-graph --state ohio --state indiana   # writes mapdata/indiana_ohio.npz
 ```
 
-Everything lives in `~/.config/backroad-route-finder/mapdata/`, outside `storage/`, so backups leave it out; `active.json` there names the map in use (otherwise `routing.region`). Building takes about 3.5× the extract's size in memory (Ohio: ~1.1 GB). For Docker, build on the host and copy the `.npz` into `data/mapdata/` (`docker.data_dir`), since osmium has no Alpine wheel.
+Everything lives in `~/.config/backroad-route-finder/mapdata/`, outside `storage/`, so backups leave it out; `active.json` there names the map in use (otherwise `routing.region`). Building takes about 3.5× the extract's size in memory (Ohio: ~1.1 GB), on top of the map the server already holds. The Docker image has osmium compiled in (a build stage of its own in `docker/Dockerfile`), so the Map data screen works there too; raise `docker.memory` (4g by default) for several states.
 
 Settings are in `config/config.yaml` under `routing:` (region, default penalty, whether secondary roads count as main, place search), editable from the Settings screen.
 

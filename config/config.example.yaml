@@ -314,7 +314,7 @@ docker:
   restart: unless-stopped          # no | always | unless-stopped | on-failure[:N]
 
   # Blast-radius limits. Raise them deliberately for real load.
-  memory: 2g                       # the road graph needs about 1.7 GB while it loads
+  memory: 4g                       # one state's graph ~1.7 GB; building or switching maps holds more
   cpus: "1"
   pids_limit: 128
   tmpfs_size: 16m                  # the only writable path besides data_dir

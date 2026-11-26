@@ -39,4 +39,3 @@ Done: Valhalla, OSRM, OpenRouteService, GraphHopper, TomTom, HERE, Mapbox and Go
 - Scheduled job (`registry.register`) to re-download the extract and rebuild the graph monthly, loading the new graph without a restart.
 - Self-hosted map tiles (a vector-tile server or a pre-rendered set), so the page needs nothing from tile.openstreetmap.org.
 - Send to phone: a share link, or a hand-off to a nav app that follows a GPX track.
-- Build the graph inside the container: osmium has no Alpine wheel yet, so `manage build-graph` runs on the host today.

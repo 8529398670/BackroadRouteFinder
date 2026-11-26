@@ -1,5 +1,6 @@
-# Only for `manage build-graph`, which turns an OpenStreetMap .pbf extract into
-# the router's graph file. Run on the host (osmium has no Alpine wheel); the
-# server and the container only read the finished graph.
+# Only for `manage build-graph` (and the Map data screen's Build button), which
+# turns an OpenStreetMap .pbf extract into the router's graph file.
 #   .venv/bin/pip install -r app/requirements-build.txt
+# osmium has no Alpine wheel, so docker/Dockerfile compiles it in a stage of
+# its own; the shipped image gets only the result.
 osmium==4.3.2

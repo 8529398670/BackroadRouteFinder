@@ -15,10 +15,26 @@ COPY app/requirements.txt .
 # stage can copy whole.
 RUN pip install --no-cache-dir --only-binary=:all: --prefix=/install -r requirements.txt
 
+# --- osmium stage ----------------------------------------------------------
+# The Map data screen builds the road graph inside the container, which needs
+# osmium (app/requirements-build.txt). It has no Alpine (musllinux) wheel, so
+# this stage compiles one from source. The compilers and headers stay in this
+# stage: only the installed package reaches the runtime image, which adds the
+# few shared libraries it links against (see below).
+FROM python:3.14-alpine AS osmium
+
+RUN apk add --no-cache build-base cmake boost-dev expat-dev bzip2-dev zlib-dev lz4-dev
+WORKDIR /build
+COPY app/requirements-build.txt .
+# --no-deps: osmium's one dependency, requests, is only for its replication
+# tools, which this app does not use. The import check proves the result runs.
+RUN pip install --no-cache-dir --no-binary=osmium --no-deps --prefix=/install -r requirements-build.txt \
+ && PYTHONPATH="$(echo /install/lib/python*/site-packages)" python -c "import osmium; osmium.FileProcessor; print('osmium ok')"
+
 # --- runtime stage ---------------------------------------------------------
 FROM python:3.14-alpine AS runtime
 
-# ca-certificates is the only package added: webhooks call out over HTTPS, and
+# ca-certificates: webhooks and map downloads call out over HTTPS, and
 # without it that fails with an opaque certificate error.
 #
 # The uid/gid are fixed at 10001 rather than left to Alpine's system range.
@@ -28,7 +44,10 @@ FROM python:3.14-alpine AS runtime
 #
 # pip is removed: nothing installs packages at runtime, and a package manager
 # is one more tool for anyone who gets code execution in here.
-RUN apk add --no-cache ca-certificates \
+#
+# expat, bzip2, zlib, lz4 and the C++ runtime are what the osmium package
+# links against: building a map reads the compressed .osm.pbf with them.
+RUN apk add --no-cache ca-certificates expat libbz2 zlib lz4-libs libstdc++ \
  && addgroup -S -g 10001 app \
  && adduser -S -u 10001 -G app -h /app -s /sbin/nologin app \
  && python -m pip uninstall --yes --quiet pip
@@ -36,6 +55,7 @@ RUN apk add --no-cache ca-certificates \
 WORKDIR /app
 
 COPY --from=builder /install /usr/local
+COPY --from=osmium /install /usr/local
 COPY app ./app
 COPY static ./static
 # The language file and the defaults the app reads; never config.yaml or

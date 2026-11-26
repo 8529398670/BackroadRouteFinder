@@ -201,8 +201,9 @@ const MapData = {
     Dom.text( Dom.get( "mapdata-summary" ) , slugs.length === 0 ? I18n.get( "mapdata.summary_none" ) : Format.fill( "mapdata.summary" , {
       count: slugs.length, size: this.bytes( total ), fetch: this.bytes( fetchBytes ),
     } ) );
-    // Building holds about 3.5 times the extract in memory (Ohio: 330 MB -> ~1.1 GB).
-    const need = total * 3.5;
+    // Building holds about 3.5 times the extract in memory (Ohio: 330 MB -> ~1.1 GB),
+    // beside the map the server already holds (~1 KB per road segment).
+    const need = total * 3.5 + ( this.data.loaded.state === "ready" ? this.data.loaded.segments * 1000 : 0 );
     const warn = Dom.get( "mapdata-warning" );
     let text = "";
     if ( this.data.memory_bytes && need > this.data.memory_bytes * 0.7 ) {

@@ -4,9 +4,9 @@ to it without a restart.
 
 Downloads and builds run as `manage fetch-osm` / `manage build-graph` in a
 child process (app/routing/tasks.py), one task at a time, with their output
-shown on the screen. Building needs osmium (app/requirements-build.txt), which
-has no Alpine wheel, so inside Docker the screen says so and the build is done
-on the host.
+shown on the screen. Building needs osmium (app/requirements-build.txt); the
+Docker image compiles it in (docker/Dockerfile), and a local run needs it
+installed in .venv.
 """
 from __future__ import annotations
 
@@ -117,10 +117,23 @@ def _can_build() -> bool:
 
 
 def _memory() -> int:
+    """The memory this process may use: the machine's, or a container's limit
+    (docker.memory) when that is lower -- inside Docker the machine's total
+    is the host's, which a build cannot actually have."""
     try:
-        return os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
+        total = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
     except (AttributeError, ValueError, OSError):
-        return 0
+        total = 0
+    for limit_file in ("/sys/fs/cgroup/memory.max", "/sys/fs/cgroup/memory/memory.limit_in_bytes"):
+        try:
+            with open(limit_file) as handle:
+                value = handle.read().strip()
+        except OSError:
+            continue
+        if value.isdigit() and (total == 0 or int(value) < total):
+            total = int(value)
+        break
+    return total
 
 
 def _reply(request: Request) -> MapDataReply:
@@ -203,8 +216,7 @@ def run_task(request: Request, body: RunMapTask) -> MapDataReply:
         if missing:
             raise Refused(400, f"not downloaded yet: {', '.join(regions.name_of(s) for s in missing)}", field="areas")
         if not _can_build():
-            raise Refused(400, "building needs osmium, which is not installed here: .venv/bin/pip install -r app/requirements-build.txt "
-                          "(in Docker, build on the host and copy the .npz into the map data folder)")
+            raise Refused(400, "building needs osmium, which is not installed here: .venv/bin/pip install -r app/requirements-build.txt")
     steps: list[list[str]] = []
     if fetch:
         steps.append(["manage", "fetch-osm", *[f"--state={s}" for s in fetch]])
