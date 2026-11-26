@@ -237,7 +237,7 @@ routing:
 
   # Count secondary roads (most numbered state routes) as main roads too,
   # for anyone who has not picked their own. [live]
-  secondary_is_main: false
+  secondary_is_main: true
 
   # How far a clicked or searched point may be from a road and still be
   # used, in metres. 50-20000. [live]

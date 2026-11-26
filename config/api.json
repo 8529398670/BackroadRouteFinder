@@ -1196,6 +1196,7 @@
             "type": "number"
           },
           "secondary_is_main": {
+            "default": true,
             "type": "boolean"
           },
           "sources": {
@@ -10556,6 +10557,7 @@
                     "type": "number"
                   },
                   "secondary_is_main": {
+                    "default": true,
                     "type": "boolean"
                   },
                   "sources": {

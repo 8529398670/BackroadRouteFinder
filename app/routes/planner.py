@@ -92,7 +92,7 @@ def _ready_graph(request: Request):
 class PlanRoute(RequestType):
     waypoints: Annotated[list[Point], Meta(min_length=2, max_length=MAX_WAYPOINTS, description="Start, any stops, destination, in order.", extra={"error": f"give 2-{MAX_WAYPOINTS} points"})]
     penalty: Penalty = 8.0
-    secondary_is_main: bool = False
+    secondary_is_main: bool = True
     allow_unpaved: bool = False
     compare_fastest: Annotated[bool, Meta(description="Also plan the plain fastest route, for comparison.")] = True
     sources: Annotated[list[Source], Meta(min_length=1, max_length=len(SOURCE_IDS), description="Who to ask: our own router and/or other engines.",
@@ -301,7 +301,7 @@ class PlannerPrefs(Reply):
     api_name: ClassVar[str] = "PlannerPrefs"
     backroads: Annotated[bool, Meta(description="Backroads mode on; off plans the plain fastest route.")] = True
     penalty: Penalty = 8.0
-    secondary_is_main: bool = False
+    secondary_is_main: bool = True
     allow_unpaved: bool = False
     compare_fastest: bool = True
     sources: list[Source] = msgspec.field(default_factory=lambda: [OURS])

@@ -10,7 +10,7 @@
 // an older answer stale, so only the latest one is shown.
 const Planner = {
   stops: [ null , null ],
-  options: { backroads: true , penalty: 8 , secondary_is_main: false , allow_unpaved: false , compare_fastest: true , sources: [ "ours" ] , combine: "best" },
+  options: { backroads: true , penalty: 8 , secondary_is_main: true , allow_unpaved: false , compare_fastest: true , sources: [ "ours" ] , combine: "best" },
   result: null,
   // Which of the result's routes is shown on the map, saved and exported.
   selected: 0,
@@ -222,6 +222,9 @@ const Planner = {
     } );
     const menu = Dom.el( "div" , { class: "list-group plan-search-menu shadow-sm" , attrs: { role: "listbox" } } );
     Dom.show( menu , false );
+    // Say it is searching as soon as something is typed, not only once the
+    // pause before the search has passed.
+    input.addEventListener( "input" , () => this.showSearching( input , menu ) );
     Dom.typed( input , () => this.search( index , input , menu ) , 400 );
     input.addEventListener( "keydown" , ( event ) => {
       if ( event.key === "Escape" ) Dom.show( menu , false );
@@ -263,6 +266,16 @@ const Planner = {
     } );
   },
 
+  showSearching( input , menu ) {
+    const query = input.value.trim();
+    if ( query.length < 2 || ( this.status && !this.status.place_search ) ) return;
+    Dom.swap( menu , Dom.el( "div" , { class: "list-group-item small text-body-secondary d-flex align-items-center gap-2" , children: [
+      Dom.el( "span" , { class: "spinner-border spinner-border-sm text-primary" , attrs: { "aria-hidden": "true" } } ),
+      Dom.el( "span" , { text: Format.fill( "plan.searching" , { query: query } ) } ),
+    ] } ) );
+    Dom.show( menu , true );
+  },
+
   async search( index , input , menu ) {
     const query = input.value.trim();
     if ( query.length < 2 ) {
@@ -278,6 +291,7 @@ const Planner = {
     try {
       places = ( await Api.request( "/api/geocode?q=" + encodeURIComponent( query ) ) ).places;
     } catch ( error ) {
+      if ( input.value.trim() === query ) Dom.show( menu , false );
       App.showError( error.message );
       return;
     }
@@ -396,6 +410,7 @@ const Planner = {
   async plan( fit ) {
     const turn = ++this.turn;
     if ( !this.ready() || !this.status || this.status.state !== "ready" ) {
+      this.showBusy( null );
       this.result = null;
       RouteMap.clearRoutes();
       Dom.show( Dom.get( "plan-result" ) , false );
@@ -405,6 +420,7 @@ const Planner = {
     const options = this.options;
     const sources = this.usableSources();
     if ( sources.length === 0 ) {
+      this.showBusy( null );
       this.result = null;
       RouteMap.clearRoutes();
       Dom.show( Dom.get( "plan-result" ) , false );
@@ -422,24 +438,51 @@ const Planner = {
     };
     const summary = Dom.get( "plan-summary" );
     summary.classList.add( "opacity-50" );
+    this.showBusy( "updating" );
     let result;
     try {
       result = await Api.post( "/api/route" , body );
     } catch ( error ) {
       if ( turn !== this.turn ) return;
       summary.classList.remove( "opacity-50" );
+      this.showBusy( null );
       App.showError( error.message );
       return;
     } finally {
       if ( turn === this.turn ) summary.classList.remove( "opacity-50" );
     }
     if ( turn !== this.turn ) return;
+    // Say whether the change moved the route, so a setting that makes no
+    // difference here does not look like it was ignored.
+    const before = this.result ? this.signature( this.result ) : null;
+    this.showBusy( before === null ? null : before === this.signature( result ) ? "unchanged" : "updated" );
     this.result = result;
     this.selected = 0;
     this.draw();
     if ( fit || !this.shownOnce ) RouteMap.fitTo( result.routes , this.stops );
     this.shownOnce = true;
     this.renderResult( result );
+  },
+
+  signature( result ) {
+    return result.routes.map( ( route ) => [ route.kind , route.source , Math.round( route.seconds ) , Math.round( route.meters ) ].join( ":" ) ).join( "|" );
+  },
+
+  // The badge over the map: a spinner while a route is being planned, then
+  // what came of it for a moment. null hides it.
+  showBusy( state ) {
+    const badge = Dom.get( "plan-busy" );
+    window.clearTimeout( this.busyTimer );
+    if ( !state ) {
+      Dom.show( badge , false );
+      return;
+    }
+    const icon = state === "updating"
+      ? Dom.el( "span" , { class: "spinner-border spinner-border-sm text-primary" , attrs: { "aria-hidden": "true" } } )
+      : Dom.el( "i" , { class: state === "updated" ? "bi bi-check-circle-fill text-success" : "bi bi-info-circle-fill text-secondary" , attrs: { "aria-hidden": "true" } } );
+    Dom.swap( badge , icon , Dom.el( "span" , { text: I18n.get( "plan." + state ) } ) );
+    Dom.show( badge , true );
+    if ( state !== "updating" ) this.busyTimer = window.setTimeout( () => Dom.show( badge , false ) , 2500 );
   },
 
   // The routes to choose between, and the fastest one shown to compare.

@@ -2578,7 +2578,7 @@ The route through the waypoints that keeps time on main roads down: each minute 
 | `compare_fastest` | boolean | no | default `true` | Also plan the plain fastest route, for comparison. |
 | `csrf_token` | string | no |  | From GET /api/me. Browser sessions only. |
 | `penalty` | number | no | 1 to 100; default `8` | How many times over a minute on a main road counts. 1 is the plain fastest route. |
-| `secondary_is_main` | boolean | no |  |  |
+| `secondary_is_main` | boolean | no | default `true` |  |
 | `sources` | array of string | no |  | Who to ask: our own router and/or other engines. |
 | `waypoints` | array of [`Point`](#point) | yes |  | Start, any stops, destination, in order. |
 
@@ -3211,7 +3211,7 @@ The shapes the routes above refer to by name.
 | `combine` | string | no | default `best` | best keeps only the best-scoring route; all returns every route, best first. |
 | `compare_fastest` | boolean | no | default `true` |  |
 | `penalty` | number | no | 1 to 100; default `8` | How many times over a minute on a main road counts. 1 is the plain fastest route. |
-| `secondary_is_main` | boolean | no |  |  |
+| `secondary_is_main` | boolean | no | default `true` |  |
 | `sources` | array of string | no |  |  |
 
 ### Point
