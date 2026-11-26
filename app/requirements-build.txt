@@ -1,0 +1,5 @@
+# Only for `manage build-graph`, which turns an OpenStreetMap .pbf extract into
+# the router's graph file. Run on the host (osmium has no Alpine wheel); the
+# server and the container only read the finished graph.
+#   .venv/bin/pip install -r app/requirements-build.txt
+osmium==4.3.2

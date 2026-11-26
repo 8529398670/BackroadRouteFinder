@@ -1,0 +1,174 @@
+"""Routes people saved from the planner, and each person's planner defaults.
+
+A saved route keeps what is needed to plan it again -- the points and the
+options -- plus the summary from when it was saved, for the list. The line
+itself is not stored: the map changes, and planning again takes a second.
+
+Deleting is soft: the record is marked and hidden, and its owner can restore
+it for RESTORE_WINDOW (the toast's Undo). After that it is removed for good
+the next time the owner's list is read.
+
+The planner defaults (backroads on or off, the penalty, the two toggles) live
+on the user's own record, the way keyboard shortcuts do, so they follow the
+person to every browser.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import timedelta
+from typing import Any
+
+from app.core.db import BUCKET_SAVED_ROUTES, BUCKET_USERS, Record, Store
+from app.models import from_iso, to_iso, utc_now
+
+RESTORE_WINDOW = timedelta(minutes=10)
+MAX_PER_USER = 500
+NAME_MAX = 80
+
+
+class NotFound(Exception):
+    """No such route, or not this person's."""
+
+
+class RenameConflict(Exception):
+    def __init__(self, current: str) -> None:
+        super().__init__("it was renamed somewhere else")
+        self.current = current
+
+
+class TooMany(Exception):
+    pass
+
+
+@dataclass
+class SavedRoute:
+    id: int
+    owner_id: int
+    name: str
+    waypoints: list[dict[str, Any]]
+    options: dict[str, Any]
+    summary: dict[str, Any]
+    created_at: str
+    updated_at: str
+    deleted_at: str | None = None
+
+
+def _from_record(key: int, record: Record) -> SavedRoute:
+    return SavedRoute(
+        id=int(key),
+        owner_id=int(record["owner_id"]),
+        name=record.get("name", ""),
+        waypoints=record.get("waypoints", []),
+        options=record.get("options", {}),
+        summary=record.get("summary", {}),
+        created_at=record.get("created_at", ""),
+        updated_at=record.get("updated_at", record.get("created_at", "")),
+        deleted_at=record.get("deleted_at"),
+    )
+
+
+def clean_name(name: str) -> str:
+    return " ".join(name.split())[:NAME_MAX]
+
+
+def create(store: Store, owner_id: int, name: str, waypoints: list[dict], options: dict, summary: dict) -> SavedRoute:
+    if len(list_routes(store, owner_id)) >= MAX_PER_USER:
+        raise TooMany(f"at most {MAX_PER_USER} saved routes")
+    key = store.next_sequence(BUCKET_SAVED_ROUTES)
+    now = to_iso(utc_now())
+    record = {
+        "owner_id": owner_id,
+        "name": clean_name(name),
+        "waypoints": waypoints,
+        "options": options,
+        "summary": summary,
+        "created_at": now,
+        "updated_at": now,
+    }
+    store.put(BUCKET_SAVED_ROUTES, key, record)
+    return _from_record(key, record)
+
+
+def _purge_expired(store: Store, owner_id: int) -> None:
+    cutoff = utc_now() - RESTORE_WINDOW
+
+    def expired(_key: Any, record: Record) -> bool:
+        deleted = record.get("deleted_at")
+        return record.get("owner_id") == owner_id and deleted is not None and from_iso(deleted) < cutoff
+
+    store.delete_where(BUCKET_SAVED_ROUTES, expired)
+
+
+def list_routes(store: Store, owner_id: int) -> list[SavedRoute]:
+    """The owner's routes that are not deleted, newest change first."""
+    _purge_expired(store, owner_id)
+    rows = [_from_record(key, record) for key, record in store.all(BUCKET_SAVED_ROUTES)
+            if record.get("owner_id") == owner_id and record.get("deleted_at") is None]
+    return sorted(rows, key=lambda route: route.updated_at, reverse=True)
+
+
+def get(store: Store, owner_id: int, route_id: int) -> SavedRoute:
+    record = store.get(BUCKET_SAVED_ROUTES, route_id)
+    if record is None or record.get("owner_id") != owner_id or record.get("deleted_at") is not None:
+        raise NotFound("no such saved route")
+    return _from_record(route_id, record)
+
+
+def _mutate(store: Store, owner_id: int, route_id: int, change, want_deleted: bool = False) -> SavedRoute:
+    problem: list[Exception] = []
+
+    def mutate(record: Record) -> None:
+        if record.get("owner_id") != owner_id or (record.get("deleted_at") is not None) != want_deleted:
+            problem.append(NotFound("no such saved route"))
+            return
+        try:
+            change(record)
+        except Exception as error:  # noqa: BLE001 -- handed back below
+            problem.append(error)
+
+    updated = store.update_value(BUCKET_SAVED_ROUTES, route_id, mutate)
+    if updated is None:
+        raise NotFound("no such saved route")
+    if problem:
+        raise problem[0]
+    return _from_record(route_id, updated)
+
+
+def rename(store: Store, owner_id: int, route_id: int, name: str, expect: str | None) -> SavedRoute:
+    def change(record: Record) -> None:
+        if expect is not None and record.get("name") != expect:
+            raise RenameConflict(record.get("name", ""))
+        record["name"] = clean_name(name)
+        record["updated_at"] = to_iso(utc_now())
+
+    return _mutate(store, owner_id, route_id, change)
+
+
+def delete(store: Store, owner_id: int, route_id: int) -> SavedRoute:
+    def change(record: Record) -> None:
+        record["deleted_at"] = to_iso(utc_now())
+
+    return _mutate(store, owner_id, route_id, change)
+
+
+def restore(store: Store, owner_id: int, route_id: int) -> SavedRoute:
+    def change(record: Record) -> None:
+        if from_iso(record["deleted_at"]) < utc_now() - RESTORE_WINDOW:
+            raise NotFound("too late to restore it")
+        record.pop("deleted_at", None)
+
+    return _mutate(store, owner_id, route_id, change, want_deleted=True)
+
+
+# --- planner defaults, on the user's record ---------------------------------
+
+def get_prefs(store: Store, user_id: int) -> dict[str, Any] | None:
+    record = store.get(BUCKET_USERS, user_id)
+    return None if record is None else record.get("planner")
+
+
+def set_prefs(store: Store, user_id: int, prefs: dict[str, Any]) -> bool:
+    def mutate(record: Record) -> None:
+        record["planner"] = prefs
+
+    return store.update_value(BUCKET_USERS, user_id, mutate) is not None
