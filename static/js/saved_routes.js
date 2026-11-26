@@ -19,6 +19,12 @@ const SavedRoutes = {
 
   stopsText( route ) {
     const short = ( point ) => ( point.label || "" ).split( "," )[ 0 ];
+    const loop = route.options && route.options.loop;
+    if ( loop ) {
+      const center = route.waypoints[ 0 ] ? short( route.waypoints[ 0 ] ) : loop.center_lat.toFixed( 3 ) + ", " + loop.center_lon.toFixed( 3 );
+      const radius = Format.fill( "plan.loop_radius_text" , { n: loop.radius , unit: I18n.get( loop.unit === "min" ? "plan.unit_min" : "plan.unit_mi" ) } );
+      return Format.fill( "routes.loop" , { center: center , radius: radius } );
+    }
     const first = route.waypoints[ 0 ];
     const last = route.waypoints[ route.waypoints.length - 1 ];
     const more = route.waypoints.length - 2;

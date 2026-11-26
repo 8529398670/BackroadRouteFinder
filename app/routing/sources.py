@@ -84,8 +84,10 @@ class Access:
         return "no API key yet: add your own on the Settings screen, or ask the owner for a shared one"
 
 
-def score(summary: Summary, penalty: float) -> float:
-    return summary.seconds + (penalty - 1.0) * summary.main_seconds
+def score(summary: Summary, penalty: float = 0.0) -> float:
+    """Seconds, plus what the avoided roads add (each road type's avoid
+    strength, Summary.extra_seconds)."""
+    return summary.seconds + summary.extra_seconds
 
 
 def _same(a: Summary, b: Summary) -> bool:
@@ -93,16 +95,21 @@ def _same(a: Summary, b: Summary) -> bool:
 
 
 def plan(graph: Graph, points: list[tuple[float, float]], options: costs.Options, sources: list[str], combine: str,
-         compare_fastest: bool, max_snap_m: float, access: Access) -> Plan:
+         compare_fastest: bool, max_snap_m: float, access: Access, snapped: list[Snap] | None = None,
+         reuse_factor: float = 1.0) -> Plan:
+    """snapped: the points already on the road (a loop's ring), else snapped
+    here. reuse_factor: see router.plan."""
     import time
 
     began = time.monotonic()
     backroads = options.penalty > 1
     kind = "backroads" if backroads else "fastest"
     out = Plan()
-    snapped = router.snap_all(graph, points, max_snap_m)
+    if snapped is None:
+        snapped = router.snap_all(graph, points, max_snap_m, options)
     out.snapped = snapped
     on_road = [(s.lat, s.lon) for s in snapped]
+    ask = base.Ask.from_rules(options.rules, backroads)
 
     asked: dict[str, concurrent.futures.Future] = {}
     for source in sources:
@@ -112,7 +119,7 @@ def plan(graph: Graph, points: list[tuple[float, float]], options: costs.Options
             out.problems.append(Problem(source, access.why_not(source)))
             continue
         engine = ENGINES[source]
-        asked[source] = _pool.submit(base.cached_fetch, engine, on_road, backroads,
+        asked[source] = _pool.submit(base.cached_fetch, engine, on_road, ask,
                                      access.keys.get(source, ""), access.urls.get(source, ""), access.timeout)
 
     choices: list[Choice] = []
@@ -120,7 +127,8 @@ def plan(graph: Graph, points: list[tuple[float, float]], options: costs.Options
     use_ours = OURS in sources
     if use_ours or (compare_fastest and backroads):
         try:
-            ours = router.plan(graph, points, options, compare_fastest, max_snap_m, chosen=use_ours)
+            ours = router.plan(graph, points, options, compare_fastest, max_snap_m, chosen=use_ours, snapped=snapped,
+                               reuse_factor=reuse_factor)
         except NoRoute as error:
             if not asked:
                 raise
@@ -132,6 +140,7 @@ def plan(graph: Graph, points: list[tuple[float, float]], options: costs.Options
                 else:
                     fastest = Choice(OURS, "fastest", planned.summary, planned.summary.seconds, compare=True)
 
+    rating = costs.rating(graph, options) if asked else None
     for source, future in asked.items():
         try:
             candidates = future.result(timeout=access.timeout + 5)
@@ -145,7 +154,7 @@ def plan(graph: Graph, points: list[tuple[float, float]], options: costs.Options
             out.problems.append(Problem(source, f"failed: {error}"))
             continue
         for rank, candidate in enumerate(candidates):
-            summary, off_map = match.measure(graph, candidate.coords, candidate.seconds, options.secondary_is_main)
+            summary, off_map = match.measure(graph, candidate.coords, candidate.seconds, rating)
             summary.meters = candidate.meters or summary.meters
             choices.append(Choice(source, kind, summary, score(summary, options.penalty),
                                   estimated=True, off_map_meters=off_map, rank=rank))

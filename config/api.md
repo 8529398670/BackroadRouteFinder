@@ -2513,7 +2513,7 @@ Addresses and places matching q, within the map's area, best first. Asked of rou
 
 Your planner defaults
 
-How the planner opens for you: backroads on or off, the penalty and the toggles.
+How the planner opens for you: backroads on or off, the penalty, the road rules and their avoid strengths, and the loop settings. What you have not set yourself is the server's (config.yaml routing).
 
 |  |  |
 |---|---|
@@ -2531,7 +2531,7 @@ How the planner opens for you: backroads on or off, the penalty and the toggles.
 
 Change your planner defaults
 
-Save how the planner opens for you. Send the whole set.
+Save how the planner opens for you. Send the whole set; a loop setting or road_factors left out keeps the server's.
 
 |  |  |
 |---|---|
@@ -2542,13 +2542,19 @@ Save how the planner opens for you. Send the whole set.
 
 | Field | Type | Required | Limits | Description |
 |---|---|---|---|---|
-| `allow_unpaved` | boolean | yes |  |  |
+| `allow_unpaved` | boolean or null | no |  | Deprecated, use road_rules: true is unpaved and track use. |
 | `backroads` | boolean | yes |  |  |
 | `combine` | string | no | default `best` | best keeps only the best-scoring route; all returns every route, best first. |
 | `compare_fastest` | boolean | yes |  |  |
 | `csrf_token` | string | no |  | From GET /api/me. Browser sessions only. |
+| `loop_points` | integer or null | no | 4 to 8 |  |
+| `loop_radius` | number or null | no | 0.5 to 200 |  |
+| `loop_reuse` | number or null | no | 1 to 10 |  |
+| `loop_unit` | string or null | no | one of `mi`, `min` |  |
 | `penalty` | number | yes | 1 to 100 | How many times over a minute on a main road counts. 1 is the plain fastest route. |
-| `secondary_is_main` | boolean | yes |  |  |
+| `road_factors` | map of number or null | no |  | Avoid strengths of their own, by road type: how many times over a minute on that type counts when its rule is avoid (unpaved: 2 makes gravel count double however high the penalty). Types left out count the penalty. Left out altogether: the defaults in GET /api/routing/status. |
+| `road_rules` | map of string | no |  | What to do with each road type: use it, avoid it (each minute on it counts penalty times over), or never (only when there is no other way). Categories: interstate, us_highway, state_route, county_road, local, service, track; and any road that is unpaved or restricted (private, permit or farm access). Types left out take the defaults in GET /api/routing/status. |
+| `secondary_is_main` | boolean or null | no |  | Deprecated, use road_rules: false is state_route use. |
 | `sources` | array of string | no |  |  |
 
 **Reply 200**: Success
@@ -2562,7 +2568,7 @@ Save how the planner opens for you. Send the whole set.
 
 Plan a route
 
-The route through the waypoints that keeps time on main roads down: each minute on a motorway, trunk or primary road (and secondary, with secondary_is_main) counts penalty times over. Times include turns, traffic signals and stop signs (delay_seconds). sources picks who plans: our own router (ours) and/or other engines (see GET /api/routing/status), each asked for its backroads route and alternatives. Every route is measured on our map and scored the same way; combine=best keeps the best, combine=all returns them all, best first. A source that fails is listed in problems and the rest still answer. With compare_fastest, the plain fastest route on our map comes last (compare=true). A waypoint with no road within routing.max_snap_m is refused with its index.
+The route through the waypoints that keeps time on main roads down: each minute on a road type its road_rules avoid counts penalty times over (or the type's own strength in road_factors). Times include turns, traffic signals and stop signs (delay_seconds). sources picks who plans: our own router (ours) and/or other engines (see GET /api/routing/status), each asked for its backroads route and alternatives. Every route is measured on our map and scored the same way; combine=best keeps the best, combine=all returns them all, best first. A source that fails is listed in problems and the rest still answer. With compare_fastest, the plain fastest route on our map comes last (compare=true). A waypoint with no road within routing.max_snap_m is refused with its index.
 
 |  |  |
 |---|---|
@@ -2573,14 +2579,17 @@ The route through the waypoints that keeps time on main roads down: each minute 
 
 | Field | Type | Required | Limits | Description |
 |---|---|---|---|---|
-| `allow_unpaved` | boolean | no |  |  |
+| `allow_unpaved` | boolean or null | no |  | Deprecated, use road_rules: true is unpaved and track use. |
 | `combine` | string | no | default `best` | best keeps only the best-scoring route; all returns every route, best first. |
 | `compare_fastest` | boolean | no | default `true` | Also plan the plain fastest route, for comparison. |
 | `csrf_token` | string | no |  | From GET /api/me. Browser sessions only. |
+| `loop` | [`Loop`](#loop) or null | no |  | Plan a loop round a center instead of a trip through the waypoints. |
 | `penalty` | number | no | 1 to 100; default `8` | How many times over a minute on a main road counts. 1 is the plain fastest route. |
-| `secondary_is_main` | boolean | no | default `true` |  |
+| `road_factors` | map of number or null | no |  | Avoid strengths of their own, by road type: how many times over a minute on that type counts when its rule is avoid (unpaved: 2 makes gravel count double however high the penalty). Types left out count the penalty. Left out altogether: the defaults in GET /api/routing/status. |
+| `road_rules` | map of string | no |  | What to do with each road type: use it, avoid it (each minute on it counts penalty times over), or never (only when there is no other way). Categories: interstate, us_highway, state_route, county_road, local, service, track; and any road that is unpaved or restricted (private, permit or farm access). Types left out take the defaults in GET /api/routing/status. |
+| `secondary_is_main` | boolean or null | no |  | Deprecated, use road_rules: false is state_route use. |
 | `sources` | array of string | no |  | Who to ask: our own router and/or other engines. |
-| `waypoints` | array of [`Point`](#point) | yes |  | Start, any stops, destination, in order. |
+| `waypoints` | array of [`Point`](#point) | no |  | Start, any stops, destination, in order (2 or more). With a loop: none, or the start alone for start=stop. |
 
 **Reply 200**: Success
 
@@ -2588,8 +2597,11 @@ The route through the waypoints that keeps time on main roads down: each minute 
 |---|---|---|---|---|
 | `milliseconds` | integer | yes |  |  |
 | `problems` | array of [`SourceProblem`](#sourceproblem) | yes |  |  |
+| `ring` | array of [`Point`](#point) | yes |  | With a loop: the ring's points, in driving order. |
+| `road_factors` | map of number | yes |  | The avoid strengths the plan used; types left out counted the penalty. |
+| `road_rules` | map of string | yes |  | The road rules the plan used, every type filled in. |
 | `routes` | array of [`PlannedRoute`](#plannedroute) | yes |  |  |
-| `snapped` | array of [`Point`](#point) | yes |  | Where each waypoint met the road. |
+| `snapped` | array of [`Point`](#point) | yes |  | Where each waypoint met the road (with a loop: every point it drives through). |
 
 ### GET /api/routing/status
 
@@ -2610,10 +2622,16 @@ Whether the map is loaded, what it covers, and the server's planner defaults.
 | `built_at` | string | yes |  |  |
 | `default_penalty` | number | yes |  |  |
 | `error` | string | yes |  |  |
+| `loop_points` | integer | yes |  |  |
+| `loop_radius` | number | yes |  | How the loop planner opens: radius, unit, ring points and reuse (routing.loop_*). |
+| `loop_reuse` | number | yes |  |  |
+| `loop_unit` | string | yes |  |  |
 | `nodes` | integer | yes |  |  |
 | `place_search` | boolean | yes |  | Whether GET /api/geocode is available. |
 | `region` | string | yes |  |  |
-| `secondary_is_main` | boolean | yes |  |  |
+| `restricted_on_map` | boolean | yes |  | Whether the loaded map holds restricted roads (one built before them leaves them out). |
+| `road_types` | array of [`RoadType`](#roadtype) | yes |  | The road types road_rules names, in the order to show them, with the server's defaults. |
+| `secondary_is_main` | boolean | yes |  | Deprecated: see road_types. |
 | `segments` | integer | yes |  |  |
 | `sources` | array of [`SourceInfo`](#sourceinfo) | yes |  | Our router and the other engines, in the order to show them. |
 | `state` | string | yes |  | missing, loading, ready or error. |
@@ -2674,7 +2692,7 @@ Keep a route's points and options under a name, with its summary for the list.
 | `name` | string | yes | 1 to 80 characters |  |
 | `options` | [`RouteOptions`](#routeoptions) | yes |  |  |
 | `summary` | [`RouteSummary`](#routesummary) | yes |  |  |
-| `waypoints` | array of [`Waypoint`](#waypoint) | yes |  |  |
+| `waypoints` | array of [`Waypoint`](#waypoint) | yes |  | 2 or more; with a loop, none or its start. |
 
 **Reply 201**: Success
 
@@ -3032,6 +3050,19 @@ The shapes the routes above refer to by name.
 | `unlimited` | boolean | yes |  |  |
 | `uses` | integer | yes |  | Sign-ins so far. |
 
+### Loop
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `center_lat` | number | yes | -90 to 90 |  |
+| `center_lon` | number | yes | -180 to 180 |  |
+| `direction` | string | no | one of `cw`, `ccw`; default `cw` | Clockwise or anticlockwise round the ring. |
+| `points` | integer or null | no | 4 to 8 | How many points the ring has (4-8); left out, routing.loop_points. |
+| `radius` | number | yes | 0.5 to 200 |  |
+| `reuse` | number or null | no | 1 to 10 | How many times over a road already driven counts on the rest of the loop (1-10; 1 lets it double back); left out, routing.loop_reuse. |
+| `start` | string | no | one of `center`, `ring`, `stop`; default `center` | center: out from the center and back; ring: on the circle itself; stop: from the first waypoint and back to it. |
+| `unit` | string | no | one of `mi`, `min`; default `mi` | mi: a circle of that radius; min: as far as that many minutes of the fastest drive reach. |
+
 ### Maintenance
 
 | Field | Type | Required | Limits | Description |
@@ -3206,12 +3237,16 @@ The shapes the routes above refer to by name.
 
 | Field | Type | Required | Limits | Description |
 |---|---|---|---|---|
-| `allow_unpaved` | boolean | no |  |  |
 | `backroads` | boolean | no | default `true` | Backroads mode on; off plans the plain fastest route. |
 | `combine` | string | no | default `best` | best keeps only the best-scoring route; all returns every route, best first. |
 | `compare_fastest` | boolean | no | default `true` |  |
+| `loop_points` | integer | no | 4 to 8; default `6` |  |
+| `loop_radius` | number | no | 0.5 to 200; default `20` |  |
+| `loop_reuse` | number | no | 1 to 10; default `3` |  |
+| `loop_unit` | string | no | one of `mi`, `min`; default `mi` |  |
 | `penalty` | number | no | 1 to 100; default `8` | How many times over a minute on a main road counts. 1 is the plain fastest route. |
-| `secondary_is_main` | boolean | no | default `true` |  |
+| `road_factors` | map of number | no |  | Avoid strengths of their own, by road type: how many times over a minute on that type counts when its rule is avoid (unpaved: 2 makes gravel count double however high the penalty). Types left out count the penalty. Left out altogether: the defaults in GET /api/routing/status. |
+| `road_rules` | map of string | no |  | What to do with each road type: use it, avoid it (each minute on it counts penalty times over), or never (only when there is no other way). Categories: interstate, us_highway, state_route, county_road, local, service, track; and any road that is unpaved or restricted (private, permit or farm access). Types left out take the defaults in GET /api/routing/status. |
 | `sources` | array of string | no |  |  |
 
 ### Point
@@ -3246,6 +3281,15 @@ The shapes the routes above refer to by name.
 | `login_links` | integer | yes |  |  |
 | `sessions` | integer | yes |  |  |
 
+### RoadType
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `default` | string | yes |  |  |
+| `default_strength` | number or null | no |  | Its own avoid strength by default; null counts the penalty. |
+| `flag` | boolean | yes |  | A property any road can have (unpaved, restricted), not a category of its own. |
+| `id` | string | yes |  |  |
+
 ### RotatedKey
 
 | Field | Type | Required | Limits | Description |
@@ -3256,11 +3300,14 @@ The shapes the routes above refer to by name.
 
 | Field | Type | Required | Limits | Description |
 |---|---|---|---|---|
-| `allow_unpaved` | boolean | no |  |  |
+| `allow_unpaved` | boolean or null | no |  | Deprecated, use road_rules: true is unpaved and track use. |
 | `backroads` | boolean | no | default `true` |  |
 | `combine` | string | no | default `best` | best keeps only the best-scoring route; all returns every route, best first. |
+| `loop` | [`Loop`](#loop) or null | no |  | A loop round a center, planned in place of the waypoints. |
 | `penalty` | number | no | 1 to 100; default `8` | How many times over a minute on a main road counts. 1 is the plain fastest route. |
-| `secondary_is_main` | boolean | no |  |  |
+| `road_factors` | map of number or null | no |  | Its avoid strengths; null for a route saved before they could be set (the server's). |
+| `road_rules` | map of string | no |  | What to do with each road type: use it, avoid it (each minute on it counts penalty times over), or never (only when there is no other way). Categories: interstate, us_highway, state_route, county_road, local, service, track; and any road that is unpaved or restricted (private, permit or farm access). Types left out take the defaults in GET /api/routing/status. |
+| `secondary_is_main` | boolean or null | no |  | Deprecated, use road_rules: false is state_route use. |
 | `sources` | array of string | no |  |  |
 
 ### RouteSummary
@@ -3381,6 +3428,7 @@ One of these:
 | Field | Type | Required | Limits | Description |
 |---|---|---|---|---|
 | `backroads` | string | yes |  | How it stays off main roads. |
+| `honours` | array of string | yes |  | The road rules it can be told: freeways (interstate), major (us_highway, state_route), unpaved, tracks. The rest are still counted when its routes are scored. |
 | `id` | string | yes |  |  |
 | `name` | string | yes |  |  |
 | `needs_key` | boolean | yes |  |  |

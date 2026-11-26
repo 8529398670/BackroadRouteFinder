@@ -6,7 +6,7 @@ mode only drops freeways. Alternatives on a two-point trip."""
 from __future__ import annotations
 
 from app.routing.providers import polyline
-from app.routing.providers.base import Candidate, Engine, Points, ProviderError, query, request_json
+from app.routing.providers.base import Ask, Candidate, Engine, Points, ProviderError, query, request_json
 
 
 def _ask(points: Points, url: str, timeout: float, exclude: bool) -> dict:
@@ -17,11 +17,12 @@ def _ask(points: Points, url: str, timeout: float, exclude: bool) -> dict:
     return request_json(f"{url.rstrip('/')}/route/v1/driving/{where}?{query(params)}", timeout=timeout)
 
 
-def fetch(points: Points, backroads: bool, key: str, url: str, timeout: float) -> list[Candidate]:
+def fetch(points: Points, ask: Ask | bool, key: str, url: str, timeout: float) -> list[Candidate]:
+    exclude = Ask.coerce(ask).off("freeways")
     try:
-        answer = _ask(points, url, timeout, backroads)
+        answer = _ask(points, url, timeout, exclude)
     except ProviderError:
-        if not backroads:
+        if not exclude:
             raise
         # A server whose profile cannot exclude motorways: its plain route.
         answer = _ask(points, url, timeout, False)
@@ -37,4 +38,5 @@ ENGINE = Engine(
     free_tier="Free public demo server, light use only; or self-host.",
     backroads="Can only leave out freeways.",
     fetch=fetch,
+    honours=frozenset({"freeways"}),
 )

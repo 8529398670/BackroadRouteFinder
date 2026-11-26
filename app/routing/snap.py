@@ -39,11 +39,14 @@ def segment_along(graph: Graph, segment: int) -> np.ndarray:
     return along
 
 
-def snap(graph: Graph, lat: float, lon: float, max_distance: float) -> Snap:
+def snap(graph: Graph, lat: float, lon: float, max_distance: float, shunned: np.ndarray | None = None) -> Snap:
+    """shunned: per segment, roads to snap onto only when no other is within
+    max_distance (the ones the request's rules rule out)."""
     point = graph.project(lat, lon)[0]
     count = min(CANDIDATES, len(graph.geom_lat))
     _, nearest = graph.tree.query(point, k=count)
     best: tuple[float, int, int, float] | None = None  # distance, segment, piece start index, fraction
+    best_ok: tuple[float, int, int, float] | None = None  # the same, among roads not shunned
     for position in np.atleast_1d(nearest):
         position = int(position)
         segment = graph.segment_of_point(position)
@@ -59,6 +62,10 @@ def snap(graph: Graph, lat: float, lon: float, max_distance: float) -> Snap:
             distance = float(np.hypot(*(point - closest)))
             if best is None or distance < best[0]:
                 best = (distance, segment, start, fraction)
+            if shunned is not None and not shunned[segment] and (best_ok is None or distance < best_ok[0]):
+                best_ok = (distance, segment, start, fraction)
+    if best_ok is not None and best_ok[0] <= max_distance:
+        best = best_ok
     if best is None or best[0] > max_distance:
         raise OffNetwork(f"no road within {int(max_distance)} m")
     distance, segment, start, fraction = best

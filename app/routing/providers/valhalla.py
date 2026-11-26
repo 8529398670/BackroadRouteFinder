@@ -2,17 +2,24 @@
 by default, no key; or your own (providers.valhalla_url).
 
 Backroads: use_highways 0 (stay off motorways and trunk roads as far as it
-can), tolls and ferries discouraged. Up to two alternates."""
+can), tolls and ferries discouraged. Unpaved roads left out (exclude_unpaved)
+or tracks shunned (use_tracks) as the rules say. Up to two alternates."""
 from __future__ import annotations
 
 from app.routing.providers import polyline
-from app.routing.providers.base import Candidate, Engine, Points, ProviderError, request_json
+from app.routing.providers.base import NEVER, Ask, Candidate, Engine, Points, ProviderError, request_json
 
 
-def fetch(points: Points, backroads: bool, key: str, url: str, timeout: float) -> list[Candidate]:
+def fetch(points: Points, ask: Ask | bool, key: str, url: str, timeout: float) -> list[Candidate]:
+    ask = Ask.coerce(ask)
     auto: dict = {"use_tolls": 0.2, "use_ferry": 0.2}
-    if backroads:
-        auto.update({"use_highways": 0.0, "use_tracks": 0.0, "use_living_streets": 0.3})
+    if ask.backroads:
+        auto["use_living_streets"] = 0.3
+    if ask.off("freeways"):
+        auto["use_highways"] = 0.0
+    auto["use_tracks"] = 0.0 if ask.off("tracks") else 0.5
+    if ask.unpaved == NEVER:
+        auto["exclude_unpaved"] = True
     body = {
         "locations": [{"lat": lat, "lon": lon, "type": "break" if i in (0, len(points) - 1) else "through"}
                       for i, (lat, lon) in enumerate(points)],
@@ -45,4 +52,5 @@ ENGINE = Engine(
     free_tier="Free public server (FOSSGIS), light use only; or self-host.",
     backroads="Avoids freeways and trunk roads (use_highways 0).",
     fetch=fetch,
+    honours=frozenset({"freeways", "unpaved", "tracks"}),
 )

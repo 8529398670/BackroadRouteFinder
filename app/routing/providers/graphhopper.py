@@ -6,12 +6,26 @@ tenth as attractive -- the closest of all the engines to what our own router
 does. Alternatives on a two-point trip."""
 from __future__ import annotations
 
-from app.routing.providers.base import Candidate, Engine, Points, ProviderError, query, request_json
+from app.routing.providers.base import AVOID, NEVER, Ask, Candidate, Engine, Points, ProviderError, query, request_json
 
-MAIN_ROADS = "road_class == MOTORWAY || road_class == TRUNK || road_class == PRIMARY"
+FREEWAYS = "road_class == MOTORWAY"
+MAJOR = "road_class == TRUNK || road_class == PRIMARY"
+UNPAVED = "surface == UNPAVED || surface == GRAVEL || surface == DIRT || surface == COMPACTED || surface == GROUND || surface == SAND"
+TRACKS = "road_class == TRACK"
+# How much less attractive "avoid" and "never" make a road. Never is not 0, so
+# a trip that cannot be made without one still gets a route.
+FACTOR = {AVOID: "0.1", NEVER: "0.01"}
 
 
-def fetch(points: Points, backroads: bool, key: str, url: str, timeout: float) -> list[Candidate]:
+def custom_model(ask: Ask) -> dict | None:
+    priority = [{"if": test, "multiply_by": FACTOR[getattr(ask, name)]}
+                for name, test in (("freeways", FREEWAYS), ("major", MAJOR), ("unpaved", UNPAVED), ("tracks", TRACKS))
+                if ask.off(name)]
+    return {"priority": priority} if priority else None
+
+
+def fetch(points: Points, ask: Ask | bool, key: str, url: str, timeout: float) -> list[Candidate]:
+    ask = Ask.coerce(ask)
     body: dict = {
         "points": [[lon, lat] for lat, lon in points],
         "profile": "car",
@@ -19,9 +33,10 @@ def fetch(points: Points, backroads: bool, key: str, url: str, timeout: float) -
         "instructions": False,
         "calc_points": True,
     }
-    if backroads:
+    model = custom_model(ask)
+    if model:
         body["ch.disable"] = True
-        body["custom_model"] = {"priority": [{"if": MAIN_ROADS, "multiply_by": "0.1"}]}
+        body["custom_model"] = model
     if len(points) == 2:
         body["algorithm"] = "alternative_route"
         body["alternative_route.max_paths"] = 3
@@ -43,4 +58,5 @@ ENGINE = Engine(
     free_tier="Free key: about 500 credits a day (a backroads route costs more than one).",
     backroads="Makes freeways, US routes and major state routes 10x less attractive.",
     fetch=fetch,
+    honours=frozenset({"freeways", "major", "unpaved", "tracks"}),
 )

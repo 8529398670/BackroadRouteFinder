@@ -235,9 +235,35 @@ routing:
   # [live]
   default_penalty: 8
 
-  # Count secondary roads (most numbered state routes) as main roads too,
-  # for anyone who has not picked their own. [live]
-  secondary_is_main: true
+  # What the planner does with each road type, for anyone who has not picked
+  # their own: use, avoid (counted with the penalty above, or the type's own
+  # avoid_strength) or never (only where there is no other way). Road types:
+  # interstate, us_highway, state_route, county_road, local, service, track,
+  # and any road that is unpaved or restricted (private, permit or farm
+  # access). A type left out keeps the value shown here. [live]
+  road_rules: [interstate=avoid, us_highway=avoid, state_route=avoid, county_road=use, local=use, service=use, track=never, unpaved=avoid, restricted=never]
+
+  # Road types whose "avoid" counts its own number of times over instead of
+  # the penalty, for anyone who has not picked their own: unpaved=2 makes a
+  # minute of gravel worth two of pavement, however strong the penalty.
+  # 1-100. [live]
+  avoid_strength: [unpaved=2]
+
+  # How far out a loop circles its center when the planner opens, for anyone
+  # who has not picked their own, in loop_unit. 1-200. [live]
+  loop_radius: 20
+
+  # The loop radius's unit: mi (a circle of that many miles) or min (as far
+  # as that many minutes of the fastest drive reach). [live]
+  loop_unit: mi
+
+  # How many points a loop's ring has: more follows the circle more closely,
+  # fewer leaves the route more room between them. 4-8. [live]
+  loop_points: 6
+
+  # How many times over a road a loop already drove counts on the rest of
+  # it: 1 lets it double back, 3 makes it come back another way. 1-10. [live]
+  loop_reuse: 3
 
   # How far a clicked or searched point may be from a road and still be
   # used, in metres. 50-20000. [live]

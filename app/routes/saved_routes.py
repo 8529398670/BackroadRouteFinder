@@ -12,7 +12,8 @@ from app.apidocs import Request as RequestType
 from app.core.security import actor_from
 from app.models import saved_routes
 from app.routes.helpers import DateTime, Page, Paged, Refused, cut_page, get_store
-from app.routes.planner import MAX_WAYPOINTS, OURS, Combine, Penalty, Source
+from app.routes.planner import MAX_WAYPOINTS, OURS, Combine, LegacySecondary, LegacyUnpaved, LoopSpec, Penalty, RoadFactors, RoadRules, Source
+from app.routing import costs
 
 RouteName = Annotated[str, Meta(min_length=1, max_length=saved_routes.NAME_MAX, extra={"error": f"name must be 1-{saved_routes.NAME_MAX} characters"})]
 RouteID = Annotated[int, PATH, Meta(description="The saved route's id, from GET /api/saved-routes.")]
@@ -29,10 +30,13 @@ class RouteOptions(Reply):
     api_name: ClassVar[str] = "RouteOptions"
     backroads: bool = True
     penalty: Penalty = 8.0
-    secondary_is_main: bool = False
-    allow_unpaved: bool = False
+    road_rules: RoadRules = msgspec.field(default_factory=dict)
+    road_factors: Annotated[RoadFactors | None, Meta(description="Its avoid strengths; null for a route saved before they could be set (the server's).")] = None
     sources: list[Source] = msgspec.field(default_factory=lambda: [OURS])
     combine: Combine = "best"
+    loop: Annotated[LoopSpec | None, Meta(description="A loop round a center, planned in place of the waypoints.")] = None
+    secondary_is_main: LegacySecondary = None
+    allow_unpaved: LegacyUnpaved = None
 
 
 class RouteSummary(Reply):
@@ -59,11 +63,21 @@ def _reply(route: saved_routes.SavedRoute) -> SavedRoute:
         id=route.id,
         name=route.name,
         waypoints=[Waypoint(**point) for point in route.waypoints],
-        options=RouteOptions(**route.options),
+        options=_options(route.options),
         summary=RouteSummary(**route.summary),
         created_at=route.created_at,
         updated_at=route.updated_at,
     )
+
+
+def _options(stored: dict) -> RouteOptions:
+    """A route's options as saved, with a route saved before road rules given
+    the rules its two toggles meant."""
+    known = {name: value for name, value in stored.items() if name in RouteOptions.__struct_fields__}
+    known["road_rules"] = costs.rules_from_legacy(stored)
+    known.pop("secondary_is_main", None)
+    known.pop("allow_unpaved", None)
+    return msgspec.convert(known, RouteOptions)
 
 
 def _owner(request: Request) -> int:
@@ -87,7 +101,8 @@ def list_saved_routes(request: Request, body: Page) -> SavedRoutesReply:
 
 class SaveRoute(RequestType):
     name: RouteName
-    waypoints: Annotated[list[Waypoint], Meta(min_length=2, max_length=MAX_WAYPOINTS, extra={"error": f"give 2-{MAX_WAYPOINTS} points"})]
+    waypoints: Annotated[list[Waypoint], Meta(max_length=MAX_WAYPOINTS, description="2 or more; with a loop, none or its start.",
+                                              extra={"error": f"give 2-{MAX_WAYPOINTS} points"})]
     options: RouteOptions
     summary: RouteSummary
 
@@ -98,11 +113,17 @@ class SaveRoute(RequestType):
     description="Keep a route's points and options under a name, with its summary for the list.",
 )
 def save_route(request: Request, body: SaveRoute) -> SavedRoute:
+    if body.options.loop is None and len(body.waypoints) < 2:
+        raise Refused(400, f"give 2-{MAX_WAYPOINTS} points", field="waypoints")
+    options = msgspec.to_builtins(body.options)
+    options["road_rules"] = costs.rules_from_legacy(options)
+    options.pop("secondary_is_main", None)
+    options.pop("allow_unpaved", None)
     try:
         made = saved_routes.create(
             get_store(request), _owner(request), body.name,
             [{"lat": p.lat, "lon": p.lon, "label": p.label} for p in body.waypoints],
-            {name: getattr(body.options, name) for name in RouteOptions.__struct_fields__},
+            options,
             {name: getattr(body.summary, name) for name in RouteSummary.__struct_fields__},
         )
     except saved_routes.TooMany as error:

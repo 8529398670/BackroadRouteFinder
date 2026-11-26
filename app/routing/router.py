@@ -33,34 +33,42 @@ class Result:
     milliseconds: int = 0
 
 
-def snap_all(graph: Graph, points: list[tuple[float, float]], max_snap_m: float) -> list[Snap]:
+def snap_all(graph: Graph, points: list[tuple[float, float]], max_snap_m: float, options: costs.Options | None = None) -> list[Snap]:
+    """Each point onto its road; with options, onto a road the rules do not
+    rule out wherever one is near enough."""
+    shunned = costs.excluded_segments(graph, options) if options is not None else None
     snapped: list[Snap] = []
     for index, (lat, lon) in enumerate(points):
         try:
-            snapped.append(snap(graph, lat, lon, max_snap_m))
+            snapped.append(snap(graph, lat, lon, max_snap_m, shunned))
         except OffNetwork as error:
             raise PointOffNetwork(index, str(error)) from None
     return snapped
 
 
 def plan(graph: Graph, points: list[tuple[float, float]], options: costs.Options, compare_fastest: bool, max_snap_m: float,
-         chosen: bool = True) -> Result:
+         chosen: bool = True, snapped: list[Snap] | None = None, reuse_factor: float = 1.0) -> Result:
     """chosen=False leaves out the route options asks for, planning only the
-    fastest one for comparison (when another engine does the choosing)."""
+    fastest one for comparison (when another engine does the choosing).
+    reuse_factor > 1 makes each leg shy of roads earlier legs drove (a loop)."""
     began = time.monotonic()
-    snapped = snap_all(graph, points, max_snap_m)
+    if snapped is None:
+        snapped = snap_all(graph, points, max_snap_m, options)
     result = Result(snapped=snapped)
     kinds = [("backroads" if options.penalty > 1 else "fastest", options)] if chosen else []
     if compare_fastest and options.penalty > 1:
-        kinds.append(("fastest", costs.Options(penalty=1.0, secondary_is_main=options.secondary_is_main, allow_unpaved=options.allow_unpaved)))
+        kinds.append(("fastest", options.fastest()))
+    rating = costs.rating(graph, options)
     for kind, kind_options in kinds:
         weights = search.weights(graph, kind_options)
         pieces: list[search.Piece] = []
         delay = 0.0
-        for start, end in zip(snapped[:-1], snapped[1:]):
+        for number, (start, end) in enumerate(zip(snapped[:-1], snapped[1:])):
+            if number and reuse_factor > 1:
+                weights = search.weights(graph, kind_options, discourage=search.driven(pieces), factor=reuse_factor)
             leg_pieces, leg_delay = search.leg(graph, weights, start, end)
             pieces.extend(leg_pieces)
             delay += leg_delay
-        result.routes.append(Planned(kind=kind, summary=summarize(graph, pieces, options.secondary_is_main, delay)))
+        result.routes.append(Planned(kind=kind, summary=summarize(graph, pieces, rating, delay)))
     result.milliseconds = int((time.monotonic() - began) * 1000)
     return result

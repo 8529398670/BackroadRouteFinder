@@ -7,7 +7,7 @@ two-point trip."""
 from __future__ import annotations
 
 from app.routing.providers import polyline
-from app.routing.providers.base import Candidate, Engine, Points, ProviderError, request_json
+from app.routing.providers.base import Ask, Candidate, Engine, Points, ProviderError, request_json
 
 URL = "https://routes.googleapis.com/directions/v2:computeRoutes"
 
@@ -16,7 +16,8 @@ def _place(lat: float, lon: float) -> dict:
     return {"location": {"latLng": {"latitude": lat, "longitude": lon}}}
 
 
-def fetch(points: Points, backroads: bool, key: str, url: str, timeout: float) -> list[Candidate]:
+def fetch(points: Points, ask: Ask | bool, key: str, url: str, timeout: float) -> list[Candidate]:
+    ask = Ask.coerce(ask)
     body: dict = {
         "origin": _place(*points[0]),
         "destination": _place(*points[-1]),
@@ -24,7 +25,7 @@ def fetch(points: Points, backroads: bool, key: str, url: str, timeout: float) -
         "travelMode": "DRIVE",
         "routingPreference": "TRAFFIC_UNAWARE",
         "computeAlternativeRoutes": len(points) == 2,
-        "routeModifiers": {"avoidHighways": backroads, "avoidTolls": backroads},
+        "routeModifiers": {"avoidHighways": ask.off("freeways"), "avoidTolls": ask.backroads},
     }
     headers = {"X-Goog-Api-Key": key, "X-Goog-FieldMask": "routes.duration,routes.distanceMeters,routes.polyline.encodedPolyline"}
     answer = request_json(URL, body=body, headers=headers, timeout=timeout)
@@ -44,4 +45,5 @@ ENGINE = Engine(
     free_tier="Free monthly allowance on a billed Cloud project (Routes API).",
     backroads="Avoids freeways and tolls only; US and state routes stay in.",
     fetch=fetch,
+    honours=frozenset({"freeways"}),
 )

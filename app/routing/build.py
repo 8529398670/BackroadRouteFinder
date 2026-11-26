@@ -17,6 +17,8 @@ code). Its layout:
   seg_class                     uint8 index into classes.CLASSES
   seg_oneway                    int8: 1 a->b only, -1 b->a only, 0 both
   seg_unpaved                   bool
+  seg_category                  uint8 index into classes.CATEGORIES
+  seg_restricted                bool: private, permit or farm access
   seg_name                      int32 index into names
   seg_g0, seg_g1                int64 first and last index into geom_* (inclusive)
   seg_stop_a, seg_stop_b        bool: a stop sign where the segment meets its a / b end
@@ -41,7 +43,9 @@ from scipy.sparse.csgraph import connected_components
 from app.routing import classes
 from app.routing.osm_parse import Ways
 
-FORMAT_VERSION = 2
+FORMAT_VERSION = 3
+# Older files this server still reads, working out what they lack (graph.py).
+READABLE_VERSIONS = (2, 3)
 # A signal or stop sign this close to an intersection belongs to it: mappers
 # often put them on the approach, a few metres before the junction node.
 CONTROL_NEAR_M = 40.0
@@ -170,6 +174,8 @@ def build(ways: Ways, out: Path, source: str, progress=print) -> dict:
         "stop_signs": int(stop_a.sum() + stop_b.sum() + node_stop.sum()),
         "bbox": [float(node_lat.min()), float(node_lon.min()), float(node_lat.max()), float(node_lon.max())],
         "classes": list(classes.CLASSES),
+        "categories": list(classes.CATEGORIES),
+        "restricted_segments": int(ways.restricted[seg_way].sum()),
     }
     out.parent.mkdir(parents=True, exist_ok=True)
     temporary = out.with_name(out.name + ".part.npz")
@@ -184,6 +190,8 @@ def build(ways: Ways, out: Path, source: str, progress=print) -> dict:
         seg_class=ways.road_class[seg_way],
         seg_oneway=ways.oneway[seg_way],
         seg_unpaved=ways.unpaved[seg_way],
+        seg_category=ways.category[seg_way],
+        seg_restricted=ways.restricted[seg_way],
         seg_name=ways.name_id[seg_way],
         seg_g0=new_g0,
         seg_g1=new_g1,

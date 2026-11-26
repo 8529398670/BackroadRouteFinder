@@ -106,6 +106,51 @@ class AnswersTest(unittest.TestCase):
                          "Access to this API has been disallowed")
 
 
+class AskTest(unittest.TestCase):
+    """The planner's road rules, as each engine is told them."""
+
+    def test_from_rules(self) -> None:
+        rules = {"interstate": "never", "us_highway": "use", "state_route": "avoid", "unpaved": "avoid", "track": "use"}
+        ask = base.Ask.from_rules(rules, backroads=True)
+        self.assertEqual((ask.freeways, ask.major, ask.unpaved, ask.tracks), ("never", "avoid", "avoid", "use"))
+        # Backroads off: avoid means nothing, never still holds.
+        ask = base.Ask.from_rules(rules, backroads=False)
+        self.assertEqual((ask.freeways, ask.major, ask.unpaved), ("never", "use", "use"))
+
+    def body(self, module, ask, answer):
+        with mock.patch.object(module, "request_json", return_value=answer) as asked:
+            module.fetch(POINTS, ask, "k" * 20, "https://example.test", 5)
+        return asked.call_args
+
+    def test_valhalla_follows_rules(self) -> None:
+        answer = {"trip": {"legs": [{"shape": LINE6}], "summary": {"time": 1, "length": 1}}}
+        auto = self.body(valhalla, base.Ask(unpaved="never", tracks="use"), answer).kwargs["body"]["costing_options"]["auto"]
+        self.assertTrue(auto["exclude_unpaved"])
+        self.assertNotIn("use_highways", auto)
+        self.assertEqual(auto["use_tracks"], 0.5)
+
+    def test_graphhopper_follows_rules(self) -> None:
+        answer = {"paths": [{"points": {"coordinates": [[-120.2, 38.5], [-120.95, 40.7]]}, "time": 1, "distance": 1}]}
+        model = self.body(graphhopper, base.Ask(backroads=True, freeways="never", major="avoid"), answer).kwargs["body"]["custom_model"]
+        self.assertEqual([(rule["if"], rule["multiply_by"]) for rule in model["priority"]],
+                         [(graphhopper.FREEWAYS, "0.01"), (graphhopper.MAJOR, "0.1")])
+        body = self.body(graphhopper, base.Ask(), answer).kwargs["body"]
+        self.assertNotIn("custom_model", body)
+
+    def test_mapbox_and_tomtom_leave_out_unpaved(self) -> None:
+        url = self.body(mapbox, base.Ask(unpaved="avoid"), {"code": "Ok", "routes": [{"geometry": LINE6, "duration": 1, "distance": 1}]}).args[0]
+        self.assertIn("exclude=unpaved", url)
+        route = {"legs": [{"points": [{"latitude": 38.5, "longitude": -120.2}]}], "summary": {"travelTimeInSeconds": 1, "lengthInMeters": 1}}
+        url = self.body(tomtom, base.Ask(unpaved="never"), {"routes": [route]}).args[0]
+        self.assertIn("avoid=unpavedRoads", url)
+        self.assertNotIn("avoid=motorways", url)
+
+    def test_every_engine_says_what_it_honours(self) -> None:
+        for engine in ENGINES.values():
+            self.assertTrue(engine.honours, engine.id)
+            self.assertLessEqual(engine.honours, {"freeways", "major", "unpaved", "tracks"})
+
+
 class AccessTest(unittest.TestCase):
     def test_usable(self) -> None:
         access = sources.Access(keys={"tomtom": "x" * 20}, urls={"valhalla": "https://v.test", "osrm": "", "ors": "https://o.test",
@@ -210,6 +255,7 @@ class MapDataTest(unittest.TestCase):
                 refs=np.array(refs, dtype=np.int64), lat=np.array(refs, dtype=np.float64), lon=np.array(refs, dtype=np.float64),
                 starts=starts.astype(np.int64), road_class=np.zeros(len(ids), dtype=np.uint8), kmh=np.ones(len(ids), dtype=np.float32),
                 oneway=np.zeros(len(ids), dtype=np.int8), unpaved=np.zeros(len(ids), dtype=bool),
+                category=np.zeros(len(ids), dtype=np.uint8), restricted=np.zeros(len(ids), dtype=bool),
                 name_id=np.arange(1, len(ids) + 1, dtype=np.int32), names=[""] + names,
                 signals=np.array([1], dtype=np.int64), stops=np.array([], dtype=np.int64), way_ids=np.array(ids, dtype=np.int64))
 

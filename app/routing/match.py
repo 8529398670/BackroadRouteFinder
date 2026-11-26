@@ -21,7 +21,7 @@ import threading
 import numpy as np
 from scipy.spatial import cKDTree
 
-from app.routing import classes
+from app.routing.costs import Rating
 from app.routing.graph import Graph
 from app.routing.summarize import DECIMALS, Run, Summary, Via, _fold
 
@@ -156,18 +156,19 @@ def _smooth(flags: np.ndarray) -> np.ndarray:
     return out
 
 
-def measure(graph: Graph, coords: list[tuple[float, float]], seconds: float, secondary_is_main: bool) -> tuple[Summary, float]:
+def measure(graph: Graph, coords: list[tuple[float, float]], seconds: float, rating: Rating) -> tuple[Summary, float]:
     """The line as a Summary (like one of our own routes), and how many
-    metres of it are not on our map."""
+    metres of it are not on our map. rating: what the request makes of each
+    segment (costs.rating)."""
     line = np.asarray(coords, dtype=np.float64)
     if len(line) < 2:
         return Summary(seconds=seconds), 0.0
     points, xy, vertex = _densify(graph, line)
     segments, _ = _nearest_segments(graph, xy)
-    main_of = classes.main_mask(secondary_is_main)
     on_map = segments >= 0
     seg = np.where(on_map, segments, 0)
-    main = np.where(on_map, main_of[graph.seg_class[seg]], False)
+    main = np.where(on_map, rating.avoided[seg], False)
+    factor = np.where(on_map, rating.factor[seg], 1.0)
     main = _smooth(main)
 
     step = np.hypot(np.diff(xy[:, 0]), np.diff(xy[:, 1]))     # step i: point i -> i+1, on point i's road
@@ -181,6 +182,7 @@ def measure(graph: Graph, coords: list[tuple[float, float]], seconds: float, sec
     out = Summary(seconds=seconds, meters=float(step.sum()))
     out.main_seconds = float(our_seconds[main_steps].sum() * scale)
     out.main_meters = float(step[main_steps].sum())
+    out.extra_seconds = float((our_seconds * (factor[:-1] - 1.0)).sum() * scale)
     unpaved = on_map[:-1] & graph.seg_unpaved[seg][:-1].astype(bool)
     out.unpaved_meters = float(step[unpaved].sum())
     off_map = float(step[~on_map[:-1]].sum())

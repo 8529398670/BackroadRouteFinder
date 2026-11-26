@@ -5,7 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="color-scheme" content="light" />
   <title data-i18n="app.title">&nbsp;</title>
-  <link rel="icon" href="/favicon.ico" />
+  <link rel="icon" href="/favicon.ico" sizes="32x32" />
+  <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+  <link rel="manifest" href="/manifest.webmanifest" />
   <!-- Before the stylesheets paint, so a saved dark theme never flashes light. -->
   <script src="/js/theme.js"></script>
   <!-- Bootstrap 5 and its icon font, vendored (see /vendor/README.md), then
@@ -157,8 +160,58 @@
               <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false" id="plan-menu-stops-toggle">
                 <i class="bi bi-geo-alt" aria-hidden="true"></i> <span data-i18n="plan.stops_heading"></span>
               </button>
-              <div class="dropdown-menu plan-menu p-3 shadow" id="plan-menu-stops" aria-labelledby="plan-menu-stops-toggle">
+              <div class="dropdown-menu plan-menu plan-menu-scroll p-3 shadow" id="plan-menu-stops" aria-labelledby="plan-menu-stops-toggle">
+                <div class="form-check form-switch mb-2">
+                  <input class="form-check-input" type="checkbox" role="switch" id="plan-loop" />
+                  <label class="form-check-label fw-semibold" for="plan-loop" data-i18n="plan.loop"></label>
+                </div>
                 <ol id="plan-stops" class="list-unstyled d-flex flex-column gap-2 mb-3"></ol>
+                <!-- A loop round the center pin (loop.py on the server). -->
+                <fieldset id="plan-loop-settings" class="mb-2" hidden>
+                  <p class="small text-body-secondary mb-2" data-i18n="plan.loop_help"></p>
+                  <div class="row g-2 mb-2">
+                    <div class="col-12">
+                      <label class="form-label small mb-1" for="plan-loop-radius" data-i18n="plan.loop_radius"></label>
+                      <div class="input-group input-group-sm">
+                        <input type="number" class="form-control" id="plan-loop-radius" min="0.5" max="200" step="0.5" inputmode="decimal" />
+                        <select class="form-select" id="plan-loop-unit" data-i18n-attr="aria-label:plan.loop_radius">
+                          <option value="mi" data-i18n="plan.unit_mi"></option>
+                          <option value="min" data-i18n="plan.unit_min"></option>
+                        </select>
+                      </div>
+                    </div>
+                    <div class="col-6">
+                      <label class="form-label small mb-1" for="plan-loop-points" data-i18n="plan.loop_points"></label>
+                      <select class="form-select form-select-sm" id="plan-loop-points">
+                        <option value="4">4</option><option value="5">5</option><option value="6">6</option><option value="7">7</option><option value="8">8</option>
+                      </select>
+                    </div>
+                    <div class="col-6">
+                      <label class="form-label small mb-1" for="plan-loop-reuse" data-i18n="plan.loop_reuse"></label>
+                      <select class="form-select form-select-sm" id="plan-loop-reuse"></select>
+                    </div>
+                    <div class="col-12">
+                      <div class="form-label small mb-1" id="plan-loop-start-label" data-i18n="plan.loop_start"></div>
+                      <div class="btn-group btn-group-sm w-100" role="group" aria-labelledby="plan-loop-start-label">
+                        <input type="radio" class="btn-check" name="plan-loop-start" id="plan-loop-start-center" value="center" autocomplete="off" />
+                        <label class="btn btn-outline-primary" for="plan-loop-start-center" data-i18n="plan.loop_start_center"></label>
+                        <input type="radio" class="btn-check" name="plan-loop-start" id="plan-loop-start-ring" value="ring" autocomplete="off" />
+                        <label class="btn btn-outline-primary" for="plan-loop-start-ring" data-i18n="plan.loop_start_ring"></label>
+                        <input type="radio" class="btn-check" name="plan-loop-start" id="plan-loop-start-stop" value="stop" autocomplete="off" />
+                        <label class="btn btn-outline-primary" for="plan-loop-start-stop" data-i18n="plan.loop_start_stop"></label>
+                      </div>
+                    </div>
+                    <div class="col-12">
+                      <div class="form-label small mb-1" id="plan-loop-direction-label" data-i18n="plan.loop_direction"></div>
+                      <div class="btn-group btn-group-sm w-100" role="group" aria-labelledby="plan-loop-direction-label">
+                        <input type="radio" class="btn-check" name="plan-loop-direction" id="plan-loop-cw" value="cw" autocomplete="off" />
+                        <label class="btn btn-outline-primary" for="plan-loop-cw"><i class="bi bi-arrow-clockwise" aria-hidden="true"></i> <span data-i18n="plan.loop_cw"></span></label>
+                        <input type="radio" class="btn-check" name="plan-loop-direction" id="plan-loop-ccw" value="ccw" autocomplete="off" />
+                        <label class="btn btn-outline-primary" for="plan-loop-ccw"><i class="bi bi-arrow-counterclockwise" aria-hidden="true"></i> <span data-i18n="plan.loop_ccw"></span></label>
+                      </div>
+                    </div>
+                  </div>
+                </fieldset>
                 <div class="d-flex flex-wrap gap-2">
                   <button id="plan-add-stop" type="button" class="btn btn-sm btn-outline-secondary"><i class="bi bi-plus-lg" aria-hidden="true"></i> <span data-i18n="plan.add_stop"></span></button>
                   <button id="plan-reverse" type="button" class="btn btn-sm btn-outline-secondary"><i class="bi bi-arrow-down-up" aria-hidden="true"></i> <span data-i18n="plan.reverse"></span></button>
@@ -189,14 +242,13 @@
                   </div>
                   <p id="plan-penalty-meaning" class="small text-body-secondary mb-2"></p>
                 </fieldset>
-                <div class="form-check">
-                  <input class="form-check-input" type="checkbox" id="plan-secondary" />
-                  <label class="form-check-label" for="plan-secondary" data-i18n="plan.secondary_is_main"></label>
-                </div>
-                <div class="form-check">
-                  <input class="form-check-input" type="checkbox" id="plan-unpaved" />
-                  <label class="form-check-label" for="plan-unpaved" data-i18n="plan.allow_unpaved"></label>
-                </div>
+                <!-- One row per road type, built by planner.js from GET /api/routing/status. -->
+                <fieldset class="mb-2">
+                  <legend class="form-label fs-6 mb-1" data-i18n="plan.roads_heading"></legend>
+                  <p class="small text-body-secondary mb-2" data-i18n="plan.roads_help"></p>
+                  <div id="plan-roads" class="d-flex flex-column gap-1"></div>
+                  <p id="plan-roads-rebuild" class="small text-body-secondary mt-1 mb-0" data-i18n="plan.restricted_rebuild" hidden></p>
+                </fieldset>
                 <div class="form-check mb-2">
                   <input class="form-check-input" type="checkbox" id="plan-compare" />
                   <label class="form-check-label" for="plan-compare" data-i18n="plan.compare_fastest"></label>

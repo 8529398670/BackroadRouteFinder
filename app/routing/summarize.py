@@ -1,5 +1,5 @@
 """A found path, as the page shows it: totals, how much of it is on main
-roads, the line split into main and backroad runs for colouring, and the
+roads (any road the request's rules avoid: costs.avoided_segments), the line split into main and backroad runs for colouring, and the
 roads it follows."""
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from app.routing import classes
+from app.routing.costs import Rating
 from app.routing.graph import Graph
 from app.routing.search import Piece
 from app.routing.snap import segment_along
@@ -38,6 +38,9 @@ class Summary:
     main_seconds: float = 0.0
     main_meters: float = 0.0
     unpaved_meters: float = 0.0
+    # What the avoided roads add to the score: each second on one counts its
+    # road type's avoid strength (costs.Rating.factor) less the second itself.
+    extra_seconds: float = 0.0
     # Of seconds: turning, and waiting at signals and stop signs.
     delay_seconds: float = 0.0
     runs: list[Run] = field(default_factory=list)
@@ -58,8 +61,8 @@ def _piece_coords(graph: Graph, s: int, start: float, end: float) -> list[list[f
     return points[::-1] if end < start else points
 
 
-def summarize(graph: Graph, pieces: list[Piece], secondary_is_main: bool, delay_seconds: float = 0.0) -> Summary:
-    main_of = classes.main_mask(secondary_is_main)
+def summarize(graph: Graph, pieces: list[Piece], rating: Rating, delay_seconds: float = 0.0) -> Summary:
+    """rating: what the request makes of each segment (costs.rating)."""
     out = Summary(seconds=delay_seconds, delay_seconds=delay_seconds)
     via: list[Via] = []
     for s, start, end in pieces:
@@ -68,7 +71,8 @@ def summarize(graph: Graph, pieces: list[Piece], secondary_is_main: bool, delay_
             continue
         length = graph.seg_len[s]
         seconds = float(graph.seg_seconds[s] * metres / length) if length > 0 else 0.0
-        main = bool(main_of[graph.seg_class[s]])
+        main = bool(rating.avoided[s])
+        out.extra_seconds += seconds * (float(rating.factor[s]) - 1.0)
         out.seconds += seconds
         out.meters += metres
         if main:

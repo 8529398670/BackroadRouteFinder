@@ -30,6 +30,8 @@ class Ways:
     kmh: np.ndarray         # float32 per way
     oneway: np.ndarray      # int8 per way: 1 forward only, -1 backward only, 0 both
     unpaved: np.ndarray     # bool per way
+    category: np.ndarray    # uint8 index into classes.CATEGORIES, per way
+    restricted: np.ndarray  # bool per way: private, permit, farm access...
     name_id: np.ndarray     # int32 per way, index into names
     names: list[str]        # "" is index 0
     signals: np.ndarray     # int64 ids of highway=traffic_signals nodes
@@ -50,20 +52,27 @@ def _oneway(tags, highway: str) -> int:
     return 0
 
 
-def _drivable(tags, highway: str) -> bool:
+def _access(tags, highway: str) -> str:
+    """"open", "restricted" (private, permit, farm access: kept, flagged, for
+    the restricted road rule) or "closed" (not a car's road at all)."""
     if highway not in classes.CLASS_INDEX:
-        return False
+        return "closed"
     if tags.get("area", "") == "yes":
-        return False
+        return "closed"
     if highway == "service" and tags.get("service", "") in classes.SKIPPED_SERVICE:
-        return False
+        return "closed"
     for key in ("motor_vehicle", "motorcar"):
         value = tags.get(key, "")
         if value in classes.YES_ACCESS:
-            return True
+            return "open"
+        if value in classes.CLOSED_ACCESS:
+            return "closed"
         if value in classes.NO_ACCESS:
-            return False
-    return tags.get("access", "") not in classes.NO_ACCESS
+            return "restricted"
+    value = tags.get("access", "")
+    if value in classes.CLOSED_ACCESS:
+        return "closed"
+    return "restricted" if value in classes.NO_ACCESS else "open"
 
 
 def _unpaved(tags, highway: str) -> bool:
@@ -81,6 +90,7 @@ def read(pbf: Path, progress=print) -> Ways:
     starts = array("q", [0])
     way_ids = array("q")
     road_class, kmh, oneway, unpaved, name_id = array("B"), array("f"), array("b"), array("B"), array("i")
+    category, restricted = array("B"), array("B")
     names: list[str] = [""]
     name_index: dict[str, int] = {"": 0}
 
@@ -108,7 +118,8 @@ def read(pbf: Path, progress=print) -> Ways:
             progress(f"  read {seen:,} highway ways, kept {len(road_class):,}")
         tags = way.tags
         highway = tags.get("highway", "")
-        if not _drivable(tags, highway) or len(way.nodes) < 2:
+        access = _access(tags, highway)
+        if access == "closed" or len(way.nodes) < 2:
             continue
         ok = True
         way_refs, way_lat, way_lon = [], [], []
@@ -131,6 +142,8 @@ def read(pbf: Path, progress=print) -> Ways:
         kmh.append(classes.speed_kmh(highway, tags.get("maxspeed")))
         oneway.append(_oneway(tags, highway))
         unpaved.append(1 if _unpaved(tags, highway) else 0)
+        category.append(classes.CATEGORY_INDEX[classes.category_of(highway, tags.get("ref", ""))])
+        restricted.append(1 if access == "restricted" else 0)
         name = tags.get("name", "")
         ref = tags.get("ref", "").replace(";", ", ")
         label = f"{name} ({ref})" if name and ref else name or ref
@@ -152,6 +165,8 @@ def read(pbf: Path, progress=print) -> Ways:
         kmh=np.frombuffer(kmh, dtype=np.float32).copy(),
         oneway=np.frombuffer(oneway, dtype=np.int8).copy(),
         unpaved=np.frombuffer(unpaved, dtype=np.uint8).astype(bool),
+        category=np.frombuffer(category, dtype=np.uint8).copy(),
+        restricted=np.frombuffer(restricted, dtype=np.uint8).astype(bool),
         name_id=np.frombuffer(name_id, dtype=np.int32).copy(),
         names=names,
         signals=np.frombuffer(signals, dtype=np.int64).copy(),
@@ -194,6 +209,8 @@ def merge(parts: list[Ways], progress=print) -> Ways:
         kmh=np.concatenate([p.kmh for p in parts])[keep],
         oneway=np.concatenate([p.oneway for p in parts])[keep],
         unpaved=np.concatenate([p.unpaved for p in parts])[keep],
+        category=np.concatenate([p.category for p in parts])[keep],
+        restricted=np.concatenate([p.restricted for p in parts])[keep],
         name_id=np.concatenate(name_ids)[keep],
         names=names,
         signals=np.unique(np.concatenate([p.signals for p in parts])),

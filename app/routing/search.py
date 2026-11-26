@@ -31,6 +31,15 @@ from app.routing.snap import Snap
 Piece = tuple[int, float, float]
 MAX_STARTS = 2
 
+# The search stops at a cost limit worked out from the straight-line distance
+# (seconds as if driven at LIMIT_SPEEDS metres a second, plus a margin), so a
+# short leg does not search the whole state. Below the limit every cost is
+# exact, so a destination reached within it has its cheapest route; one not
+# reached tries the next, slower speed, and finally no limit at all.
+LIMIT_SPEEDS = (8.0, 4.0)
+LIMIT_MARGIN_S = 600.0
+EARTH_RADIUS_M = 6_371_008.8
+
 
 class NoRoute(Exception):
     """The destination cannot be reached from the start."""
@@ -49,8 +58,18 @@ class Weights:
     moves: int
 
 
-def weights(graph: Graph, options: costs.Options) -> Weights:
+def driven(pieces: list[Piece]) -> np.ndarray:
+    """The segments a path drives, for weights(discourage=...)."""
+    return np.unique(np.fromiter((p[0] for p in pieces), dtype=np.int64, count=len(pieces)))
+
+
+def weights(graph: Graph, options: costs.Options, discourage: np.ndarray | None = None, factor: float = 1.0) -> Weights:
+    """discourage: segments to count factor times over (roads a loop has
+    already driven, so it comes back another way)."""
     seg_weight = costs.segment_weights(graph, options)
+    if discourage is not None and len(discourage) and factor != 1.0:
+        seg_weight = seg_weight.copy()
+        seg_weight[discourage] *= factor
     table = graph.turns
     moves = len(table.to)
     edges = len(graph.edge_seg)
@@ -97,7 +116,23 @@ def _ends(graph: Graph, w: Weights, at: Snap) -> list[tuple[int, float, Piece]]:
     return out
 
 
+def _straight_m(a: Snap, b: Snap) -> float:
+    p1, p2 = np.radians(a.lat), np.radians(b.lat)
+    h = np.sin((p2 - p1) / 2) ** 2 + np.cos(p1) * np.cos(p2) * np.sin(np.radians(b.lon - a.lon) / 2) ** 2
+    return float(2 * EARTH_RADIUS_M * np.arcsin(np.sqrt(min(h, 1.0))))
+
+
 def leg(graph: Graph, w: Weights, start: Snap, end: Snap) -> tuple[list[Piece], float]:
+    metres = _straight_m(start, end)
+    for speed in LIMIT_SPEEDS:
+        try:
+            return _leg(graph, w, start, end, metres / speed + LIMIT_MARGIN_S)
+        except NoRoute:
+            continue
+    return _leg(graph, w, start, end, np.inf)
+
+
+def _leg(graph: Graph, w: Weights, start: Snap, end: Snap, limit: float) -> tuple[list[Piece], float]:
     starts = _starts(graph, w, start)
     ends = _ends(graph, w, end)
     best_cost = np.inf
@@ -121,7 +156,7 @@ def leg(graph: Graph, w: Weights, start: Snap, end: Snap) -> tuple[list[Piece], 
     w.indptr[edges + 1] = w.moves + count
     size = w.moves + count
     matrix = csr_matrix((w.data[:size], w.indices[:size], w.indptr), shape=(edges + 1, edges + 1), copy=False)
-    distances, predecessors = dijkstra(matrix, directed=True, indices=edges, return_predecessors=True)
+    distances, predecessors = dijkstra(matrix, directed=True, indices=edges, return_predecessors=True, limit=limit)
 
     start_edges = {edge: piece for edge, _, piece in starts}
     for edge, beyond, piece in ends:

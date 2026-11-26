@@ -5,13 +5,15 @@ Backroads: avoid_features highways (freeways) and tollways. Alternatives on a
 two-point trip."""
 from __future__ import annotations
 
-from app.routing.providers.base import Candidate, Engine, Points, ProviderError, request_json
+from app.routing.providers.base import Ask, Candidate, Engine, Points, ProviderError, request_json
 
 
-def fetch(points: Points, backroads: bool, key: str, url: str, timeout: float) -> list[Candidate]:
+def fetch(points: Points, ask: Ask | bool, key: str, url: str, timeout: float) -> list[Candidate]:
+    ask = Ask.coerce(ask)
     body: dict = {"coordinates": [[lon, lat] for lat, lon in points], "instructions": False}
-    if backroads:
-        body["options"] = {"avoid_features": ["highways", "tollways"]}
+    avoid = (["highways"] if ask.off("freeways") else []) + (["tollways"] if ask.backroads else [])
+    if avoid:
+        body["options"] = {"avoid_features": avoid}
     if len(points) == 2:
         body["alternative_routes"] = {"target_count": 3, "share_factor": 0.6, "weight_factor": 1.6}
     answer = request_json(url.rstrip("/") + "/v2/directions/driving-car/geojson", body=body,
@@ -32,4 +34,5 @@ ENGINE = Engine(
     free_tier="Free key: 2,000 routes a day.",
     backroads="Avoids freeways and toll roads.",
     fetch=fetch,
+    honours=frozenset({"freeways"}),
 )

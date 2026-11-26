@@ -506,6 +506,78 @@
         ],
         "type": "object"
       },
+      "Loop": {
+        "description": "A round trip circling a center at about radius miles, or radius minutes of fastest driving from it.",
+        "properties": {
+          "center_lat": {
+            "maximum": 90,
+            "minimum": -90,
+            "type": "number"
+          },
+          "center_lon": {
+            "maximum": 180,
+            "minimum": -180,
+            "type": "number"
+          },
+          "direction": {
+            "default": "cw",
+            "description": "Clockwise or anticlockwise round the ring.",
+            "enum": [
+              "cw",
+              "ccw"
+            ],
+            "type": "string"
+          },
+          "points": {
+            "description": "How many points the ring has (4-8); left out, routing.loop_points.",
+            "maximum": 8,
+            "minimum": 4,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "radius": {
+            "maximum": 200,
+            "minimum": 0.5,
+            "type": "number"
+          },
+          "reuse": {
+            "description": "How many times over a road already driven counts on the rest of the loop (1-10; 1 lets it double back); left out, routing.loop_reuse.",
+            "maximum": 10,
+            "minimum": 1,
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "start": {
+            "default": "center",
+            "description": "center: out from the center and back; ring: on the circle itself; stop: from the first waypoint and back to it.",
+            "enum": [
+              "center",
+              "ring",
+              "stop"
+            ],
+            "type": "string"
+          },
+          "unit": {
+            "default": "mi",
+            "description": "mi: a circle of that radius; min: as far as that many minutes of the fastest drive reach.",
+            "enum": [
+              "mi",
+              "min"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "center_lat",
+          "center_lon",
+          "radius"
+        ],
+        "type": "object"
+      },
       "Maintenance": {
         "properties": {
           "error": {
@@ -1170,9 +1242,6 @@
       },
       "PlannerPrefs": {
         "properties": {
-          "allow_unpaved": {
-            "type": "boolean"
-          },
           "backroads": {
             "default": true,
             "description": "Backroads mode on; off plans the plain fastest route.",
@@ -1188,6 +1257,32 @@
             "default": true,
             "type": "boolean"
           },
+          "loop_points": {
+            "default": 6,
+            "maximum": 8,
+            "minimum": 4,
+            "type": "integer"
+          },
+          "loop_radius": {
+            "default": 20.0,
+            "maximum": 200,
+            "minimum": 0.5,
+            "type": "number"
+          },
+          "loop_reuse": {
+            "default": 3.0,
+            "maximum": 10,
+            "minimum": 1,
+            "type": "number"
+          },
+          "loop_unit": {
+            "default": "mi",
+            "enum": [
+              "mi",
+              "min"
+            ],
+            "type": "string"
+          },
           "penalty": {
             "default": 8.0,
             "description": "How many times over a minute on a main road counts. 1 is the plain fastest route.",
@@ -1195,9 +1290,26 @@
             "minimum": 1,
             "type": "number"
           },
-          "secondary_is_main": {
-            "default": true,
-            "type": "boolean"
+          "road_factors": {
+            "additionalProperties": {
+              "maximum": 100,
+              "minimum": 1,
+              "type": "number"
+            },
+            "description": "Avoid strengths of their own, by road type: how many times over a minute on that type counts when its rule is avoid (unpaved: 2 makes gravel count double however high the penalty). Types left out count the penalty. Left out altogether: the defaults in GET /api/routing/status.",
+            "type": "object"
+          },
+          "road_rules": {
+            "additionalProperties": {
+              "enum": [
+                "avoid",
+                "never",
+                "use"
+              ],
+              "type": "string"
+            },
+            "description": "What to do with each road type: use it, avoid it (each minute on it counts penalty times over), or never (only when there is no other way). Categories: interstate, us_highway, state_route, county_road, local, service, track; and any road that is unpaved or restricted (private, permit or farm access). Types left out take the defaults in GET /api/routing/status.",
+            "type": "object"
           },
           "sources": {
             "items": {
@@ -1295,6 +1407,34 @@
         ],
         "type": "object"
       },
+      "RoadType": {
+        "description": "A road type the planner's road_rules can name, and what it does with it by default.",
+        "properties": {
+          "default": {
+            "type": "string"
+          },
+          "default_strength": {
+            "description": "Its own avoid strength by default; null counts the penalty.",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "flag": {
+            "description": "A property any road can have (unpaved, restricted), not a category of its own.",
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "default",
+          "flag",
+          "id"
+        ],
+        "type": "object"
+      },
       "RotatedKey": {
         "properties": {
           "credential": {
@@ -1310,7 +1450,11 @@
       "RouteOptions": {
         "properties": {
           "allow_unpaved": {
-            "type": "boolean"
+            "description": "Deprecated, use road_rules: true is unpaved and track use.",
+            "type": [
+              "boolean",
+              "null"
+            ]
           },
           "backroads": {
             "default": true,
@@ -1322,6 +1466,17 @@
             "pattern": "^(best|all)$",
             "type": "string"
           },
+          "loop": {
+            "description": "A loop round a center, planned in place of the waypoints.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Loop"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "penalty": {
             "default": 8.0,
             "description": "How many times over a minute on a main road counts. 1 is the plain fastest route.",
@@ -1329,8 +1484,40 @@
             "minimum": 1,
             "type": "number"
           },
+          "road_factors": {
+            "description": "Its avoid strengths; null for a route saved before they could be set (the server's).",
+            "oneOf": [
+              {
+                "additionalProperties": {
+                  "maximum": 100,
+                  "minimum": 1,
+                  "type": "number"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "road_rules": {
+            "additionalProperties": {
+              "enum": [
+                "avoid",
+                "never",
+                "use"
+              ],
+              "type": "string"
+            },
+            "description": "What to do with each road type: use it, avoid it (each minute on it counts penalty times over), or never (only when there is no other way). Categories: interstate, us_highway, state_route, county_road, local, service, track; and any road that is unpaved or restricted (private, permit or farm access). Types left out take the defaults in GET /api/routing/status.",
+            "type": "object"
+          },
           "secondary_is_main": {
-            "type": "boolean"
+            "description": "Deprecated, use road_rules: false is state_route use.",
+            "type": [
+              "boolean",
+              "null"
+            ]
           },
           "sources": {
             "items": {
@@ -1760,6 +1947,13 @@
             "description": "How it stays off main roads.",
             "type": "string"
           },
+          "honours": {
+            "description": "The road rules it can be told: freeways (interstate), major (us_highway, state_route), unpaved, tracks. The rest are still counted when its routes are scored.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
           "id": {
             "type": "string"
           },
@@ -1779,6 +1973,7 @@
         },
         "required": [
           "backroads",
+          "honours",
           "id",
           "name",
           "needs_key",
@@ -9986,7 +10181,7 @@
     },
     "/api/planner/prefs": {
       "get": {
-        "description": "How the planner opens for you: backroads on or off, the penalty and the toggles.",
+        "description": "How the planner opens for you: backroads on or off, the penalty, the road rules and their avoid strengths, and the loop settings. What you have not set yourself is the server's (config.yaml routing).",
         "operationId": "get_api_planner_prefs",
         "responses": {
           "200": {
@@ -10036,7 +10231,7 @@
         ]
       },
       "post": {
-        "description": "Save how the planner opens for you. Send the whole set.",
+        "description": "Save how the planner opens for you. Send the whole set; a loop setting or road_factors left out keeps the server's.",
         "operationId": "post_api_planner_prefs",
         "requestBody": {
           "content": {
@@ -10045,7 +10240,11 @@
                 "additionalProperties": false,
                 "properties": {
                   "allow_unpaved": {
-                    "type": "boolean"
+                    "description": "Deprecated, use road_rules: true is unpaved and track use.",
+                    "type": [
+                      "boolean",
+                      "null"
+                    ]
                   },
                   "backroads": {
                     "type": "boolean"
@@ -10063,14 +10262,80 @@
                     "description": "From GET /api/me. Browser sessions only.",
                     "type": "string"
                   },
+                  "loop_points": {
+                    "maximum": 8,
+                    "minimum": 4,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "loop_radius": {
+                    "maximum": 200,
+                    "minimum": 0.5,
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "loop_reuse": {
+                    "maximum": 10,
+                    "minimum": 1,
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "loop_unit": {
+                    "enum": [
+                      "mi",
+                      "min"
+                    ],
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
                   "penalty": {
                     "description": "How many times over a minute on a main road counts. 1 is the plain fastest route.",
                     "maximum": 100,
                     "minimum": 1,
                     "type": "number"
                   },
+                  "road_factors": {
+                    "description": "Avoid strengths of their own, by road type: how many times over a minute on that type counts when its rule is avoid (unpaved: 2 makes gravel count double however high the penalty). Types left out count the penalty. Left out altogether: the defaults in GET /api/routing/status.",
+                    "oneOf": [
+                      {
+                        "additionalProperties": {
+                          "maximum": 100,
+                          "minimum": 1,
+                          "type": "number"
+                        },
+                        "type": "object"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "road_rules": {
+                    "additionalProperties": {
+                      "enum": [
+                        "avoid",
+                        "never",
+                        "use"
+                      ],
+                      "type": "string"
+                    },
+                    "description": "What to do with each road type: use it, avoid it (each minute on it counts penalty times over), or never (only when there is no other way). Categories: interstate, us_highway, state_route, county_road, local, service, track; and any road that is unpaved or restricted (private, permit or farm access). Types left out take the defaults in GET /api/routing/status.",
+                    "type": "object"
+                  },
                   "secondary_is_main": {
-                    "type": "boolean"
+                    "description": "Deprecated, use road_rules: false is state_route use.",
+                    "type": [
+                      "boolean",
+                      "null"
+                    ]
                   },
                   "sources": {
                     "items": {
@@ -10084,11 +10349,9 @@
                   }
                 },
                 "required": [
-                  "allow_unpaved",
                   "backroads",
                   "compare_fastest",
-                  "penalty",
-                  "secondary_is_main"
+                  "penalty"
                 ],
                 "type": "object"
               }
@@ -10523,7 +10786,7 @@
     },
     "/api/route": {
       "post": {
-        "description": "The route through the waypoints that keeps time on main roads down: each minute on a motorway, trunk or primary road (and secondary, with secondary_is_main) counts penalty times over. Times include turns, traffic signals and stop signs (delay_seconds). sources picks who plans: our own router (ours) and/or other engines (see GET /api/routing/status), each asked for its backroads route and alternatives. Every route is measured on our map and scored the same way; combine=best keeps the best, combine=all returns them all, best first. A source that fails is listed in problems and the rest still answer. With compare_fastest, the plain fastest route on our map comes last (compare=true). A waypoint with no road within routing.max_snap_m is refused with its index.",
+        "description": "The route through the waypoints that keeps time on main roads down: each minute on a road type its road_rules avoid counts penalty times over (or the type's own strength in road_factors). Times include turns, traffic signals and stop signs (delay_seconds). sources picks who plans: our own router (ours) and/or other engines (see GET /api/routing/status), each asked for its backroads route and alternatives. Every route is measured on our map and scored the same way; combine=best keeps the best, combine=all returns them all, best first. A source that fails is listed in problems and the rest still answer. With compare_fastest, the plain fastest route on our map comes last (compare=true). A waypoint with no road within routing.max_snap_m is refused with its index.",
         "operationId": "post_api_route",
         "requestBody": {
           "content": {
@@ -10532,7 +10795,11 @@
                 "additionalProperties": false,
                 "properties": {
                   "allow_unpaved": {
-                    "type": "boolean"
+                    "description": "Deprecated, use road_rules: true is unpaved and track use.",
+                    "type": [
+                      "boolean",
+                      "null"
+                    ]
                   },
                   "combine": {
                     "default": "best",
@@ -10549,6 +10816,17 @@
                     "description": "From GET /api/me. Browser sessions only.",
                     "type": "string"
                   },
+                  "loop": {
+                    "description": "Plan a loop round a center instead of a trip through the waypoints.",
+                    "oneOf": [
+                      {
+                        "$ref": "#/components/schemas/Loop"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
                   "penalty": {
                     "default": 8.0,
                     "description": "How many times over a minute on a main road counts. 1 is the plain fastest route.",
@@ -10556,9 +10834,40 @@
                     "minimum": 1,
                     "type": "number"
                   },
+                  "road_factors": {
+                    "description": "Avoid strengths of their own, by road type: how many times over a minute on that type counts when its rule is avoid (unpaved: 2 makes gravel count double however high the penalty). Types left out count the penalty. Left out altogether: the defaults in GET /api/routing/status.",
+                    "oneOf": [
+                      {
+                        "additionalProperties": {
+                          "maximum": 100,
+                          "minimum": 1,
+                          "type": "number"
+                        },
+                        "type": "object"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "road_rules": {
+                    "additionalProperties": {
+                      "enum": [
+                        "avoid",
+                        "never",
+                        "use"
+                      ],
+                      "type": "string"
+                    },
+                    "description": "What to do with each road type: use it, avoid it (each minute on it counts penalty times over), or never (only when there is no other way). Categories: interstate, us_highway, state_route, county_road, local, service, track; and any road that is unpaved or restricted (private, permit or farm access). Types left out take the defaults in GET /api/routing/status.",
+                    "type": "object"
+                  },
                   "secondary_is_main": {
-                    "default": true,
-                    "type": "boolean"
+                    "description": "Deprecated, use road_rules: false is state_route use.",
+                    "type": [
+                      "boolean",
+                      "null"
+                    ]
                   },
                   "sources": {
                     "description": "Who to ask: our own router and/or other engines.",
@@ -10572,18 +10881,14 @@
                     "type": "array"
                   },
                   "waypoints": {
-                    "description": "Start, any stops, destination, in order.",
+                    "description": "Start, any stops, destination, in order (2 or more). With a loop: none, or the start alone for start=stop.",
                     "items": {
                       "$ref": "#/components/schemas/Point"
                     },
                     "maxItems": 10,
-                    "minItems": 2,
                     "type": "array"
                   }
                 },
-                "required": [
-                  "waypoints"
-                ],
                 "type": "object"
               }
             }
@@ -10605,6 +10910,27 @@
                       },
                       "type": "array"
                     },
+                    "ring": {
+                      "description": "With a loop: the ring's points, in driving order.",
+                      "items": {
+                        "$ref": "#/components/schemas/Point"
+                      },
+                      "type": "array"
+                    },
+                    "road_factors": {
+                      "additionalProperties": {
+                        "type": "number"
+                      },
+                      "description": "The avoid strengths the plan used; types left out counted the penalty.",
+                      "type": "object"
+                    },
+                    "road_rules": {
+                      "additionalProperties": {
+                        "type": "string"
+                      },
+                      "description": "The road rules the plan used, every type filled in.",
+                      "type": "object"
+                    },
                     "routes": {
                       "items": {
                         "$ref": "#/components/schemas/PlannedRoute"
@@ -10612,7 +10938,7 @@
                       "type": "array"
                     },
                     "snapped": {
-                      "description": "Where each waypoint met the road.",
+                      "description": "Where each waypoint met the road (with a loop: every point it drives through).",
                       "items": {
                         "$ref": "#/components/schemas/Point"
                       },
@@ -10622,6 +10948,9 @@
                   "required": [
                     "milliseconds",
                     "problems",
+                    "ring",
+                    "road_factors",
+                    "road_rules",
                     "routes",
                     "snapped"
                   ],
@@ -10687,6 +11016,19 @@
                     "error": {
                       "type": "string"
                     },
+                    "loop_points": {
+                      "type": "integer"
+                    },
+                    "loop_radius": {
+                      "description": "How the loop planner opens: radius, unit, ring points and reuse (routing.loop_*).",
+                      "type": "number"
+                    },
+                    "loop_reuse": {
+                      "type": "number"
+                    },
+                    "loop_unit": {
+                      "type": "string"
+                    },
                     "nodes": {
                       "type": "integer"
                     },
@@ -10697,7 +11039,19 @@
                     "region": {
                       "type": "string"
                     },
+                    "restricted_on_map": {
+                      "description": "Whether the loaded map holds restricted roads (one built before them leaves them out).",
+                      "type": "boolean"
+                    },
+                    "road_types": {
+                      "description": "The road types road_rules names, in the order to show them, with the server's defaults.",
+                      "items": {
+                        "$ref": "#/components/schemas/RoadType"
+                      },
+                      "type": "array"
+                    },
                     "secondary_is_main": {
+                      "description": "Deprecated: see road_types.",
                       "type": "boolean"
                     },
                     "segments": {
@@ -10720,9 +11074,15 @@
                     "built_at",
                     "default_penalty",
                     "error",
+                    "loop_points",
+                    "loop_radius",
+                    "loop_reuse",
+                    "loop_unit",
                     "nodes",
                     "place_search",
                     "region",
+                    "restricted_on_map",
+                    "road_types",
                     "secondary_is_main",
                     "segments",
                     "sources",
@@ -10869,11 +11229,11 @@
                     "$ref": "#/components/schemas/RouteSummary"
                   },
                   "waypoints": {
+                    "description": "2 or more; with a loop, none or its start.",
                     "items": {
                       "$ref": "#/components/schemas/Waypoint"
                     },
                     "maxItems": 10,
-                    "minItems": 2,
                     "type": "array"
                   }
                 },

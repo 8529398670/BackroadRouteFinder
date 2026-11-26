@@ -9,6 +9,7 @@ const RouteMap = {
   map: null,
   pins: null,
   lines: null,
+  ring: null,
   fitted: false,
 
   init( elementId , handlers ) {
@@ -21,6 +22,7 @@ const RouteMap = {
       referrerPolicy: "strict-origin-when-cross-origin",
       attribution: I18n.get( "plan.map_attribution" ),
     } ).addTo( this.map );
+    this.ring = L.layerGroup().addTo( this.map );
     this.lines = L.layerGroup().addTo( this.map );
     this.pins = L.layerGroup().addTo( this.map );
     this.map.on( "click" , ( event ) => handlers.click( event.latlng.lat , event.latlng.lng ) );
@@ -55,19 +57,23 @@ const RouteMap = {
     return String( index );
   },
 
-  drawStops( stops ) {
+  // kindOf( index ) -> { kind , label } for pins other than A, 1, 2... B (a
+  // loop's center and start); without it, the stops of a trip.
+  drawStops( stops , kindOf ) {
     const count = stops.length;
     const layers = [];
     stops.forEach( ( stop , index ) => {
       if ( !stop ) return;
-      const kind = index === 0 ? "start" : index === count - 1 ? "end" : "via";
+      const own = kindOf ? kindOf( index ) : null;
+      const kind = own ? own.kind : index === 0 ? "start" : index === count - 1 ? "end" : "via";
+      const label = own ? own.label : this.pinLabel( index , count );
       const marker = L.marker( [ stop.lat , stop.lon ] , {
         draggable: true,
         keyboard: true,
         title: stop.label,
         icon: L.divIcon( {
           className: "plan-pin plan-pin-" + kind,
-          html: "<span>" + this.pinLabel( index , count ) + "</span>",
+          html: "<span>" + label + "</span>",
           iconSize: [ 28 , 28 ],
           iconAnchor: [ 14 , 14 ],
         } ),
@@ -104,6 +110,7 @@ const RouteMap = {
       } );
     }
     this.lines.clearLayers();
+    this.ring.clearLayers();
     layers.forEach( ( layer ) => this.lines.addLayer( layer ) );
   },
 
@@ -121,7 +128,24 @@ const RouteMap = {
     this.map.fitBounds( L.latLngBounds( points ) , { padding: [ 30 , 30 ] , maxZoom: 15 } );
   },
 
+  // A loop's target: a dashed circle of radius metres round the center (a
+  // radius in miles), or a dashed ring through the ring points (in minutes,
+  // where the ring follows the roads), with a dot at each ring point.
+  drawRing( center , ring , metres ) {
+    const color = getComputedStyle( document.documentElement ).getPropertyValue( "--plan-ring" ).trim() || "#6f42c1";
+    const style = { color: color , weight: 2 , opacity: 0.7 , dashArray: "4 6" , fill: false , interactive: false };
+    const layers = [];
+    if ( metres && center ) layers.push( L.circle( [ center.lat , center.lon ] , Object.assign( { radius: metres } , style ) ) );
+    else if ( ring.length > 2 ) layers.push( L.polygon( ring.map( ( point ) => [ point.lat , point.lon ] ) , style ) );
+    ring.forEach( ( point ) => layers.push( L.circleMarker( [ point.lat , point.lon ] , {
+      radius: 4 , color: color , weight: 2 , fillColor: "#ffffff" , fillOpacity: 1 , interactive: false,
+    } ) ) );
+    this.ring.clearLayers();
+    layers.forEach( ( layer ) => this.ring.addLayer( layer ) );
+  },
+
   clearRoutes() {
     this.lines.clearLayers();
+    this.ring.clearLayers();
   },
 };

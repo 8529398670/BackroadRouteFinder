@@ -171,9 +171,16 @@ class RoutingSection:
     region: str
     pbf_url: str
     default_penalty: int
-    secondary_is_main: bool
+    road_rules: list[str]
+    avoid_strength: list[str]
+    loop_radius: int
+    loop_unit: str
+    loop_points: int
+    loop_reuse: int
     max_snap_m: int
     geocoder_url: str
+    # Deprecated: road_rules says it (state_route=use for false).
+    secondary_is_main: bool = True
 
 
 @dataclass
@@ -212,7 +219,12 @@ class File:
 
 # Fields that may be absent from defaults.yaml: kept only so an older
 # config.yaml still decodes.
-DEPRECATED = {"server": {"secret_key"}}
+DEPRECATED = {"server": {"secret_key"}, "routing": {"secondary_is_main"}}
+
+# The road types routing.road_rules and routing.avoid_strength name: the same
+# as app/routing/classes.RULE_KEYS (a test holds them together; config does
+# not import the router).
+ROAD_TYPES = ("interstate", "us_highway", "state_route", "county_road", "local", "service", "track", "unpaved", "restricted")
 
 SECTIONS: dict[str, type] = {
     "app": AppSection,
@@ -783,6 +795,22 @@ def validate(file: File) -> list[str]:
           "routing.region must be lowercase letters, digits and dashes")
     check(routing.pbf_url.startswith("https://"), "routing.pbf_url must be an https:// address")
     check(1 <= routing.default_penalty <= 100, "routing.default_penalty must be 1-100")
+    for item in routing.road_rules:
+        key, _, value = item.partition("=")
+        check(key.strip() in ROAD_TYPES and value.strip() in ("use", "avoid", "never"),
+              f"routing.road_rules: {item!r} must be <road type>=use|avoid|never (road types: {', '.join(ROAD_TYPES)})")
+    for item in routing.avoid_strength:
+        key, _, value = item.partition("=")
+        try:
+            number = float(value)
+        except ValueError:
+            number = 0.0
+        check(key.strip() in ROAD_TYPES and 1 <= number <= 100,
+              f"routing.avoid_strength: {item!r} must be <road type>=<1-100> (road types: {', '.join(ROAD_TYPES)})")
+    check(1 <= routing.loop_radius <= 200, "routing.loop_radius must be 1-200")
+    check(routing.loop_unit in ("mi", "min"), "routing.loop_unit must be mi or min")
+    check(4 <= routing.loop_points <= 8, "routing.loop_points must be 4-8")
+    check(1 <= routing.loop_reuse <= 10, "routing.loop_reuse must be 1-10")
     check(50 <= routing.max_snap_m <= 20000, "routing.max_snap_m must be 50-20000")
     check(routing.geocoder_url == "" or routing.geocoder_url.startswith("https://"),
           "routing.geocoder_url must be empty or an https:// address")

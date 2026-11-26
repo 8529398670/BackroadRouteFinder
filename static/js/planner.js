@@ -8,9 +8,23 @@
 //
 // Routes are planned by the server (POST /api/route). A newer request makes
 // an older answer stale, so only the latest one is shown.
+//
+// Two kinds of trip: from A to B through the stops, or a loop round a center
+// (options.loop.on). The loop has its own points -- the center, and the
+// person's own start when it starts there -- so switching between the two
+// keeps both. points() is whichever list is in use.
 const Planner = {
   stops: [ null , null ],
-  options: { backroads: true , penalty: 8 , secondary_is_main: true , allow_unpaved: false , compare_fastest: true , sources: [ "ours" ] , combine: "best" },
+  loopPoints: [ null , null ],
+  options: {
+    backroads: true , penalty: 8 , road_rules: {} , road_factors: {} , compare_fastest: true , sources: [ "ours" ] , combine: "best",
+    loop: { on: false , radius: 20 , unit: "mi" , start: "center" , direction: "cw" , points: 6 , reuse: 3 },
+  },
+
+  // The avoid strengths a road type can be given, and how much a loop may
+  // count a road it already drove.
+  STRENGTHS: [ 1.5 , 2 , 3 , 5 , 8 , 12 , 25 , 50 , 100 ],
+  REUSES: [ 1 , 1.5 , 2 , 3 , 5 , 10 ],
   result: null,
   // Which of the result's routes is shown on the map, saved and exported.
   selected: 0,
@@ -34,8 +48,21 @@ const Planner = {
     Dom.get( "plan-reverse" ).addEventListener( "click" , () => this.reverse() );
     Dom.get( "plan-clear" ).addEventListener( "click" , () => this.clear() );
     Dom.get( "plan-backroads" ).addEventListener( "change" , ( event ) => this.setOption( "backroads" , event.target.checked ) );
-    Dom.get( "plan-secondary" ).addEventListener( "change" , ( event ) => this.setOption( "secondary_is_main" , event.target.checked ) );
-    Dom.get( "plan-unpaved" ).addEventListener( "change" , ( event ) => this.setOption( "allow_unpaved" , event.target.checked ) );
+    Dom.get( "plan-loop" ).addEventListener( "change" , ( event ) => this.setLoop( "on" , event.target.checked , null , true ) );
+    Dom.get( "plan-loop-radius" ).addEventListener( "change" , ( event ) => {
+      const value = Number( event.target.value );
+      if ( value >= 0.5 && value <= 200 ) this.setLoop( "radius" , value );
+      else event.target.value = String( this.options.loop.radius );
+    } );
+    Dom.get( "plan-loop-unit" ).addEventListener( "change" , ( event ) => this.setLoop( "unit" , event.target.value ) );
+    Dom.get( "plan-loop-points" ).addEventListener( "change" , ( event ) => this.setLoop( "points" , Number( event.target.value ) ) );
+    Dom.get( "plan-loop-reuse" ).addEventListener( "change" , ( event ) => this.setLoop( "reuse" , Number( event.target.value ) ) );
+    Dom.all( "input[name=plan-loop-start]" ).forEach( ( radio ) => {
+      radio.addEventListener( "change" , () => { if ( radio.checked ) this.setLoop( "start" , radio.value ); } );
+    } );
+    Dom.all( "input[name=plan-loop-direction]" ).forEach( ( radio ) => {
+      radio.addEventListener( "change" , () => { if ( radio.checked ) this.setLoop( "direction" , radio.value ); } );
+    } );
     Dom.get( "plan-compare" ).addEventListener( "change" , ( event ) => this.setOption( "compare_fastest" , event.target.checked ) );
     Dom.get( "plan-penalty" ).addEventListener( "input" , ( event ) => this.setOption( "penalty" , Number( event.target.value ) , "penalty" ) );
     Dom.all( "#plan-presets [data-penalty]" ).forEach( ( button ) => {
@@ -53,7 +80,7 @@ const Planner = {
       Api.request( "/api/planner/prefs" ),
     ] );
     this.status = status;
-    this.options = Object.assign( {} , this.options , prefs.prefs );
+    this.options = this.copyOptions( this.fromPrefs( prefs.prefs ) );
     this.showStatus();
     RouteMap.showArea( status.bbox );
     this.renderStops();
@@ -100,13 +127,39 @@ const Planner = {
 
   // --- changes, each one undoable --------------------------------------------
 
+  // Prefs as the API keeps them (loop settings flat) into the options.
+  fromPrefs( prefs ) {
+    const loop = Object.assign( {} , this.options.loop , {
+      radius: prefs.loop_radius , unit: prefs.loop_unit , points: prefs.loop_points , reuse: prefs.loop_reuse,
+    } );
+    const options = Object.assign( {} , this.options , prefs , { loop: loop } );
+    [ "loop_radius" , "loop_unit" , "loop_points" , "loop_reuse" ].forEach( ( name ) => { delete options[ name ]; } );
+    return options;
+  },
+
+  // Options hold three objects of their own (the road rules, the loop), so a
+  // copy copies them too, and no undo step shares them with another.
+  copyOptions( options ) {
+    return Object.assign( {} , options , {
+      road_rules: Object.assign( {} , options.road_rules || {} ),
+      road_factors: Object.assign( {} , options.road_factors || {} ),
+      loop: Object.assign( {} , options.loop || {} ),
+      sources: ( options.sources || [] ).slice(),
+    } );
+  },
+
+  copyPoints( list ) {
+    return list.map( ( stop ) => ( stop ? Object.assign( {} , stop ) : null ) );
+  },
+
   snapshot() {
-    return { stops: this.stops.map( ( stop ) => ( stop ? Object.assign( {} , stop ) : null ) ) , options: Object.assign( {} , this.options ) };
+    return { stops: this.copyPoints( this.stops ) , loopPoints: this.copyPoints( this.loopPoints ) , options: this.copyOptions( this.options ) };
   },
 
   apply( state , fit ) {
-    this.stops = state.stops.map( ( stop ) => ( stop ? Object.assign( {} , stop ) : null ) );
-    this.options = Object.assign( {} , state.options );
+    this.stops = this.copyPoints( state.stops );
+    this.loopPoints = this.copyPoints( state.loopPoints );
+    this.options = this.copyOptions( state.options );
     this.renderStops();
     this.renderOptions();
     this.schedulePlan( fit );
@@ -128,8 +181,26 @@ const Planner = {
     return { lat: lat , lon: lon , label: Format.fill( "plan.map_point" , { lat: lat.toFixed( 4 ) , lon: lon.toFixed( 4 ) } ) };
   },
 
+  // --- loop or A to B ----------------------------------------------------------
+
+  isLoop() {
+    return Boolean( this.options.loop && this.options.loop.on );
+  },
+
+  // The loop's own start is used only when it starts there.
+  loopUsesStart() {
+    return this.options.loop.start === "stop";
+  },
+
+  // The points of the trip in use: the stops, or the loop's center (and own start).
+  points() {
+    if ( !this.isLoop() ) return this.stops;
+    return this.loopUsesStart() ? this.loopPoints : this.loopPoints.slice( 0 , 1 );
+  },
+
   setStop( index , stop , fit ) {
-    this.change( "undo.plan_stops" , ( state ) => { state.stops[ index ] = stop; } , null , fit );
+    const loop = this.isLoop();
+    this.change( "undo.plan_stops" , ( state ) => { ( loop ? state.loopPoints : state.stops )[ index ] = stop; } , null , fit );
   },
 
   setOption( name , value , merge ) {
@@ -137,11 +208,32 @@ const Planner = {
     this.change( "undo.plan_options" , ( state ) => { state.options[ name ] = value; } , merge || null );
   },
 
+  setRule( key , value ) {
+    if ( this.options.road_rules[ key ] === value ) return;
+    this.change( "undo.plan_options" , ( state ) => { state.options.road_rules[ key ] = value; } );
+  },
+
+  // A road type's own avoid strength; null goes back to the slider's.
+  setFactor( key , value ) {
+    if ( ( this.options.road_factors[ key ] || null ) === value ) return;
+    this.change( "undo.plan_options" , ( state ) => {
+      if ( value === null ) delete state.options.road_factors[ key ];
+      else state.options.road_factors[ key ] = value;
+    } );
+  },
+
+  setLoop( name , value , merge , fit ) {
+    if ( this.options.loop[ name ] === value ) return;
+    this.picking = null;
+    this.change( "undo.plan_options" , ( state ) => { state.options.loop[ name ] = value; } , merge || null , fit );
+  },
+
   onMapClick( lat , lon ) {
+    const points = this.points();
     let index = this.picking;
-    if ( index === null ) {
-      index = this.stops.findIndex( ( stop ) => stop === null );
-      if ( index < 0 ) index = this.stops.length - 1;
+    if ( index === null || index >= points.length ) {
+      index = points.findIndex( ( stop ) => stop === null );
+      if ( index < 0 ) index = this.isLoop() ? 0 : points.length - 1;
     }
     this.picking = null;
     this.setStop( index , this.pointStop( lat , lon ) );
@@ -156,6 +248,7 @@ const Planner = {
   },
 
   addStop() {
+    if ( this.isLoop() ) return;
     this.change( "undo.plan_stops" , ( state ) => { state.stops.splice( state.stops.length - 1 , 0 , null ); } );
     this.picking = this.stops.length - 2;
     this.showHint();
@@ -166,25 +259,44 @@ const Planner = {
   },
 
   reverse() {
+    if ( this.isLoop() ) return;
     this.change( "undo.plan_stops" , ( state ) => { state.stops.reverse(); } );
   },
 
   clear() {
-    if ( this.stops.every( ( stop ) => stop === null ) ) return;
-    this.change( "undo.plan_stops" , ( state ) => { state.stops = [ null , null ]; } );
+    if ( this.points().every( ( stop ) => stop === null ) ) return;
+    const loop = this.isLoop();
+    this.change( "undo.plan_stops" , ( state ) => {
+      if ( loop ) state.loopPoints = [ null , null ];
+      else state.stops = [ null , null ];
+    } );
   },
 
   // Opening a saved route (saved_routes.js): its stops and options, undoable
   // like any other change, and the map moves to show it.
   open( saved ) {
     this.change( "undo.plan_stops" , ( state ) => {
-      state.stops = saved.waypoints.map( ( point ) => ( { lat: point.lat , lon: point.lon , label: point.label } ) );
-      state.options = Object.assign( {} , state.options , {
+      const points = saved.waypoints.map( ( point ) => ( { lat: point.lat , lon: point.lon , label: point.label } ) );
+      const loop = saved.options.loop;
+      state.options = this.copyOptions( Object.assign( {} , state.options , {
         backroads: saved.options.backroads,
         penalty: saved.options.penalty,
-        secondary_is_main: saved.options.secondary_is_main,
-        allow_unpaved: saved.options.allow_unpaved,
-      } );
+        road_rules: saved.options.road_rules || {},
+        road_factors: saved.options.road_factors || this.statusFactors(),
+      } ) );
+      if ( loop ) {
+        // A loop's points were saved center first, then its own start.
+        const center = points[ 0 ] || this.pointStop( loop.center_lat , loop.center_lon );
+        state.loopPoints = [ center , points[ 1 ] || null ];
+        state.options.loop = Object.assign( {} , state.options.loop , {
+          on: true , radius: loop.radius , unit: loop.unit , start: loop.start , direction: loop.direction,
+        } );
+        if ( loop.points ) state.options.loop.points = loop.points;
+        if ( loop.reuse ) state.options.loop.reuse = loop.reuse;
+      } else {
+        state.stops = points;
+        state.options.loop.on = false;
+      }
       if ( saved.options.sources ) state.options.sources = saved.options.sources.slice();
       if ( saved.options.combine ) state.options.combine = saved.options.combine;
     } , null , true );
@@ -194,21 +306,31 @@ const Planner = {
   // --- the stops card ----------------------------------------------------------
 
   stopName( index ) {
+    if ( this.isLoop() ) return I18n.get( index === 0 ? "plan.loop_center" : "plan.loop_own_start" );
     if ( index === 0 ) return I18n.get( "plan.start" );
     if ( index === this.stops.length - 1 ) return I18n.get( "plan.destination" );
     return Format.fill( "plan.stop" , { n: index } );
   },
 
   renderStops() {
-    const items = this.stops.map( ( stop , index ) => this.stopRow( stop , index ) );
+    const points = this.points();
+    const items = points.map( ( stop , index ) => this.stopRow( stop , index ) );
     Dom.swap( Dom.get( "plan-stops" ) , ...items );
-    RouteMap.drawStops( this.stops );
+    RouteMap.drawStops( points , this.isLoop() ? ( index ) => this.pinKind( index ) : null );
     this.showHint();
+  },
+
+  // A pin's look: its class suffix and the letter on it.
+  pinKind( index ) {
+    if ( this.isLoop() ) return index === 0 ? { kind: "center" , label: "C" } : { kind: "start" , label: "S" };
+    const count = this.stops.length;
+    return { kind: index === 0 ? "start" : index === count - 1 ? "end" : "via" , label: RouteMap.pinLabel( index , count ) };
   },
 
   stopRow( stop , index ) {
     const name = this.stopName( index );
-    const kind = index === 0 ? "start" : index === this.stops.length - 1 ? "end" : "via";
+    const pin = this.pinKind( index );
+    const kind = this.isLoop() ? "loop" : pin.kind;
     const input = Dom.el( "input" , {
       class: "form-control",
       attrs: {
@@ -253,8 +375,8 @@ const Planner = {
       } ) );
     }
     const badge = Dom.el( "span" , {
-      class: "input-group-text plan-stop-badge plan-pin-" + kind,
-      text: RouteMap.pinLabel( index , this.stops.length ),
+      class: "input-group-text plan-stop-badge plan-pin-" + pin.kind,
+      text: pin.label,
       attrs: { title: name },
     } );
     return Dom.el( "li" , {
@@ -311,8 +433,13 @@ const Planner = {
 
   showHint() {
     let text;
+    const points = this.loopPoints;
     if ( this.picking !== null ) text = Format.fill( "plan.hint_pick" , { stop: this.stopName( this.picking ) } );
-    else if ( this.stops[ 0 ] === null ) text = I18n.get( "plan.hint_start" );
+    else if ( this.isLoop() ) {
+      if ( points[ 0 ] === null ) text = I18n.get( "plan.hint_loop_center" );
+      else if ( this.loopUsesStart() && points[ 1 ] === null ) text = I18n.get( "plan.hint_loop_start" );
+      else text = I18n.get( "plan.hint_loop_done" );
+    } else if ( this.stops[ 0 ] === null ) text = I18n.get( "plan.hint_start" );
     else if ( this.stops.some( ( stop ) => stop === null ) ) text = I18n.get( "plan.hint_end" );
     else text = I18n.get( "plan.hint_done" );
     Dom.text( Dom.get( "plan-hint" ) , text );
@@ -325,8 +452,8 @@ const Planner = {
     const options = this.options;
     Dom.get( "plan-backroads" ).checked = options.backroads;
     Dom.get( "plan-strength" ).disabled = !options.backroads;
-    Dom.get( "plan-secondary" ).checked = options.secondary_is_main;
-    Dom.get( "plan-unpaved" ).checked = options.allow_unpaved;
+    this.renderRoads();
+    this.renderLoop();
     Dom.get( "plan-compare" ).checked = options.compare_fastest;
     Dom.get( "plan-compare" ).disabled = !options.backroads;
     const slider = Dom.get( "plan-penalty" );
@@ -340,6 +467,96 @@ const Planner = {
     } );
     Dom.show( Dom.get( "plan-legend-fastest" ) , options.backroads && options.compare_fastest );
     this.renderSources();
+  },
+
+  // The server's own avoid strengths (routing.avoid_strength).
+  statusFactors() {
+    const out = {};
+    ( ( this.status && this.status.road_types ) || [] ).forEach( ( type ) => {
+      if ( type.default_strength ) out[ type.id ] = type.default_strength;
+    } );
+    return out;
+  },
+
+  // Under a road type set to Avoid: its strength, the slider's or its own.
+  strengthSelect( type ) {
+    const current = this.options.road_factors[ type.id ] || null;
+    const values = this.STRENGTHS.slice();
+    if ( current !== null && !values.includes( current ) ) values.push( current );
+    values.sort( ( a , b ) => a - b );
+    const select = Dom.el( "select" , {
+      class: "form-select form-select-sm w-auto",
+      attrs: { "aria-label": Format.fill( "plan.strength_label" , { road: I18n.get( "plan.road_" + type.id ) } ) },
+      children: [
+        Dom.el( "option" , { text: Format.fill( "plan.strength_slider" , { n: this.options.penalty } ) , attrs: { value: "" } } ),
+        ...values.map( ( n ) => Dom.el( "option" , { text: Format.fill( "plan.strength_value" , { n: n } ) , attrs: { value: String( n ) } } ) ),
+      ],
+      on: { change: ( event ) => this.setFactor( type.id , event.target.value === "" ? null : Number( event.target.value ) ) },
+    } );
+    select.value = current === null ? "" : String( current );
+    select.disabled = !this.options.backroads;
+    return Dom.el( "div" , { class: "d-flex justify-content-end mb-1" , children: [ select ] } );
+  },
+
+  // One row per road type: its name and Use / Avoid / Never, and under an
+  // avoided one its strength.
+  renderRoads() {
+    const types = ( this.status && this.status.road_types ) || [];
+    const rules = this.options.road_rules;
+    const rows = types.map( ( type ) => {
+      const value = rules[ type.id ] || type.default;
+      const name = "plan-road-" + type.id;
+      const label = Dom.el( "span" , { class: "small me-auto" , text: I18n.get( "plan.road_" + type.id ) , attrs: { id: name + "-label" } } );
+      const buttons = [ [ "use" , "btn-outline-success" ] , [ "avoid" , "btn-outline-warning" ] , [ "never" , "btn-outline-danger" ] ].flatMap( ( [ rule , style ] ) => {
+        const id = name + "-" + rule;
+        const input = Dom.el( "input" , {
+          class: "btn-check",
+          attrs: { type: "radio" , name: name , id: id , value: rule , autocomplete: "off" },
+          on: { change: ( event ) => { if ( event.target.checked ) this.setRule( type.id , rule ); } },
+        } );
+        input.checked = value === rule;
+        return [ input , Dom.el( "label" , { class: "btn " + style , text: I18n.get( "plan.rule_" + rule ) , attrs: { for: id } } ) ];
+      } );
+      const row = Dom.el( "div" , { class: "d-flex align-items-center gap-2" , children: [
+        label,
+        Dom.el( "div" , { class: "btn-group btn-group-sm flex-shrink-0" , attrs: { role: "group" , "aria-labelledby": name + "-label" } , children: buttons } ),
+      ] } );
+      return value === "avoid" ? Dom.el( "div" , { children: [ row , this.strengthSelect( type ) ] } ) : row;
+    } );
+    Dom.swap( Dom.get( "plan-roads" ) , ...rows );
+    const restricted = rules.restricted && rules.restricted !== "never";
+    Dom.show( Dom.get( "plan-roads-rebuild" ) , Boolean( restricted && this.status && !this.status.restricted_on_map ) );
+  },
+
+  renderLoop() {
+    const loop = this.options.loop;
+    Dom.get( "plan-loop" ).checked = loop.on;
+    Dom.show( Dom.get( "plan-loop-settings" ) , loop.on );
+    Dom.show( Dom.get( "plan-add-stop" ) , !loop.on );
+    Dom.show( Dom.get( "plan-reverse" ) , !loop.on );
+    const radius = Dom.get( "plan-loop-radius" );
+    if ( Number( radius.value ) !== loop.radius ) radius.value = String( loop.radius );
+    Dom.get( "plan-loop-unit" ).value = loop.unit;
+    Dom.get( "plan-loop-points" ).value = String( loop.points );
+    const reuses = this.REUSES.includes( loop.reuse ) ? this.REUSES : [ ...this.REUSES , loop.reuse ].sort( ( a , b ) => a - b );
+    const reuse = Dom.get( "plan-loop-reuse" );
+    Dom.swap( reuse , ...reuses.map( ( n ) => Dom.el( "option" , {
+      text: n === 1 ? I18n.get( "plan.loop_reuse_free" ) : Format.fill( "plan.loop_reuse_value" , { n: n } ),
+      attrs: { value: String( n ) },
+    } ) ) );
+    reuse.value = String( loop.reuse );
+    Dom.get( "plan-loop-start-" + loop.start ).checked = true;
+    Dom.get( "plan-loop-" + loop.direction ).checked = true;
+  },
+
+  // The road rules an engine cannot be told, among the ones in force now.
+  notTold( source ) {
+    if ( !source.honours || source.id === "ours" ) return [];
+    const rules = this.options.road_rules;
+    const backroads = this.options.backroads;
+    const off = ( ...keys ) => keys.some( ( key ) => rules[ key ] === "never" || ( backroads && rules[ key ] === "avoid" ) );
+    const asked = { freeways: off( "interstate" ) , major: off( "us_highway" , "state_route" ) , unpaved: off( "unpaved" ) , tracks: off( "track" ) };
+    return Object.keys( asked ).filter( ( name ) => asked[ name ] && !source.honours.includes( name ) );
   },
 
   // --- the sources card ----------------------------------------------------------
@@ -382,7 +599,11 @@ const Planner = {
           : Dom.el( "span" , { class: "small text-body-secondary ms-2" , text: I18n.get( "plan.source_unusable" ) , attrs: { title: source.why_not } } );
         label.appendChild( note );
       }
-      return Dom.el( "div" , { class: "form-check" , children: [ input , label ] } );
+      const missing = source.usable && picked.has( source.id ) ? this.notTold( source ) : [];
+      const told = missing.length ? Dom.el( "div" , { class: "small text-body-secondary" , text: Format.fill( "plan.source_not_told" , {
+        roads: missing.map( ( name ) => I18n.get( "plan.told_" + name ) ).join( ", " ),
+      } ) } ) : null;
+      return Dom.el( "div" , { class: "form-check" , children: [ input , label , told ].filter( Boolean ) } );
     } );
     Dom.swap( Dom.get( "plan-sources" ) , ...rows );
     const combine = this.options.combine || "best";
@@ -392,14 +613,30 @@ const Planner = {
   },
 
   async savePrefs() {
-    await Api.post( "/api/planner/prefs" , this.options );
+    const options = this.options;
+    await Api.post( "/api/planner/prefs" , {
+      backroads: options.backroads , penalty: options.penalty , road_rules: options.road_rules , road_factors: options.road_factors,
+      compare_fastest: options.compare_fastest , sources: options.sources , combine: options.combine || "best",
+      loop_radius: options.loop.radius , loop_unit: options.loop.unit , loop_points: options.loop.points , loop_reuse: options.loop.reuse,
+    } );
     Dom.toast( I18n.get( "plan.prefs_saved" ) , "ok" );
   },
 
   // --- planning ------------------------------------------------------------------
 
   ready() {
+    if ( this.isLoop() ) return this.points().every( ( stop ) => stop !== null );
     return this.stops.length >= 2 && this.stops[ 0 ] !== null && this.stops[ this.stops.length - 1 ] !== null;
+  },
+
+  // The loop as the API takes it (LoopSpec).
+  loopSpec() {
+    const loop = this.options.loop;
+    const center = this.loopPoints[ 0 ];
+    return {
+      center_lat: center.lat , center_lon: center.lon , radius: loop.radius , unit: loop.unit , start: loop.start , direction: loop.direction,
+      points: loop.points , reuse: loop.reuse,
+    };
   },
 
   schedulePlan( fit ) {
@@ -414,7 +651,7 @@ const Planner = {
       this.result = null;
       RouteMap.clearRoutes();
       Dom.show( Dom.get( "plan-result" ) , false );
-      if ( fit ) RouteMap.fitTo( [] , this.stops );
+      if ( fit ) RouteMap.fitTo( [] , this.points() );
       return;
     }
     const options = this.options;
@@ -427,15 +664,19 @@ const Planner = {
       App.showError( I18n.get( "plan.sources_need_one" ) );
       return;
     }
+    const loop = this.isLoop();
     const body = {
-      waypoints: this.stops.filter( Boolean ).map( ( stop ) => ( { lat: stop.lat , lon: stop.lon } ) ),
+      waypoints: loop
+        ? ( this.loopUsesStart() ? [ { lat: this.loopPoints[ 1 ].lat , lon: this.loopPoints[ 1 ].lon } ] : [] )
+        : this.stops.filter( Boolean ).map( ( stop ) => ( { lat: stop.lat , lon: stop.lon } ) ),
       penalty: options.backroads ? options.penalty : 1,
-      secondary_is_main: options.secondary_is_main,
-      allow_unpaved: options.allow_unpaved,
+      road_rules: options.road_rules,
+      road_factors: options.road_factors,
       compare_fastest: options.backroads && options.compare_fastest,
       sources: sources,
       combine: options.combine || "best",
     };
+    if ( loop ) body.loop = this.loopSpec();
     const summary = Dom.get( "plan-summary" );
     summary.classList.add( "opacity-50" );
     this.showBusy( "updating" );
@@ -459,7 +700,7 @@ const Planner = {
     this.result = result;
     this.selected = 0;
     this.draw();
-    if ( fit || !this.shownOnce ) RouteMap.fitTo( result.routes , this.stops );
+    if ( fit || !this.shownOnce ) RouteMap.fitTo( result.routes , this.points() );
     this.shownOnce = true;
     this.renderResult( result );
   },
@@ -507,6 +748,10 @@ const Planner = {
       return;
     }
     RouteMap.drawRoutes( [ chosen , ...this.result.routes.filter( ( route ) => route !== chosen ) ] );
+    if ( this.isLoop() && this.result.ring && this.result.ring.length ) {
+      const loop = this.options.loop;
+      RouteMap.drawRing( this.loopPoints[ 0 ] , this.result.ring , loop.unit === "mi" ? loop.radius * 1609.344 : null );
+    }
   },
 
   select( index ) {
@@ -661,15 +906,17 @@ const Planner = {
   // --- save and export -------------------------------------------------------------
 
   defaultName() {
-    const set = this.stops.filter( Boolean );
     const short = ( stop ) => stop.label.split( "," )[ 0 ];
+    if ( this.isLoop() ) return Format.fill( "plan.save_name_loop" , { center: short( this.loopPoints[ 0 ] ) } ).slice( 0 , 80 );
+    const set = this.stops.filter( Boolean );
     return Format.fill( "plan.save_name_default" , { from: short( set[ 0 ] ) , to: short( set[ set.length - 1 ] ) } ).slice( 0 , 80 );
   },
 
   async saveRoute() {
     const route = this.chosen();
     if ( !route ) return;
-    const stops = this.stops.filter( Boolean );
+    const stops = this.points().filter( Boolean );
+    const loop = this.isLoop() ? this.loopSpec() : null;
     let made = null;
     const answer = await Dom.form( {
       title: I18n.get( "plan.save_title" ),
@@ -681,10 +928,11 @@ const Planner = {
           options: {
             backroads: this.options.backroads,
             penalty: this.options.penalty,
-            secondary_is_main: this.options.secondary_is_main,
-            allow_unpaved: this.options.allow_unpaved,
+            road_rules: this.options.road_rules,
+            road_factors: this.options.road_factors,
             sources: this.usableSources(),
             combine: this.options.combine || "best",
+            loop: loop,
           },
           summary: { seconds: route.seconds , meters: route.meters , main_seconds: route.main_seconds , main_meters: route.main_meters },
         } );
@@ -704,7 +952,7 @@ const Planner = {
   exportGpx() {
     const route = this.chosen();
     if ( !route ) return;
-    const stops = this.stops.filter( Boolean );
+    const stops = this.points().filter( Boolean );
     Gpx.download( this.defaultName() || I18n.get( "plan.gpx_name" ) , stops , route );
   },
 };

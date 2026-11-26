@@ -40,6 +40,8 @@ class Graph:
     seg_class: np.ndarray
     seg_oneway: np.ndarray
     seg_unpaved: np.ndarray
+    seg_category: np.ndarray
+    seg_restricted: np.ndarray
     seg_name: np.ndarray
     seg_g0: np.ndarray
     seg_g1: np.ndarray
@@ -77,11 +79,18 @@ def load(path: Path) -> Graph:
     with np.load(path, allow_pickle=False) as data:
         arrays = {name: data[name] for name in data.files}
     meta = json.loads(arrays["meta"].tobytes().decode("utf-8"))
-    if meta.get("version") != build.FORMAT_VERSION:
-        raise ValueError(f"graph file is format {meta.get('version')}, this server reads {build.FORMAT_VERSION}: rebuild it")
+    if meta.get("version") not in build.READABLE_VERSIONS:
+        raise ValueError(f"graph file is format {meta.get('version')}, this server reads {build.FORMAT_VERSION}: "
+                         "rebuild it on the Map data screen")
     if meta.get("classes") != list(classes.CLASSES):
-        raise ValueError("graph file was built with other road classes: rebuild it")
+        raise ValueError("graph file was built with other road classes: rebuild it on the Map data screen")
     names = arrays["names"].tobytes().decode("utf-8").split("\n")
+    if "seg_category" in arrays:
+        if meta.get("categories") != list(classes.CATEGORIES):
+            raise ValueError("graph file was built with other road categories: rebuild it on the Map data screen")
+        seg_category, seg_restricted = arrays["seg_category"], arrays["seg_restricted"]
+    else:
+        seg_category, seg_restricted = _old_categories(arrays["seg_class"], arrays["seg_name"], names)
 
     seg_a, seg_b = arrays["seg_a"].astype(np.int64), arrays["seg_b"].astype(np.int64)
     oneway = arrays["seg_oneway"]
@@ -126,6 +135,8 @@ def load(path: Path) -> Graph:
         seg_class=arrays["seg_class"],
         seg_oneway=oneway,
         seg_unpaved=arrays["seg_unpaved"],
+        seg_category=seg_category,
+        seg_restricted=seg_restricted,
         seg_name=arrays["seg_name"],
         seg_g0=arrays["seg_g0"],
         seg_g1=arrays["seg_g1"],
@@ -143,6 +154,18 @@ def load(path: Path) -> Graph:
     )
     graph.tree = cKDTree(graph.project(graph.geom_lat, graph.geom_lon), balanced_tree=False, compact_nodes=False)
     return graph
+
+
+def _old_categories(seg_class: np.ndarray, seg_name: np.ndarray, names: list[str]) -> tuple[np.ndarray, np.ndarray]:
+    """Categories for a format-2 file, which has none stored: from each road's
+    class and the ref kept in its label. Such a file left restricted roads out,
+    so none is restricted. Rebuilding stores the real ones."""
+    pairs, inverse = np.unique(np.column_stack((seg_name.astype(np.int64), seg_class.astype(np.int64))), axis=0, return_inverse=True)
+    table = np.empty(len(pairs), dtype=np.uint8)
+    for row, (name_id, class_id) in enumerate(pairs):
+        label = names[int(name_id)]
+        table[row] = classes.CATEGORY_INDEX[classes.category_of(classes.CLASSES[int(class_id)], classes.ref_of_label(label))]
+    return table[inverse.ravel()], np.zeros(len(seg_class), dtype=bool)
 
 
 class Holder:

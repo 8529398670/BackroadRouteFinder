@@ -6,12 +6,13 @@ to three."""
 from __future__ import annotations
 
 from app.routing.providers import polyline
-from app.routing.providers.base import Candidate, Engine, Points, ProviderError, query, request_json
+from app.routing.providers.base import Ask, Candidate, Engine, Points, ProviderError, query, request_json
 
 URL = "https://router.hereapi.com/v8/routes"
 
 
-def fetch(points: Points, backroads: bool, key: str, url: str, timeout: float) -> list[Candidate]:
+def fetch(points: Points, ask: Ask | bool, key: str, url: str, timeout: float) -> list[Candidate]:
+    ask = Ask.coerce(ask)
     params: list[tuple[str, str]] = [
         ("transportMode", "car"),
         ("origin", f"{points[0][0]:.6f},{points[0][1]:.6f}"),
@@ -21,8 +22,10 @@ def fetch(points: Points, backroads: bool, key: str, url: str, timeout: float) -
         ("apiKey", key),
     ]
     params += [("via", f"{lat:.6f},{lon:.6f}!passThrough=true") for lat, lon in points[1:-1]]
-    if backroads:
-        params.append(("avoid[features]", "controlledAccessHighway,tollRoad"))
+    avoid = (["controlledAccessHighway"] if ask.off("freeways") else []) + (["tollRoad"] if ask.backroads else []) \
+        + (["dirtRoad"] if ask.off("unpaved") else [])
+    if avoid:
+        params.append(("avoid[features]", ",".join(avoid)))
     answer = request_json(f"{URL}?{query(params)}", timeout=timeout)
     out = []
     for route in answer.get("routes", []):
@@ -46,4 +49,5 @@ ENGINE = Engine(
     free_tier="Free monthly allowance on the base plan (card required).",
     backroads="Avoids controlled-access highways and toll roads.",
     fetch=fetch,
+    honours=frozenset({"freeways", "unpaved"}),
 )

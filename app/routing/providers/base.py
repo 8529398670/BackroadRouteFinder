@@ -1,12 +1,16 @@
 """What every engine module provides, and the HTTP they share.
 
-fetch(points, backroads, key, url, timeout) asks the engine for routes through
+fetch(points, ask, key, url, timeout) asks the engine for routes through
 points ([(lat, lon), ...]) and returns candidates, best first by the engine's
-own measure. backroads says to use whatever the engine has to stay off main
-roads (avoid motorways, a lower priority for trunk and primary roads, a
-"thrilling" route type); without it the engine plans its plain fastest route.
+own measure. ask (an Ask) is the planner's road rules in the few words every
+engine shares: backroads mode, and use / avoid / never for freeways, other
+major roads (US highways and state routes), unpaved roads and tracks. Each
+engine says what it can of that (avoid motorways, a lower priority for trunk
+and primary roads, leave out unpaved roads, a "thrilling" route type) and
+lists the rules it follows in Engine.honours; whatever it cannot say is still
+counted when its route is scored on our map.
 
-Answers are cached for a while (CACHE_SECONDS) by engine, points and mode, so
+Answers are cached for a while (CACHE_SECONDS) by engine, points and ask, so
 moving the backroads slider -- which re-plans -- does not spend a free tier's
 daily allowance: only a new or moved stop asks again.
 """
@@ -20,7 +24,7 @@ import urllib.parse
 import urllib.request
 from collections import OrderedDict
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 from app.routing.files import USER_AGENT
 
@@ -33,6 +37,44 @@ Points = list[tuple[float, float]]
 class ProviderError(Exception):
     """The engine could not plan the route: a refused key, a quota, a trip it
     does not cover, or no answer."""
+
+
+USE, AVOID, NEVER = "use", "avoid", "never"
+_STRENGTH = {USE: 0, AVOID: 1, NEVER: 2}
+
+
+@dataclass(frozen=True)
+class Ask:
+    """The road rules as every engine can be told them. An "avoid" only
+    counts in backroads mode (penalty above 1), as on our own map."""
+
+    backroads: bool = False
+    freeways: str = USE      # Interstates (and other motorways)
+    major: str = USE         # US highways and state routes
+    unpaved: str = USE
+    tracks: str = USE
+
+    @classmethod
+    def from_rules(cls, rules: Mapping[str, str], backroads: bool) -> "Ask":
+        def rule(*keys: str) -> str:
+            value = max((rules.get(key, USE) for key in keys), key=lambda v: _STRENGTH.get(v, 0))
+            return USE if value == AVOID and not backroads else value
+        return cls(backroads=backroads, freeways=rule("interstate"), major=rule("us_highway", "state_route"),
+                   unpaved=rule("unpaved"), tracks=rule("track"))
+
+    @classmethod
+    def coerce(cls, value: "Ask | bool") -> "Ask":
+        """An Ask from a plain backroads on/off, for callers that only have
+        that (the Settings screen's engine test): the default rules."""
+        if isinstance(value, Ask):
+            return value
+        if value:
+            return cls(backroads=True, freeways=AVOID, major=AVOID, unpaved=AVOID, tracks=NEVER)
+        return cls(tracks=NEVER)
+
+    def off(self, name: str) -> bool:
+        """Should the engine keep off this kind of road (avoid or never)."""
+        return getattr(self, name) != USE
 
 
 @dataclass
@@ -54,7 +96,9 @@ class Engine:
     # One line each, shown on the Settings card.
     free_tier: str
     backroads: str
-    fetch: Callable[[Points, bool, str, str, float], list[Candidate]] = field(repr=False, compare=False)
+    fetch: Callable[[Points, Ask, str, str, float], list[Candidate]] = field(repr=False, compare=False)
+    # The Ask fields it can act on (freeways, major, unpaved, tracks).
+    honours: frozenset[str] = frozenset()
 
 
 # --- HTTP ---------------------------------------------------------------------
@@ -122,14 +166,14 @@ _lock = threading.Lock()
 _cache: OrderedDict[tuple, tuple[float, list[Candidate]]] = OrderedDict()
 
 
-def cached_fetch(engine: Engine, points: Points, backroads: bool, key: str, url: str, timeout: float) -> list[Candidate]:
-    marker = (engine.id, tuple((round(lat, 5), round(lon, 5)) for lat, lon in points), backroads, url, key[-6:])
+def cached_fetch(engine: Engine, points: Points, ask: Ask, key: str, url: str, timeout: float) -> list[Candidate]:
+    marker = (engine.id, tuple((round(lat, 5), round(lon, 5)) for lat, lon in points), ask, url, key[-6:])
     with _lock:
         hit = _cache.get(marker)
         if hit and time.time() - hit[0] < CACHE_SECONDS:
             _cache.move_to_end(marker)
             return hit[1]
-    found = engine.fetch(points, backroads, key, url, timeout)
+    found = engine.fetch(points, ask, key, url, timeout)
     if not found:
         raise ProviderError("no route found")
     with _lock:
