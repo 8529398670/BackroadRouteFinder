@@ -10,6 +10,7 @@ This file is generated: do not edit it. Change the docs next to the handlers and
 - [Errors](#errors)
 - [Account](#account)
 - [Sign-in](#sign-in)
+- [API keys](#api-keys)
 - [Admin](#admin)
 - [Owner](#owner)
 - [Monitoring](#monitoring)
@@ -564,6 +565,563 @@ Finish a sign-in with a code
 | Field | Type | Required | Limits | Description |
 |---|---|---|---|---|
 | `ok` | boolean | yes |  |  |
+
+## API keys
+
+| Method | Path | Summary | Who may call |
+|---|---|---|---|
+| GET | [`/api/admin/keys`](#get-apiadminkeys) | Every key in the app | browser session only, admins |
+| POST | [`/api/admin/keys`](#post-apiadminkeys) | Create a key that acts as someone else | browser session only, admins |
+| POST | [`/api/admin/keys/{key_id}/delete`](#post-apiadminkeyskey_iddelete) | Delete anyone's key | browser session only, admins |
+| POST | [`/api/admin/keys/{key_id}/expiry`](#post-apiadminkeyskey_idexpiry) | Change when anyone's key expires | browser session only, admins |
+| POST | [`/api/admin/keys/{key_id}/rename`](#post-apiadminkeyskey_idrename) | Rename anyone's key | browser session only, admins |
+| POST | [`/api/admin/keys/{key_id}/restore`](#post-apiadminkeyskey_idrestore) | Undo deleting anyone's key | browser session only, admins |
+| POST | [`/api/admin/keys/{key_id}/revoke`](#post-apiadminkeyskey_idrevoke) | Revoke anyone's key | browser session or API key, admins |
+| GET | [`/api/admin/users/{user_id}/keys`](#get-apiadminusersuser_idkeys) | An account's keys | browser session or API key, admins |
+| POST | [`/api/admin/users/{user_id}/keys`](#post-apiadminusersuser_idkeys) | Make a key for an account | browser session or API key, admins |
+| GET | [`/api/keys`](#get-apikeys) | Your API keys | browser session only, anyone signed in |
+| POST | [`/api/keys`](#post-apikeys) | Create an API key | browser session only, anyone signed in |
+| POST | [`/api/keys/self/rotate`](#post-apikeysselfrotate) | Rotate the calling key | API key only, anyone signed in |
+| POST | [`/api/keys/{key_id}/delete`](#post-apikeyskey_iddelete) | Delete one of your keys | browser session only, anyone signed in |
+| POST | [`/api/keys/{key_id}/expiry`](#post-apikeyskey_idexpiry) | Change when one of your keys expires | browser session only, anyone signed in |
+| POST | [`/api/keys/{key_id}/mint-keys`](#post-apikeyskey_idmint-keys) | Let one of your keys make keys | browser session only, anyone signed in |
+| POST | [`/api/keys/{key_id}/rename`](#post-apikeyskey_idrename) | Rename one of your keys | browser session only, anyone signed in |
+| POST | [`/api/keys/{key_id}/restore`](#post-apikeyskey_idrestore) | Undo deleting one of your keys | browser session only, anyone signed in |
+| POST | [`/api/keys/{key_id}/revoke`](#post-apikeyskey_idrevoke) | Revoke one of your keys | browser session only, anyone signed in |
+| POST | [`/api/keys/{key_id}/rotate`](#post-apikeyskey_idrotate) | Rotate one of your keys | browser session only, anyone signed in |
+| POST | [`/api/keys/{key_id}/sign-in`](#post-apikeyskey_idsign-in) | Let one of your keys make sign-in links | browser session only, anyone signed in |
+
+### GET /api/admin/keys
+
+Every key in the app
+
+|  |  |
+|---|---|
+| Who may call | browser session only, admins |
+| Errors | 400, 401, 403, 404, 429, 503 |
+
+**Parameters**
+
+| Name | In | Type | Required | Limits | Description |
+|---|---|---|---|---|---|
+| `limit` | query | integer | no | 1 to 1000; default `200` | Rows to return. Default 200. |
+| `offset` | query | integer | no | at least 0 | Rows to skip: the next value of the previous page. |
+| `q` | query | string | no |  | Keep keys whose name or owner contains this, in any case. |
+| `live` | query | string | no | one of `true` | Leave out revoked and expired keys. |
+| `sort` | query | string | no | one of `display_name`, `name`, `role`, `last_used_at`, `expires_at`, `created_at` | Field to sort the whole list by. Rows without it go last. |
+| `dir` | query | string | no | one of `asc`, `desc` | Default asc. |
+
+**Reply 200**: Success
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `keys` | array of [`APIKey`](#apikey) | yes |  |  |
+| `next` | integer or null | yes |  | Offset of the next page, or null on the last one. |
+| `total` | integer | yes |  |  |
+
+### POST /api/admin/keys
+
+Create a key that acts as someone else
+
+Any admin may do this for an ordinary user, and only the owner for another admin. Nobody may do it for the owner. The key records who made it and shows that to the person it acts as.
+
+|  |  |
+|---|---|
+| Who may call | browser session only, admins |
+| Errors | 400, 401, 403, 404, 429, 503 |
+
+**Request body**
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `csrf_token` | string | no |  | From GET /api/me. Browser sessions only. |
+| `expires_in_days` | integer or null | no | 0 to 3650 | Absent or null: the configured default. 0: never expires. |
+| `name` | string | yes | 1 to 80 characters |  |
+| `role` | string | no | one of `admin`, `user`, `viewer`; default `user` |  |
+| `user_id` | integer | yes | at least 1 |  |
+
+**Reply 201**: Success
+
+[`NewAPIKey`](#newapikey).
+
+### POST /api/admin/keys/{key_id}/delete
+
+Delete anyone's key
+
+|  |  |
+|---|---|
+| Who may call | browser session only, admins |
+| Errors | 400, 401, 403, 404, 429, 503 |
+
+**Parameters**
+
+| Name | In | Type | Required | Limits | Description |
+|---|---|---|---|---|---|
+| `key_id` | path | string | yes |  | The key's id, from GET /api/keys (GET /api/admin/keys for anyone's). |
+
+**Request body**
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `csrf_token` | string | no |  | From GET /api/me. Browser sessions only. |
+
+**Reply 200**: Success
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `ok` | boolean | yes |  |  |
+
+### POST /api/admin/keys/{key_id}/expiry
+
+Change when anyone's key expires
+
+|  |  |
+|---|---|
+| Who may call | browser session only, admins |
+| Errors | 400, 401, 403, 404, 429, 503 |
+
+**Parameters**
+
+| Name | In | Type | Required | Limits | Description |
+|---|---|---|---|---|---|
+| `key_id` | path | string | yes |  | The key's id, from GET /api/keys (GET /api/admin/keys for anyone's). |
+
+**Request body**
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `csrf_token` | string | no |  | From GET /api/me. Browser sessions only. |
+| `expires_in_days` | integer | yes | 0 to 3650 | Counted from now. 0 means it never expires. |
+
+**Reply 200**: Success
+
+[`APIKey`](#apikey).
+
+### POST /api/admin/keys/{key_id}/rename
+
+Rename anyone's key
+
+|  |  |
+|---|---|
+| Who may call | browser session only, admins |
+| Errors | 400, 401, 403, 404, 409, 429, 503 |
+
+**Parameters**
+
+| Name | In | Type | Required | Limits | Description |
+|---|---|---|---|---|---|
+| `key_id` | path | string | yes |  | The key's id, from GET /api/keys (GET /api/admin/keys for anyone's). |
+
+**Request body**
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `csrf_token` | string | no |  | From GET /api/me. Browser sessions only. |
+| `expect` | string or null | no |  | The name you think it has. Answers 409 if it has another. |
+| `name` | string | yes | 1 to 80 characters | 1-80 characters. |
+
+**Reply 200**: Success
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `name` | string | yes |  |  |
+| `ok` | boolean | yes |  |  |
+
+### POST /api/admin/keys/{key_id}/restore
+
+Undo deleting anyone's key
+
+|  |  |
+|---|---|
+| Who may call | browser session only, admins |
+| Errors | 400, 401, 403, 404, 409, 429, 503 |
+
+**Parameters**
+
+| Name | In | Type | Required | Limits | Description |
+|---|---|---|---|---|---|
+| `key_id` | path | string | yes |  | The key's id, from GET /api/keys (GET /api/admin/keys for anyone's). |
+
+**Request body**
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `csrf_token` | string | no |  | From GET /api/me. Browser sessions only. |
+
+**Reply 200**: Success
+
+[`APIKey`](#apikey).
+
+### POST /api/admin/keys/{key_id}/revoke
+
+Revoke anyone's key
+
+Stops the key at once, and every key it made, down the chain. Needs a browser session or a key with may_mint_keys (any other key gets 403 key_minting_off), which may not revoke the owner's keys.
+
+|  |  |
+|---|---|
+| Who may call | browser session or API key, admins |
+| Errors | 400, 401, 403, 404, 429, 503 |
+
+**Parameters**
+
+| Name | In | Type | Required | Limits | Description |
+|---|---|---|---|---|---|
+| `key_id` | path | string | yes |  | The key's id, from GET /api/keys (GET /api/admin/keys for anyone's). |
+
+**Request body**
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `csrf_token` | string | no |  | From GET /api/me. Browser sessions only. |
+
+**Reply 200**: Success
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `ok` | boolean | yes |  |  |
+
+### GET /api/admin/users/{user_id}/keys
+
+An account's keys
+
+One account's keys, revoked and expired ones included, newest first. Each row says which key minted it (minted_by_key, empty when a person made it). Needs a browser session or a key with may_mint_keys; any other key gets 403 key_minting_off. Follows the owner ladder: nobody lists the owner's keys this way, and only the owner lists another admin's.
+
+|  |  |
+|---|---|
+| Who may call | browser session or API key, admins |
+| Errors | 400, 401, 403, 404, 429, 503 |
+
+**Parameters**
+
+| Name | In | Type | Required | Limits | Description |
+|---|---|---|---|---|---|
+| `user_id` | path | integer | yes | at least 1 | The account's id, from GET /api/admin/users (admin_list_users over MCP). |
+
+**Reply 200**: Success
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `keys` | array of [`APIKey`](#apikey) | yes |  |  |
+
+### POST /api/admin/users/{user_id}/keys
+
+Make a key for an account
+
+Needs a browser session or a key the owner allowed to make keys (may_mint_keys); any other key gets 403 key_minting_off. The role is capped at the account's own; expires_in_days is required (1-365). Never for the owner. The new key records the key that made it, can never make keys or sign-in links itself, and is revoked when that key is revoked or deleted. Answers with the key and its credential, shown only now.
+
+|  |  |
+|---|---|
+| Who may call | browser session or API key, admins |
+| Errors | 400, 401, 403, 404, 429, 503 |
+
+**Parameters**
+
+| Name | In | Type | Required | Limits | Description |
+|---|---|---|---|---|---|
+| `user_id` | path | integer | yes | at least 1 | The account's id, from GET /api/admin/users (admin_list_users over MCP). |
+
+**Request body**
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `csrf_token` | string | no |  | From GET /api/me. Browser sessions only. |
+| `expires_in_days` | integer | yes | 1 to 365 | Required: 1-365. A minted key always expires. |
+| `name` | string | yes | 1 to 80 characters |  |
+| `role` | string | yes | one of `admin`, `user`, `viewer` | Capped at the account's own role. |
+
+**Reply 201**: Success
+
+[`NewAPIKey`](#newapikey).
+
+### GET /api/keys
+
+Your API keys
+
+|  |  |
+|---|---|
+| Who may call | browser session only, anyone signed in |
+| Errors | 400, 401, 403, 404, 429, 503 |
+
+**Parameters**
+
+| Name | In | Type | Required | Limits | Description |
+|---|---|---|---|---|---|
+| `limit` | query | integer | no | 1 to 1000; default `200` | Rows to return. Default 200. |
+| `offset` | query | integer | no | at least 0 | Rows to skip: the next value of the previous page. |
+| `q` | query | string | no |  | Keep keys whose name contains this, in any case. |
+| `live` | query | string | no | one of `true` | Leave out revoked and expired keys. |
+| `sort` | query | string | no | one of `name`, `role`, `last_used_at`, `expires_at`, `created_at` | Field to sort the whole list by. Rows without it go last. |
+| `dir` | query | string | no | one of `asc`, `desc` | Default asc. |
+
+**Reply 200**: Success
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `keys` | array of [`APIKey`](#apikey) | yes |  |  |
+| `next` | integer or null | yes |  | Offset of the next page, or null on the last one. |
+| `total` | integer | yes |  |  |
+
+### POST /api/keys
+
+Create an API key
+
+|  |  |
+|---|---|
+| Who may call | browser session only, anyone signed in |
+| Errors | 400, 401, 403, 404, 429, 503 |
+
+**Request body**
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `csrf_token` | string | no |  | From GET /api/me. Browser sessions only. |
+| `expires_in_days` | integer or null | no | 0 to 3650 | Absent or null: the configured default. 0: never expires. |
+| `name` | string | yes | 1 to 80 characters |  |
+| `role` | string | no | one of `admin`, `user`, `viewer`; default `user` |  |
+
+**Reply 201**: Success
+
+[`NewAPIKey`](#newapikey).
+
+### POST /api/keys/self/rotate
+
+Rotate the calling key
+
+Gives the calling key a new secret and answers its new credential, shown only now. The old secret stops working at once. The key's id, name, role, grants, lineage and expiry stay as they are, so the keys and links it made keep working; rotating never extends the expiry. A viewer key may call it.
+
+|  |  |
+|---|---|
+| Who may call | API key only, anyone signed in |
+| Errors | 400, 403, 404, 429, 503 |
+
+**Request body**
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `csrf_token` | string | no |  | From GET /api/me. Browser sessions only. |
+
+**Reply 200**: Success
+
+[`RotatedKey`](#rotatedkey).
+
+### POST /api/keys/{key_id}/delete
+
+Delete one of your keys
+
+|  |  |
+|---|---|
+| Who may call | browser session only, anyone signed in |
+| Errors | 400, 401, 403, 404, 429, 503 |
+
+**Parameters**
+
+| Name | In | Type | Required | Limits | Description |
+|---|---|---|---|---|---|
+| `key_id` | path | string | yes |  | The key's id, from GET /api/keys (GET /api/admin/keys for anyone's). |
+
+**Request body**
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `csrf_token` | string | no |  | From GET /api/me. Browser sessions only. |
+
+**Reply 200**: Success
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `ok` | boolean | yes |  |  |
+
+### POST /api/keys/{key_id}/expiry
+
+Change when one of your keys expires
+
+|  |  |
+|---|---|
+| Who may call | browser session only, anyone signed in |
+| Errors | 400, 401, 403, 404, 429, 503 |
+
+**Parameters**
+
+| Name | In | Type | Required | Limits | Description |
+|---|---|---|---|---|---|
+| `key_id` | path | string | yes |  | The key's id, from GET /api/keys (GET /api/admin/keys for anyone's). |
+
+**Request body**
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `csrf_token` | string | no |  | From GET /api/me. Browser sessions only. |
+| `expires_in_days` | integer | yes | 0 to 3650 | Counted from now. 0 means it never expires. |
+
+**Reply 200**: Success
+
+[`APIKey`](#apikey).
+
+### POST /api/keys/{key_id}/mint-keys
+
+Let one of your keys make keys
+
+Owner only, on one of your own admin-role keys. When on, the key may make keys for other accounts (never the owner's) through POST /api/admin/users/{user_id}/keys, list them, and revoke them. Each key it makes records it, and revoking or deleting this key revokes them all.
+
+|  |  |
+|---|---|
+| Who may call | browser session only, anyone signed in |
+| Errors | 400, 401, 403, 404, 429, 503 |
+
+**Parameters**
+
+| Name | In | Type | Required | Limits | Description |
+|---|---|---|---|---|---|
+| `key_id` | path | string | yes |  | The key's id, from GET /api/keys (GET /api/admin/keys for anyone's). |
+
+**Request body**
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `csrf_token` | string | no |  | From GET /api/me. Browser sessions only. |
+| `may_mint_keys` | boolean | yes |  | true lets this key make, list and revoke other accounts' keys, each recording this key and revoked with it. |
+
+**Reply 200**: Success
+
+[`APIKey`](#apikey).
+
+### POST /api/keys/{key_id}/rename
+
+Rename one of your keys
+
+|  |  |
+|---|---|
+| Who may call | browser session only, anyone signed in |
+| Errors | 400, 401, 403, 404, 409, 429, 503 |
+
+**Parameters**
+
+| Name | In | Type | Required | Limits | Description |
+|---|---|---|---|---|---|
+| `key_id` | path | string | yes |  | The key's id, from GET /api/keys (GET /api/admin/keys for anyone's). |
+
+**Request body**
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `csrf_token` | string | no |  | From GET /api/me. Browser sessions only. |
+| `expect` | string or null | no |  | The name you think it has. Answers 409 if it has another. |
+| `name` | string | yes | 1 to 80 characters | 1-80 characters. |
+
+**Reply 200**: Success
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `name` | string | yes |  |  |
+| `ok` | boolean | yes |  |  |
+
+### POST /api/keys/{key_id}/restore
+
+Undo deleting one of your keys
+
+|  |  |
+|---|---|
+| Who may call | browser session only, anyone signed in |
+| Errors | 400, 401, 403, 404, 409, 429, 503 |
+
+**Parameters**
+
+| Name | In | Type | Required | Limits | Description |
+|---|---|---|---|---|---|
+| `key_id` | path | string | yes |  | The key's id, from GET /api/keys (GET /api/admin/keys for anyone's). |
+
+**Request body**
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `csrf_token` | string | no |  | From GET /api/me. Browser sessions only. |
+
+**Reply 200**: Success
+
+[`APIKey`](#apikey).
+
+### POST /api/keys/{key_id}/revoke
+
+Revoke one of your keys
+
+|  |  |
+|---|---|
+| Who may call | browser session only, anyone signed in |
+| Errors | 400, 401, 403, 404, 429, 503 |
+
+**Parameters**
+
+| Name | In | Type | Required | Limits | Description |
+|---|---|---|---|---|---|
+| `key_id` | path | string | yes |  | The key's id, from GET /api/keys (GET /api/admin/keys for anyone's). |
+
+**Request body**
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `csrf_token` | string | no |  | From GET /api/me. Browser sessions only. |
+
+**Reply 200**: Success
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `ok` | boolean | yes |  |  |
+
+### POST /api/keys/{key_id}/rotate
+
+Rotate one of your keys
+
+The owner only: gives one of the owner's own keys a new secret and answers its new credential, shown only now. The old secret stops working at once; nothing else about the key changes.
+
+|  |  |
+|---|---|
+| Who may call | browser session only, anyone signed in |
+| Errors | 400, 401, 403, 404, 429, 503 |
+
+**Parameters**
+
+| Name | In | Type | Required | Limits | Description |
+|---|---|---|---|---|---|
+| `key_id` | path | string | yes |  | The key's id, from GET /api/keys (GET /api/admin/keys for anyone's). |
+
+**Request body**
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `csrf_token` | string | no |  | From GET /api/me. Browser sessions only. |
+
+**Reply 200**: Success
+
+[`RotatedKey`](#rotatedkey).
+
+### POST /api/keys/{key_id}/sign-in
+
+Let one of your keys make sign-in links
+
+Off by default. When on, the key may ask POST /api/account/login-link for a link that signs your account in on a browser, which then can do everything you can, including what keys may not. The link works once, for at most 15 minutes.
+
+|  |  |
+|---|---|
+| Who may call | browser session only, anyone signed in |
+| Errors | 400, 401, 403, 404, 429, 503 |
+
+**Parameters**
+
+| Name | In | Type | Required | Limits | Description |
+|---|---|---|---|---|---|
+| `key_id` | path | string | yes |  | The key's id, from GET /api/keys (GET /api/admin/keys for anyone's). |
+
+**Request body**
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `csrf_token` | string | no |  | From GET /api/me. Browser sessions only. |
+| `may_sign_in` | boolean | yes |  | true lets the key make a login link for your account: one that works once, for at most 15 minutes. |
+
+**Reply 200**: Success
+
+[`APIKey`](#apikey).
 
 ## Admin
 
@@ -1221,6 +1779,13 @@ Runs POST /api/admin/users/{user_id}/sessions/{session_id}/revoke once per item:
 | POST | [`/api/owner/logs/ip-names/delete`](#post-apiownerlogsip-namesdelete) | Take a name off an address or a range | browser session only, the owner |
 | POST | [`/api/owner/logs/prune`](#post-apiownerlogsprune) | Apply the retention rules now | browser session only, the owner |
 | GET | [`/api/owner/logs/stream`](#get-apiownerlogsstream) | New log entries as they happen | browser session only, the owner |
+| GET | [`/api/owner/portal`](#get-apiownerportal) | ProjectPortal's accounts | browser session only, the owner |
+| POST | [`/api/owner/portal/connect`](#post-apiownerportalconnect) | Connect ProjectPortal | browser session only, the owner |
+| POST | [`/api/owner/portal/disconnect`](#post-apiownerportaldisconnect) | Disconnect ProjectPortal | browser session only, the owner |
+| GET | [`/api/owner/providers`](#get-apiownerproviders) | Routing engines and their keys | browser session only, the owner |
+| POST | [`/api/owner/providers/{engine}/key`](#post-apiownerprovidersenginekey) | Set a routing engine's API key | browser session only, the owner |
+| POST | [`/api/owner/providers/{engine}/key/delete`](#post-apiownerprovidersenginekeydelete) | Remove a routing engine's API key | browser session only, the owner |
+| POST | [`/api/owner/providers/{engine}/test`](#post-apiownerprovidersenginetest) | Test a routing engine | browser session only, the owner |
 | GET | [`/api/owner/settings`](#get-apiownersettings) | config.yaml, as a form | browser session only, the owner |
 | POST | [`/api/owner/settings`](#post-apiownersettings) | Save settings | browser session only, the owner |
 
@@ -1450,6 +2015,181 @@ New log entries as they happen
 
 Text, as `text/event-stream`.
 
+### GET /api/owner/portal
+
+ProjectPortal's accounts
+
+The service accounts ProjectPortal works through, each with its live keys and when they expire.
+
+|  |  |
+|---|---|
+| Who may call | browser session only, the owner |
+| Errors | 404, 429, 503 |
+
+**Reply 200**: Success
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `accounts` | array of [`PortalAccount`](#portalaccount) | yes |  | Every service account, oldest first. |
+
+### POST /api/owner/portal/connect
+
+Connect ProjectPortal
+
+Makes the service account named name (ProjectPortal when left out) if there is none, and one admin key for it, lasting days (1-365), that may make keys for other accounts and never makes sign-in links. Answers with the key and its credential, shown only now: paste it into ProjectPortal as this app's admin key.
+
+|  |  |
+|---|---|
+| Who may call | browser session only, the owner |
+| Errors | 400, 403, 404, 429, 503 |
+
+**Request body**
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `csrf_token` | string | no |  | From GET /api/me. Browser sessions only. |
+| `days` | integer | yes | 1 to 365 | How long the key lasts, in days. |
+| `name` | string | no | 1 to 80 characters; default `ProjectPortal` | The service account's name. Left out: ProjectPortal. |
+
+**Reply 201**: Success
+
+[`NewAPIKey`](#newapikey).
+
+### POST /api/owner/portal/disconnect
+
+Disconnect ProjectPortal
+
+Revokes every key of the service account user_id, and with them every key and link those keys made. The account stays, with no way in, until Connect gives it a key again.
+
+|  |  |
+|---|---|
+| Who may call | browser session only, the owner |
+| Errors | 400, 403, 404, 429, 503 |
+
+**Request body**
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `csrf_token` | string | no |  | From GET /api/me. Browser sessions only. |
+| `user_id` | integer | yes |  | The service account. |
+
+**Reply 200**: Success
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `ok` | boolean | yes |  |  |
+| `revoked` | integer | yes |  | Its keys revoked. The keys and links they made went with them. |
+
+### GET /api/owner/providers
+
+Routing engines and their keys
+
+Every other routing engine the planner can ask: whether it has a key (never the key itself), its address, and whether it can be asked now.
+
+|  |  |
+|---|---|
+| Who may call | browser session only, the owner |
+| Errors | 404, 429, 503 |
+
+**Reply 200**: Success
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `engines` | array of [`EngineInfo`](#engineinfo) | yes |  |  |
+
+### POST /api/owner/providers/{engine}/key
+
+Set a routing engine's API key
+
+Saves the key, sealed in the database. It replaces any key the engine had.
+
+|  |  |
+|---|---|
+| Who may call | browser session only, the owner |
+| Errors | 400, 403, 404, 429, 503 |
+
+**Parameters**
+
+| Name | In | Type | Required | Limits | Description |
+|---|---|---|---|---|---|
+| `engine` | path | string | yes |  | The engine: valhalla, osrm, ors, graphhopper, tomtom, here, mapbox, google. |
+
+**Request body**
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `csrf_token` | string | no |  | From GET /api/me. Browser sessions only. |
+| `key` | string | yes | 8 to 400 characters | The API key, as the engine's dashboard shows it. |
+
+**Reply 200**: Success
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `engines` | array of [`EngineInfo`](#engineinfo) | yes |  |  |
+
+### POST /api/owner/providers/{engine}/key/delete
+
+Remove a routing engine's API key
+
+Forgets the key; the planner stops offering the engine if it needs one.
+
+|  |  |
+|---|---|
+| Who may call | browser session only, the owner |
+| Errors | 400, 403, 404, 429, 503 |
+
+**Parameters**
+
+| Name | In | Type | Required | Limits | Description |
+|---|---|---|---|---|---|
+| `engine` | path | string | yes |  | The engine: valhalla, osrm, ors, graphhopper, tomtom, here, mapbox, google. |
+
+**Request body**
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `csrf_token` | string | no |  | From GET /api/me. Browser sessions only. |
+
+**Reply 200**: Success
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `engines` | array of [`EngineInfo`](#engineinfo) | yes |  |  |
+
+### POST /api/owner/providers/{engine}/test
+
+Test a routing engine
+
+Asks the engine for a short backroads route in Ohio (Columbus to Delaware) with its current key and address, and says whether it answered. Not cached, so it spends one request.
+
+|  |  |
+|---|---|
+| Who may call | browser session only, the owner |
+| Errors | 400, 403, 404, 429, 503 |
+
+**Parameters**
+
+| Name | In | Type | Required | Limits | Description |
+|---|---|---|---|---|---|
+| `engine` | path | string | yes |  | The engine: valhalla, osrm, ors, graphhopper, tomtom, here, mapbox, google. |
+
+**Request body**
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `csrf_token` | string | no |  | From GET /api/me. Browser sessions only. |
+
+**Reply 200**: Success
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `message` | string | yes |  |  |
+| `meters` | number | yes |  |  |
+| `milliseconds` | integer | yes |  |  |
+| `ok` | boolean | yes |  |  |
+| `routes` | integer | yes |  |  |
+| `seconds` | number | yes |  |  |
+
 ### GET /api/owner/settings
 
 config.yaml, as a form
@@ -1617,10 +2357,12 @@ Save how the planner opens for you. Send the whole set.
 |---|---|---|---|---|
 | `allow_unpaved` | boolean | yes |  |  |
 | `backroads` | boolean | yes |  |  |
+| `combine` | string | no | default `best` | best keeps only the best-scoring route; all returns every route, best first. |
 | `compare_fastest` | boolean | yes |  |  |
 | `csrf_token` | string | no |  | From GET /api/me. Browser sessions only. |
 | `penalty` | number | yes | 1 to 100 | How many times over a minute on a main road counts. 1 is the plain fastest route. |
 | `secondary_is_main` | boolean | yes |  |  |
+| `sources` | array of string | no |  |  |
 
 **Reply 200**: Success
 
@@ -1633,7 +2375,7 @@ Save how the planner opens for you. Send the whole set.
 
 Plan a route
 
-The route through the waypoints that keeps time on main roads down: each minute on a motorway, trunk or primary road (and secondary, with secondary_is_main) counts penalty times over. Times include turns, traffic signals and stop signs (delay_seconds). With compare_fastest, the plain fastest route comes second. A waypoint with no road within routing.max_snap_m is refused with its index.
+The route through the waypoints that keeps time on main roads down: each minute on a motorway, trunk or primary road (and secondary, with secondary_is_main) counts penalty times over. Times include turns, traffic signals and stop signs (delay_seconds). sources picks who plans: our own router (ours) and/or other engines (see GET /api/routing/status), each asked for its backroads route and alternatives. Every route is measured on our map and scored the same way; combine=best keeps the best, combine=all returns them all, best first. A source that fails is listed in problems and the rest still answer. With compare_fastest, the plain fastest route on our map comes last (compare=true). A waypoint with no road within routing.max_snap_m is refused with its index.
 
 |  |  |
 |---|---|
@@ -1645,10 +2387,12 @@ The route through the waypoints that keeps time on main roads down: each minute 
 | Field | Type | Required | Limits | Description |
 |---|---|---|---|---|
 | `allow_unpaved` | boolean | no |  |  |
+| `combine` | string | no | default `best` | best keeps only the best-scoring route; all returns every route, best first. |
 | `compare_fastest` | boolean | no | default `true` | Also plan the plain fastest route, for comparison. |
 | `csrf_token` | string | no |  | From GET /api/me. Browser sessions only. |
 | `penalty` | number | no | 1 to 100; default `8` | How many times over a minute on a main road counts. 1 is the plain fastest route. |
 | `secondary_is_main` | boolean | no |  |  |
+| `sources` | array of string | no |  | Who to ask: our own router and/or other engines. |
 | `waypoints` | array of [`Point`](#point) | yes |  | Start, any stops, destination, in order. |
 
 **Reply 200**: Success
@@ -1656,6 +2400,7 @@ The route through the waypoints that keeps time on main roads down: each minute 
 | Field | Type | Required | Limits | Description |
 |---|---|---|---|---|
 | `milliseconds` | integer | yes |  |  |
+| `problems` | array of [`SourceProblem`](#sourceproblem) | yes |  |  |
 | `routes` | array of [`PlannedRoute`](#plannedroute) | yes |  |  |
 | `snapped` | array of [`Point`](#point) | yes |  | Where each waypoint met the road. |
 
@@ -1683,6 +2428,7 @@ Whether the map is loaded, what it covers, and the server's planner defaults.
 | `region` | string | yes |  |  |
 | `secondary_is_main` | boolean | yes |  |  |
 | `segments` | integer | yes |  |  |
+| `sources` | array of [`SourceInfo`](#sourceinfo) | yes |  | Our router and the other engines, in the order to show them. |
 | `state` | string | yes |  | missing, loading, ready or error. |
 
 ## Saved routes
@@ -1857,6 +2603,28 @@ Bring back a saved route deleted in the last 10 minutes.
 
 The shapes the routes above refer to by name.
 
+### APIKey
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `created_at` | string (date-time) | yes |  |  |
+| `created_by` | integer | no |  | The admin who made this key for its owner. Absent if the owner made it. |
+| `created_by_name` | string | no |  |  |
+| `display_name` | string | no |  | The key's owner. On the admin list only. |
+| `expired` | boolean | yes |  |  |
+| `expires_at` | string (date-time) | no |  |  |
+| `id` | string | yes |  |  |
+| `last_used_at` | string (date-time) | no |  |  |
+| `live` | boolean | yes |  |  |
+| `may_mint_keys` | boolean | yes |  | Whether this key may make keys for other accounts. Only the owner switches it on. |
+| `may_sign_in` | boolean | yes |  | Whether this key may make a login link for its own account. |
+| `minted_by_key` | string | yes |  | The key that made this one, or empty. Revoking that key revokes this one. |
+| `name` | string | yes |  |  |
+| `revoked` | boolean | yes |  |  |
+| `revoked_at` | string (date-time) | no |  |  |
+| `role` | string | yes | one of `admin`, `user`, `viewer` |  |
+| `user_id` | integer | yes |  |  |
+
 ### BulkReply
 
 | Field | Type | Required | Limits | Description |
@@ -1875,6 +2643,23 @@ The shapes the routes above refer to by name.
 | `reply` | object | no |  | When it worked: the route's own reply, if it has one. |
 | `request_id` | string | no |  | On a 5xx: the reference that finds this failure in the log. |
 | `status` | integer | no |  | When it failed: the status the route would have answered. |
+
+### EngineInfo
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `backroads` | string | yes |  |  |
+| `free_tier` | string | yes |  |  |
+| `id` | string | yes |  |  |
+| `key_hint` | string | yes |  | The key's last four characters, while one is set. |
+| `key_set` | boolean | yes |  |  |
+| `name` | string | yes |  |  |
+| `needs_key` | boolean | yes |  |  |
+| `signup_url` | string | yes |  |  |
+| `url` | string | yes |  |  |
+| `url_setting` | string | yes |  | The providers.* setting holding its address, or empty when it is fixed. |
+| `usable` | boolean | yes |  |  |
+| `why_not` | string | yes |  |  |
 
 ### Error
 
@@ -1952,6 +2737,9 @@ The shapes the routes above refer to by name.
 | `account_role` | string | yes | one of `admin`, `user`, `viewer` |  |
 | `announcement` | string | yes |  | server.announcement. Empty when there is none. |
 | `api_doc_url` | string | yes |  | Where to read the API reference as a page for people: config/api.md in app.repo, or /docs/api when there is no repo. |
+| `api_key_id` | string | no |  | API keys only. |
+| `api_key_name` | string | no |  | API keys only. |
+| `api_keys_enabled` | boolean | yes |  |  |
 | `auth` | string | yes |  |  |
 | `authenticated` | boolean | yes |  |  |
 | `capabilities` | array of string | yes |  | The optional parts of that contract this app has on now: viewer_role, account_expiry, key_minting, invite_links, key_sign_in, service_accounts, key_grants, error_codes, key_rotation, admin_sessions. |
@@ -1961,11 +2749,13 @@ The shapes the routes above refer to by name.
 | `display_name` | string | yes |  |  |
 | `id` | integer | yes |  |  |
 | `is_owner` | boolean | yes |  |  |
+| `key` | [`MeKey`](#mekey) | no |  | API keys only: what this key may do. |
 | `kind` | string | yes | one of `person`, `service` | person, or service for an account that only has API keys and is never signed into (ProjectPortal's own). |
 | `login_link` | [`LoginLink`](#loginlink) or null | yes |  | Your own live login link, or null. |
 | `logs_enabled` | boolean | yes |  |  |
 | `logs_ui_clicks` | boolean | yes |  |  |
 | `maintenance` | string | yes | one of `none`, `read_only`, `full` |  |
+| `may_mint_keys` | boolean | no |  | API keys only: whether this key may make keys for other accounts. |
 | `openapi_url` | string | yes |  | Where to read this API's reference: config/api.json in app.repo, or /api/api.json when there is no repo. |
 | `owner` | boolean | yes |  | Whether this is the owner's account: the same as is_owner, under portal contract v3's name. |
 | `repo` | string | yes |  | app.repo without a trailing / or .git: where the source lives. Empty when it is not set. |
@@ -1982,12 +2772,46 @@ The shapes the routes above refer to by name.
 | `two_factor_enabled` | boolean | yes |  |  |
 | `version` | string | yes |  | The running build. dev when none was stamped. |
 
+### MeKey
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `expires_at` | string (date-time) | no |  | When the key stops working. Absent when it never does. |
+| `id` | string | yes |  |  |
+| `may_mint_keys` | boolean | yes |  | Whether this key may make keys for other accounts. |
+| `may_sign_in` | boolean | yes |  | Whether this key may make a login link for its own account. |
+| `name` | string | yes |  |  |
+| `role` | string | yes | one of `admin`, `user`, `viewer` | The key's own role. The role it acts with is the lower of this and the account's. |
+
 ### Member
 
 | Field | Type | Required | Limits | Description |
 |---|---|---|---|---|
 | `display_name` | string | yes |  |  |
 | `id` | integer | yes |  |  |
+
+### NewAPIKey
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `created_at` | string (date-time) | yes |  |  |
+| `created_by` | integer | no |  | The admin who made this key for its owner. Absent if the owner made it. |
+| `created_by_name` | string | no |  |  |
+| `credential` | string | yes |  | Shown in this response only, and never recoverable. |
+| `display_name` | string | no |  | The key's owner. On the admin list only. |
+| `expired` | boolean | yes |  |  |
+| `expires_at` | string (date-time) | no |  |  |
+| `id` | string | yes |  |  |
+| `last_used_at` | string (date-time) | no |  |  |
+| `live` | boolean | yes |  |  |
+| `may_mint_keys` | boolean | yes |  | Whether this key may make keys for other accounts. Only the owner switches it on. |
+| `may_sign_in` | boolean | yes |  | Whether this key may make a login link for its own account. |
+| `minted_by_key` | string | yes |  | The key that made this one, or empty. Revoking that key revokes this one. |
+| `name` | string | yes |  |  |
+| `revoked` | boolean | yes |  |  |
+| `revoked_at` | string (date-time) | no |  |  |
+| `role` | string | yes | one of `admin`, `user`, `viewer` |  |
+| `user_id` | integer | yes |  |  |
 
 ### Place
 
@@ -2001,13 +2825,20 @@ The shapes the routes above refer to by name.
 
 | Field | Type | Required | Limits | Description |
 |---|---|---|---|---|
+| `also` | array of string | yes |  | Other sources that found the same roads. |
+| `compare` | boolean | yes |  | The plain fastest route on our map, shown for comparison (always last). |
 | `delay_seconds` | number | yes |  | Of seconds: turning, and waiting at traffic signals and stop signs. |
+| `estimated` | boolean | yes |  | Planned by another engine: the time is its own, the main-road share is measured on our map. |
 | `kind` | string | yes |  | backroads, or fastest for the plain fastest route. |
 | `main_meters` | number | yes |  |  |
 | `main_seconds` | number | yes |  |  |
 | `meters` | number | yes |  |  |
+| `off_map_meters` | number | yes |  | Of meters: not on our map (outside it, or roads it leaves out), counted as backroad. |
 | `runs` | array of [`Run`](#run) | yes |  |  |
+| `score` | number | yes |  | seconds plus (penalty - 1) times main_seconds: lower is better. |
 | `seconds` | number | yes |  |  |
+| `source` | string | yes |  | Who planned it: ours, or another engine's id. |
+| `source_name` | string | yes |  |  |
 | `unpaved_meters` | number | yes |  |  |
 | `via` | array of [`Via`](#via) | yes |  |  |
 
@@ -2017,9 +2848,11 @@ The shapes the routes above refer to by name.
 |---|---|---|---|---|
 | `allow_unpaved` | boolean | no |  |  |
 | `backroads` | boolean | no | default `true` | Backroads mode on; off plans the plain fastest route. |
+| `combine` | string | no | default `best` | best keeps only the best-scoring route; all returns every route, best first. |
 | `compare_fastest` | boolean | no | default `true` |  |
 | `penalty` | number | no | 1 to 100; default `8` | How many times over a minute on a main road counts. 1 is the plain fastest route. |
 | `secondary_is_main` | boolean | no |  |  |
+| `sources` | array of string | no |  |  |
 
 ### Point
 
@@ -2027,6 +2860,14 @@ The shapes the routes above refer to by name.
 |---|---|---|---|---|
 | `lat` | number | yes | -90 to 90 |  |
 | `lon` | number | yes | -180 to 180 |  |
+
+### PortalAccount
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `display_name` | string | yes |  |  |
+| `id` | integer | yes |  |  |
+| `keys` | array of [`APIKey`](#apikey) | yes |  | Its live keys, newest first. |
 
 ### PruneResult
 
@@ -2041,8 +2882,15 @@ The shapes the routes above refer to by name.
 
 | Field | Type | Required | Limits | Description |
 |---|---|---|---|---|
+| `api_keys` | integer | yes |  |  |
 | `login_links` | integer | yes |  |  |
 | `sessions` | integer | yes |  |  |
+
+### RotatedKey
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `credential` | string | yes |  | The key's new credential, shown in this response only. The old one stopped working. |
 
 ### RouteOptions
 
@@ -2050,8 +2898,10 @@ The shapes the routes above refer to by name.
 |---|---|---|---|---|
 | `allow_unpaved` | boolean | no |  |  |
 | `backroads` | boolean | no | default `true` |  |
+| `combine` | string | no | default `best` | best keeps only the best-scoring route; all returns every route, best first. |
 | `penalty` | number | no | 1 to 100; default `8` | How many times over a minute on a main road counts. 1 is the plain fastest route. |
 | `secondary_is_main` | boolean | no |  |  |
+| `sources` | array of string | no |  |  |
 
 ### RouteSummary
 
@@ -2153,6 +3003,25 @@ One of these:
 |---|---|---|---|---|
 | `challenge` | string | yes |  |  |
 | `two_factor` | boolean | yes |  |  |
+
+### SourceInfo
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `backroads` | string | yes |  | How it stays off main roads. |
+| `id` | string | yes |  |  |
+| `name` | string | yes |  |  |
+| `needs_key` | boolean | yes |  |  |
+| `usable` | boolean | yes |  |  |
+| `why_not` | string | yes |  | Why it cannot be asked, while usable is false. |
+
+### SourceProblem
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `message` | string | yes |  |  |
+| `source` | string | yes |  |  |
+| `source_name` | string | yes |  |  |
 
 ### Theme
 

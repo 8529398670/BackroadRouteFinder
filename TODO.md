@@ -8,7 +8,13 @@
 - Search time grows with the graph: a whole-graph Dijkstra on the turn graph is ~0.9 s for Ohio, and would be ~30x for the US. It needs a bounded search (A* with a straight-line heuristic, or bidirectional) before then.
 - Raise `docker.memory`, and give place search the new area (it already uses the graph's bounding box).
 
-## Other routing engines worth trying (instead of, or beside, our own)
+## Other routing engines
+Done: Valhalla, OSRM, OpenRouteService, GraphHopper, TomTom, HERE, Mapbox and Google can be asked beside our own router (app/routing/providers/), each route measured on our map and scored the same way. Next:
+- Stadia Maps (hosted Valhalla with a key, more options than the public server).
+- Use other engines' routes as hints for ours (e.g. a corridor), not only as competitors.
+- Self-host GraphHopper with a backroads custom model, so it is not limited by a free tier.
+
+### Notes from before, on each engine
 - **GraphHopper**, self-hosted (Java): "custom models" can change `priority` by `road_class` per request (`motorway`, `trunk`, `primary` x0.1), with CH turned off for flexible mode. Fast, turn-by-turn, multi-state. Runs as a second container/process.
 - **Valhalla**, self-hosted: `costing_options.auto.use_highways` (0-1), `use_tolls`, `use_tracks`, `use_living_streets`. `use_highways` covers only freeways, so US/state routes need more (e.g. its `exclude_polygons`, or a custom costing build).
 - **OSRM** with a custom Lua profile: very fast, but the weights are fixed when the graph is built, so the "how hard to avoid" slider means one graph per setting.

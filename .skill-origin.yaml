@@ -5,6 +5,6 @@ commit: 13377794684472d1495e0062b5ffd90f807616bd
 project_name: "Backroad Route Finder"
 slug: backroad-route-finder
 port: 39949
-features: [two_factor]
-pruned: [api_keys, backups, files, invite_links, mcp, metrics, passwords, webhooks]
+features: [two_factor, api_keys]
 tests: false
+pruned: [backups, files, invite_links, mcp, metrics, passwords, webhooks]

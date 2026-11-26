@@ -24,6 +24,7 @@ from app.core.config import Config
 from app.core.config_live import Holder
 from app.core.db import Store
 from app.core.middleware import internal_error
+from app.models import RestoreError, RestoreForbiddenError, RestoreGoneError, RestoreOutrankedError
 from app.core.error_codes import CODE_INVALID, CODE_OWNER_PROTECTED, CODE_OWNER_REQUIRED, CODE_SERVICE_ACCOUNT, CODE_SESSION_ONLY, error_body
 from app.models.users import OwnerProtectedError, OwnerRequiredError, ServiceAccountError
 
@@ -225,6 +226,15 @@ def forbidden(message: str) -> JSONResponse:
 
 def not_found(message: str) -> JSONResponse:
     return error(404, message)
+
+
+def restore_refusal(refusal: RestoreError) -> Refused:
+    """The refusal for each way a restore can be refused."""
+    if isinstance(refusal, RestoreGoneError):
+        return Refused(404, str(refusal))
+    if isinstance(refusal, (RestoreForbiddenError, RestoreOutrankedError)):
+        return Refused(403, str(refusal))
+    return Refused(409, str(refusal))
 
 
 def server_error(request: Request, cause: object) -> JSONResponse:

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from typing import Annotated, ClassVar
 
+import msgspec
 from msgspec import Meta
 from starlette.requests import Request
 
@@ -11,7 +12,7 @@ from app.apidocs import Request as RequestType
 from app.core.security import actor_from
 from app.models import saved_routes
 from app.routes.helpers import DateTime, Page, Paged, Refused, cut_page, get_store
-from app.routes.planner import MAX_WAYPOINTS, Penalty
+from app.routes.planner import MAX_WAYPOINTS, OURS, Combine, Penalty, Source
 
 RouteName = Annotated[str, Meta(min_length=1, max_length=saved_routes.NAME_MAX, extra={"error": f"name must be 1-{saved_routes.NAME_MAX} characters"})]
 RouteID = Annotated[int, PATH, Meta(description="The saved route's id, from GET /api/saved-routes.")]
@@ -30,6 +31,8 @@ class RouteOptions(Reply):
     penalty: Penalty = 8.0
     secondary_is_main: bool = False
     allow_unpaved: bool = False
+    sources: list[Source] = msgspec.field(default_factory=lambda: [OURS])
+    combine: Combine = "best"
 
 
 class RouteSummary(Reply):

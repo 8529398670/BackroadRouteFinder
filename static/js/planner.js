@@ -10,8 +10,10 @@
 // an older answer stale, so only the latest one is shown.
 const Planner = {
   stops: [ null , null ],
-  options: { backroads: true , penalty: 8 , secondary_is_main: false , allow_unpaved: false , compare_fastest: true },
+  options: { backroads: true , penalty: 8 , secondary_is_main: false , allow_unpaved: false , compare_fastest: true , sources: [ "ours" ] , combine: "best" },
   result: null,
+  // Which of the result's routes is shown on the map, saved and exported.
+  selected: 0,
   picking: null,
   turn: 0,
   status: null,
@@ -39,6 +41,9 @@ const Planner = {
     Dom.all( "#plan-presets [data-penalty]" ).forEach( ( button ) => {
       button.addEventListener( "click" , () => this.setOption( "penalty" , Number( button.getAttribute( "data-penalty" ) ) ) );
     } );
+    Dom.all( "input[name=plan-combine]" ).forEach( ( radio ) => {
+      radio.addEventListener( "change" , () => { if ( radio.checked ) this.setOption( "combine" , radio.value ); } );
+    } );
     Dom.onPress( Dom.get( "plan-save-prefs" ) , () => this.savePrefs() );
     Dom.onPress( Dom.get( "plan-save" ) , () => this.saveRoute() );
     Dom.get( "plan-gpx" ).addEventListener( "click" , () => this.exportGpx() );
@@ -52,6 +57,18 @@ const Planner = {
     this.showStatus();
     RouteMap.showArea( status.bbox );
     this.renderStops();
+    this.renderOptions();
+  },
+
+  // The owner added or removed a key on the Settings screen: show the sources
+  // as they are now.
+  async refreshSources() {
+    if ( !this.status ) return;
+    try {
+      this.status = await Api.request( "/api/routing/status" );
+    } catch ( error ) {
+      return;
+    }
     this.renderOptions();
   },
 
@@ -156,6 +173,8 @@ const Planner = {
         secondary_is_main: saved.options.secondary_is_main,
         allow_unpaved: saved.options.allow_unpaved,
       } );
+      if ( saved.options.sources ) state.options.sources = saved.options.sources.slice();
+      if ( saved.options.combine ) state.options.combine = saved.options.combine;
     } , null , true );
     Nav.go( "/plan" );
   },
@@ -294,6 +313,56 @@ const Planner = {
       button.setAttribute( "aria-pressed" , on ? "true" : "false" );
     } );
     Dom.show( Dom.get( "plan-legend-fastest" ) , options.backroads && options.compare_fastest );
+    this.renderSources();
+  },
+
+  // --- the sources card ----------------------------------------------------------
+
+  sourceList() {
+    return ( this.status && this.status.sources ) || [ { id: "ours" , name: I18n.get( "plan.source_ours" ) , usable: true , backroads: "" } ];
+  },
+
+  // The picked sources that can be asked now.
+  usableSources() {
+    const usable = new Set( this.sourceList().filter( ( source ) => source.usable ).map( ( source ) => source.id ) );
+    return ( this.options.sources || [] ).filter( ( id ) => usable.has( id ) );
+  },
+
+  toggleSource( id , on ) {
+    const picked = new Set( this.options.sources || [] );
+    if ( on ) picked.add( id ); else picked.delete( id );
+    const order = this.sourceList().map( ( source ) => source.id );
+    this.setOption( "sources" , order.filter( ( name ) => picked.has( name ) ) );
+  },
+
+  renderSources() {
+    const picked = new Set( this.options.sources || [] );
+    const rows = this.sourceList().map( ( source ) => {
+      const id = "plan-source-" + source.id;
+      const input = Dom.el( "input" , {
+        class: "form-check-input",
+        attrs: { type: "checkbox" , id: id },
+        on: { change: ( event ) => this.toggleSource( source.id , event.target.checked ) },
+      } );
+      input.checked = picked.has( source.id ) && source.usable;
+      input.disabled = !source.usable;
+      const label = Dom.el( "label" , { class: "form-check-label" , attrs: { for: id , title: source.backroads || "" } , children: [
+        Dom.el( "span" , { text: source.id === "ours" ? I18n.get( "plan.source_ours" ) : source.name } ),
+      ] } );
+      if ( !source.usable ) {
+        const note = this.me && this.me.is_owner
+          ? Dom.el( "a" , { class: "small ms-2" , text: I18n.get( "plan.source_unusable_owner" ) , attrs: { href: "/admin/settings" , title: source.why_not } } )
+          : Dom.el( "span" , { class: "small text-body-secondary ms-2" , text: I18n.get( "plan.source_unusable" ) , attrs: { title: source.why_not } } );
+        if ( note.tagName === "A" ) note.addEventListener( "click" , ( event ) => { event.preventDefault(); Nav.go( "/admin/settings" ); } );
+        label.appendChild( note );
+      }
+      return Dom.el( "div" , { class: "form-check" , children: [ input , label ] } );
+    } );
+    Dom.swap( Dom.get( "plan-sources" ) , ...rows );
+    const combine = this.options.combine || "best";
+    Dom.get( "plan-combine-best" ).checked = combine === "best";
+    Dom.get( "plan-combine-all" ).checked = combine === "all";
+    Dom.get( "plan-combine" ).disabled = this.usableSources().length < 2;
   },
 
   async savePrefs() {
@@ -322,12 +391,22 @@ const Planner = {
       return;
     }
     const options = this.options;
+    const sources = this.usableSources();
+    if ( sources.length === 0 ) {
+      this.result = null;
+      RouteMap.clearRoutes();
+      Dom.show( Dom.get( "plan-result" ) , false );
+      App.showError( I18n.get( "plan.sources_need_one" ) );
+      return;
+    }
     const body = {
       waypoints: this.stops.filter( Boolean ).map( ( stop ) => ( { lat: stop.lat , lon: stop.lon } ) ),
       penalty: options.backroads ? options.penalty : 1,
       secondary_is_main: options.secondary_is_main,
       allow_unpaved: options.allow_unpaved,
       compare_fastest: options.backroads && options.compare_fastest,
+      sources: sources,
+      combine: options.combine || "best",
     };
     const summary = Dom.get( "plan-summary" );
     summary.classList.add( "opacity-50" );
@@ -344,10 +423,42 @@ const Planner = {
     }
     if ( turn !== this.turn ) return;
     this.result = result;
-    RouteMap.drawRoutes( result.routes );
+    this.selected = 0;
+    this.draw();
     if ( fit || !this.shownOnce ) RouteMap.fitTo( result.routes , this.stops );
     this.shownOnce = true;
     this.renderResult( result );
+  },
+
+  // The routes to choose between, and the fastest one shown to compare.
+  choices() {
+    return this.result ? this.result.routes.filter( ( route ) => !route.compare ) : [];
+  },
+
+  comparison() {
+    return this.result ? this.result.routes.find( ( route ) => route.compare ) || null : null;
+  },
+
+  chosen() {
+    const choices = this.choices();
+    return choices[ Math.min( this.selected , choices.length - 1 ) ] || null;
+  },
+
+  // The chosen route on top, the others faint behind it.
+  draw() {
+    const chosen = this.chosen();
+    if ( !chosen ) {
+      RouteMap.clearRoutes();
+      return;
+    }
+    RouteMap.drawRoutes( [ chosen , ...this.result.routes.filter( ( route ) => route !== chosen ) ] );
+  },
+
+  select( index ) {
+    if ( index === this.selected ) return;
+    this.selected = index;
+    this.draw();
+    this.renderResult( this.result );
   },
 
   // --- the result card -------------------------------------------------------------
@@ -360,7 +471,17 @@ const Planner = {
     ].filter( Boolean ) } );
   },
 
-  routeBlock( route ) {
+  sourceLabel( id , name ) {
+    return id === "ours" ? I18n.get( "plan.source_ours" ) : name || id;
+  },
+
+  routeTitle( route ) {
+    const kind = I18n.get( route.kind === "fastest" ? "plan.kind_fastest" : "plan.kind_backroads" );
+    const many = this.usableSources().length > 1 || route.source !== "ours";
+    return many ? Format.fill( "plan.kind_from" , { kind: kind , source: this.sourceLabel( route.source , route.source_name ) } ) : kind;
+  },
+
+  routeBlock( route , best ) {
     const share = route.seconds > 0 ? ( 100 * route.main_seconds ) / route.seconds : 0;
     const bar = Dom.el( "div" , {
       class: "progress plan-share mt-1",
@@ -369,7 +490,10 @@ const Planner = {
     } );
     bar.firstChild.style.width = share.toFixed( 1 ) + "%";
     const children = [
-      Dom.el( "h4" , { class: "h6 mb-2" , text: I18n.get( route.kind === "fastest" ? "plan.kind_fastest" : "plan.kind_backroads" ) } ),
+      Dom.el( "h4" , { class: "h6 mb-2 d-flex align-items-center gap-2" , children: [
+        Dom.el( "span" , { text: this.routeTitle( route ) } ),
+        best ? Dom.el( "span" , { class: "badge text-bg-success" , text: I18n.get( "plan.best_badge" ) } ) : null,
+      ].filter( Boolean ) } ),
       Dom.el( "div" , { class: "row row-cols-3 g-2" , children: [
         this.stat( "plan.time" , Format.duration( route.seconds ) ),
         this.stat( "plan.distance" , Format.distance( route.meters ) ),
@@ -383,25 +507,91 @@ const Planner = {
     if ( route.unpaved_meters > 0 ) {
       children.push( Dom.el( "div" , { class: "small text-body-secondary mt-1" , text: Format.fill( "plan.unpaved" , { distance: Format.distance( route.unpaved_meters ) } ) } ) );
     }
+    if ( route.estimated ) {
+      children.push( Dom.el( "div" , { class: "small text-body-secondary mt-1" , text: Format.fill( "plan.estimated" , { source: this.sourceLabel( route.source , route.source_name ) } ) } ) );
+    }
+    if ( route.off_map_meters >= 500 ) {
+      children.push( Dom.el( "div" , { class: "small text-body-secondary mt-1" , text: Format.fill( "plan.off_map" , { distance: Format.distance( route.off_map_meters ) } ) } ) );
+    }
+    if ( route.also && route.also.length ) {
+      const names = route.also.map( ( id ) => {
+        const known = this.sourceList().find( ( source ) => source.id === id );
+        return this.sourceLabel( id , known ? known.name : id );
+      } );
+      children.push( Dom.el( "div" , { class: "small text-body-secondary mt-1" , text: Format.fill( "plan.also_found" , { sources: names.join( ", " ) } ) } ) );
+    }
     return Dom.el( "div" , { class: "mb-3" , children: children } );
   },
 
+  // One of several routes, in one line: a button that shows it on the map
+  // (and its details below the list).
+  choiceButton( route , index ) {
+    const on = index === this.selected;
+    const share = route.seconds > 0 ? ( 100 * route.main_seconds ) / route.seconds : 0;
+    const bar = Dom.el( "div" , {
+      class: "progress plan-share mt-1",
+      attrs: { role: "presentation" },
+      children: [ Dom.el( "div" , { class: "progress-bar plan-share-main" } ) ],
+    } );
+    bar.firstChild.style.width = share.toFixed( 1 ) + "%";
+    return Dom.el( "button" , {
+      class: "list-group-item list-group-item-action text-start py-2" + ( on ? " bg-primary-subtle border-primary" : "" ),
+      attrs: { type: "button" , "aria-pressed": on ? "true" : "false" , "data-key": "route-" + index },
+      children: [
+        Dom.el( "div" , { class: "d-flex align-items-center gap-2" , children: [
+          Dom.el( "span" , { class: "fw-semibold small me-auto" , text: this.sourceLabel( route.source , route.source_name ) } ),
+          index === 0 ? Dom.el( "span" , { class: "badge text-bg-success" , text: I18n.get( "plan.best_badge" ) } ) : null,
+        ].filter( Boolean ) } ),
+        Dom.el( "div" , { class: "small text-body-secondary" , text: [
+          Format.duration( route.seconds ),
+          Format.distance( route.meters ),
+          Format.fill( "plan.choice_main" , { share: Format.share( route.main_seconds , route.seconds ) } ),
+        ].join( " · " ) } ),
+        bar,
+      ],
+      on: { click: () => this.select( index ) },
+    } );
+  },
+
+  // How the chosen route compares with the fastest: longer or shorter, and
+  // more or less on main roads (another engine's route can be either).
+  tradeText( extra , saved ) {
+    if ( Math.abs( extra ) < 30 && Math.abs( saved ) < 30 ) return I18n.get( "plan.trade_same" );
+    const length = Math.abs( extra ) < 30 ? I18n.get( "plan.trade_as_long" )
+      : Format.fill( extra > 0 ? "plan.trade_longer" : "plan.trade_shorter" , { time: Format.duration( Math.abs( extra ) ) } );
+    const main = Math.abs( saved ) < 30 ? I18n.get( "plan.trade_main_same" )
+      : Format.fill( saved > 0 ? "plan.trade_main_less" : "plan.trade_main_more" , { time: Format.duration( Math.abs( saved ) ) } );
+    return Format.fill( "plan.trade" , { length: length , main: main } );
+  },
+
   renderResult( result ) {
-    const blocks = result.routes.map( ( route ) => this.routeBlock( route ) );
-    if ( result.routes.length === 2 ) {
-      const chosen = result.routes[ 0 ];
-      const fastest = result.routes[ 1 ];
+    const problems = ( result.problems || [] ).map( ( problem ) => Dom.el( "div" , {
+      text: Format.fill( "plan.problem" , { source: this.sourceLabel( problem.source , problem.source_name ) , message: problem.message } ),
+    } ) );
+    Dom.swap( Dom.get( "plan-problems" ) , ...problems );
+    Dom.show( Dom.get( "plan-problems" ) , problems.length > 0 );
+
+    const choices = this.choices();
+    const chosen = this.chosen();
+    const fastest = this.comparison();
+    const blocks = [];
+    if ( choices.length > 1 ) {
+      blocks.push( Dom.el( "p" , { class: "small text-body-secondary mb-2" , text: Format.fill( "plan.routes_count" , { n: choices.length } ) } ) );
+      blocks.push( Dom.el( "div" , { class: "list-group mb-3" , children: choices.map( ( route , index ) => this.choiceButton( route , index ) ) } ) );
+    }
+    if ( chosen ) blocks.push( this.routeBlock( chosen , choices.length > 1 && this.selected === 0 ) );
+    if ( chosen && fastest ) {
       const extra = chosen.seconds - fastest.seconds;
       const saved = fastest.main_seconds - chosen.main_seconds;
-      const text = Math.abs( extra ) < 30 && Math.abs( saved ) < 30
-        ? I18n.get( "plan.trade_same" )
-        : Format.fill( "plan.trade" , { extra: Format.duration( Math.max( 0 , extra ) ) , saved: Format.duration( Math.max( 0 , saved ) ) } );
-      blocks.splice( 1 , 0 , Dom.el( "p" , { class: "small alert alert-light border py-2" , text: text } ) );
-      blocks[ 2 ].classList.add( "opacity-75" );
+      const text = this.tradeText( extra , saved );
+      blocks.push( Dom.el( "p" , { class: "small alert alert-light border py-2" , text: text } ) );
+      const compareBlock = this.routeBlock( fastest , false );
+      compareBlock.classList.add( "opacity-75" );
+      blocks.push( compareBlock );
     }
     Dom.swap( Dom.get( "plan-summary" ) , ...blocks );
 
-    const via = result.routes[ 0 ].via.map( ( road ) => Dom.el( "li" , {
+    const via = ( chosen ? chosen.via : [] ).map( ( road ) => Dom.el( "li" , {
       class: "list-group-item d-flex justify-content-between align-items-start gap-2 px-0",
       children: [
         Dom.el( "span" , { class: "me-auto" , text: road.name || I18n.get( "plan.unnamed" ) } ),
@@ -422,8 +612,8 @@ const Planner = {
   },
 
   async saveRoute() {
-    if ( !this.result ) return;
-    const route = this.result.routes[ 0 ];
+    const route = this.chosen();
+    if ( !route ) return;
     const stops = this.stops.filter( Boolean );
     let made = null;
     const answer = await Dom.form( {
@@ -438,6 +628,8 @@ const Planner = {
             penalty: this.options.penalty,
             secondary_is_main: this.options.secondary_is_main,
             allow_unpaved: this.options.allow_unpaved,
+            sources: this.usableSources(),
+            combine: this.options.combine || "best",
           },
           summary: { seconds: route.seconds , meters: route.meters , main_seconds: route.main_seconds , main_meters: route.main_meters },
         } );
@@ -455,8 +647,9 @@ const Planner = {
   },
 
   exportGpx() {
-    if ( !this.result ) return;
+    const route = this.chosen();
+    if ( !route ) return;
     const stops = this.stops.filter( Boolean );
-    Gpx.download( this.defaultName() || I18n.get( "plan.gpx_name" ) , stops , this.result.routes[ 0 ] );
+    Gpx.download( this.defaultName() || I18n.get( "plan.gpx_name" ) , stops , route );
   },
 };

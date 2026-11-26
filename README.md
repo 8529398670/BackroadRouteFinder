@@ -26,6 +26,15 @@ Both files live in `~/.config/backroad-route-finder/mapdata/`, outside `storage/
 
 Settings are in `config/config.yaml` under `routing:` (region, default penalty, whether secondary roads count as main, place search), editable from the Settings screen.
 
+## Other routing engines
+
+Beside its own router, the planner can ask other engines (the **Sources** card): Valhalla and OSRM (free public servers, no key), and OpenRouteService, GraphHopper, TomTom, HERE, Mapbox and Google (API keys). Each is asked for its own "avoid main roads" route and its alternatives; every route is then laid on our map and scored the same way (time, plus main-road minutes × the penalty), so **Use the best route** picks the winner whoever planned it, and **Show every route** lists them all, best first.
+
+- **API keys:** Settings → *Routing engines and API keys*. They are stored encrypted in the database (never in config.yaml, which holds no secret), re-sealed on key rotation, and never shown again; each row has a **Test** button.
+- **Addresses** (free and self-hosted engines) and the timeout: `providers:` in `config/config.yaml`.
+- Answers are cached for 15 minutes, so moving the slider does not spend a free tier's quota.
+- Code: `app/routing/providers/` (one module per engine), `app/routing/match.py` (lays a route on our map), `app/routing/sources.py` (asks them all and combines).
+
 ## How it works
 
 - `app/routing/`: the router. `osm_parse.py` and `build.py` turn the extract into arrays (`mapdata/ohio.npz`). `graph.py` loads them. `costs.py` weights each road for a request. `turns.py` prices every turn. `search.py` runs scipy's Dijkstra over the turns. `summarize.py` works out the main-road share and the roads used.

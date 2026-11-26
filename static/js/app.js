@@ -179,13 +179,16 @@ const App = {
     Dom.get( "my-link-copy-button" ).addEventListener( "click" , () => Dom.copy( Dom.get( "my-link-value" ) ) );
     Qr.toggle( Dom.get( "my-link-qr-button" ) , Dom.get( "my-link-qr" ) , Dom.get( "my-link-value" ) );
 
-    // Each screen owns its own file and its own init().
+    // Each screen owns its own file and its own init(). This is the one line
+    // that knows the API keys card and screen exist.
     Track.init( me );
     TwoFactor.init( me );
     Fresh.init( me );
     Live.init( me );
     // Side by side: the wait is the slowest screen, not all of them added up.
     const loading = [];
+    loading.push( Keys.init( me ) );
+    loading.push( Portal.init( me ) );
     loading.push( Sessions.init() );
     About.init( me );
     loading.push( Planner.init( me ) );
@@ -212,6 +215,7 @@ const App = {
       loading.push( Logs.init( me ) );
       loading.push( Jobs.init( me ) );
       loading.push( Settings.init( me ) );
+      loading.push( ProviderKeys.init( me ) );
       const version = I18n.get( "nav.version" );
       if ( version !== "" ) {
         Dom.text( Dom.get( "sidebar-version" ) , version.replace( "{version}" , me.version ) );
@@ -365,6 +369,7 @@ const App = {
   // whose each key is, and a link stops when its maker stops being an admin.
   async refreshAfterUserChange() {
     await App.refreshUsers();
+    if ( App.currentUser.api_keys_enabled ) await Keys.refreshAll();
   },
 
   async refreshUsers() {
@@ -426,6 +431,7 @@ const App = {
           if ( !( await Dom.confirm( question ) ) ) return;
           try {
             await Api.revokeAccess( user.id );
+            if ( App.currentUser.api_keys_enabled ) await Keys.refreshAll();
             Dom.toast( I18n.get( "admin.revoked_toast" ).replace( "{name}" , () => user.display_name ) , "ok" );
           } catch ( error ) { App.showError( error.message ); }
         } },
@@ -514,6 +520,7 @@ const App = {
           try {
             await Api.deleteUser( user.id );
             await App.refreshUsers();
+            if ( App.currentUser.api_keys_enabled ) await Keys.refreshAll();
           } catch ( error ) { App.showError( error.message ); }
         } },
       } );
@@ -551,6 +558,7 @@ const App = {
       // display name is user-controlled input.
       const status = [ Dom.badge( I18n.get( statusKey ) , statusTone ) ];
       if ( user.two_factor ) status.push( Dom.el( "span" , { class: "ms-1" , children: [ Dom.badge( I18n.get( "admin.two_factor_badge" ) , "secondary" ) ] } ) );
+      if ( user.kind === "service" ) status.push( Dom.el( "span" , { class: "ms-1" , children: [ Dom.badge( I18n.get( "admin.service_badge" ) , "info" ) ] } ) );
       if ( user.expires_at && !user.expired ) status.push( Dom.el( "div" , { class: "small text-body-secondary" , children: [ document.createTextNode( I18n.get( "admin.expires_line" ).split( "{when}" )[ 0 ] ) , Dom.when( user.expires_at ) ] } ) );
       if ( user.login_link ) status.push( Dom.el( "div" , { class: "small text-body-secondary" , text: LoginLinks.live( user.login_link , "live" ) } ) );
 

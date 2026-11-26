@@ -40,6 +40,7 @@ nav:
   about: "About"
   admin_heading: "Admin"
   users: "Users"
+  all_keys: "All API keys"
   logs: "Logs"
   jobs: "Jobs"
   settings: "Settings"
@@ -87,11 +88,32 @@ plan:
   allow_unpaved: "Gravel and dirt roads are fine"
   compare_fastest: "Show the fastest route to compare"
   save_prefs: "Make these my defaults"
+  # The Sources card: who plans the route.
+  sources_heading: "Sources"
+  sources_help: "Who plans the route. Every route is measured on our map the same way, so routes from different sources can be compared."
+  source_ours: "Our map"
+  source_unusable_owner: "Add a key in Settings"
+  source_unusable: "Not set up"
+  combine_label: "With more than one source"
+  combine_best: "Use the best route"
+  combine_all: "Show every route"
+  sources_need_one: "Pick at least one source."
+  # A route from another engine: its time is its own, the main-road share is measured on our map.
+  estimated: "Time from {source}. Main-road share measured on our map."
+  off_map: "{distance} of it is not on our map, so it was not checked."
+  also_found: "Also found by {sources}."
+  best_badge: "Best"
+  problem: "{source}: {message}"
+  routes_count: "{n} routes, best first. Pick one to see it on the map."
+  # One route in the list: {share} is its share of time on main roads.
+  choice_main: "{share} main roads"
   prefs_saved: "Saved. The planner will open like this."
   result_heading: "Route"
   planning: "Planning…"
   kind_backroads: "Backroads route"
   kind_fastest: "Fastest route"
+  # A route's heading with its source: {kind} is one of the two above.
+  kind_from: "{kind} · {source}"
   time: "Time"
   distance: "Distance"
   on_main: "On main roads"
@@ -100,8 +122,15 @@ plan:
   unpaved: "Gravel or dirt: {distance}"
   # {time} is the part of the route's time spent turning and stopping.
   delay: "Includes {time} for turns, traffic signals and stop signs."
-  # Comparing the two: {extra} is the extra time, {saved} the main-road time avoided.
-  trade: "{extra} longer than the fastest route, with {saved} less on main roads."
+  # Comparing the chosen route with the fastest: {length} is one of the
+  # trade_longer/shorter/as_long lines, {main} one of the trade_main lines.
+  trade: "{length}, with {main}."
+  trade_longer: "{time} longer than the fastest route"
+  trade_shorter: "{time} shorter than the fastest route"
+  trade_as_long: "About as long as the fastest route"
+  trade_main_less: "{time} less on main roads"
+  trade_main_more: "{time} more on main roads"
+  trade_main_same: "about the same time on main roads"
   trade_same: "The fastest route is already this one."
   via_heading: "Roads on the way"
   unnamed: "Unnamed road"
@@ -230,7 +259,9 @@ undo:
   ip_name: "address name deleted"
   sidebar: "sidebar"
   rename: "name changed"
+  rename_key: "API key name changed"
   rename_session: "device name changed"
+  deleted_key: "API key deleted"
   settings: "settings change"
   plan_stops: "stops change"
   plan_options: "route options change"
@@ -456,7 +487,7 @@ two_factor:
   download_button: "Download"
   recovery_filename: "recovery-codes.txt"
   heading: "Two-factor sign-in"
-  description: "Ask for a code from an authenticator app every time you sign in in a browser, whichever way you sign in."
+  description: "Ask for a code from an authenticator app every time you sign in in a browser, whichever way you sign in. API keys are not affected."
   status_on: "On"
   status_off: "Off"
   start_button: "Set up"
@@ -504,6 +535,7 @@ admin:
   role_select_label: "Role of {name}"
   role_confirm: "Make {name} {role}? It applies at once. Becoming an admin signs them out everywhere."
   two_factor_badge: "2FA"
+  service_badge: "Service"
   reissue_button: "New link"
   # The New link dialog: its heading, and the line under the choices.
   reissue_heading: "New login link for {name}"
@@ -512,28 +544,99 @@ admin:
   link_for: "Login link for {name}"
   revoke_button: "Revoke access"
   # {name} is replaced with the account's display name.
-  revoke_confirm: "End every session and login link that {name} has? The account stays enabled; send them a new link to let them back in."
+  revoke_confirm: "End every session, login link and API key that {name} has? The account stays enabled; send them a new link to let them back in."
   reset_two_factor_button: "Reset 2FA"
   # {name} is replaced with the account's display name.
   reset_two_factor_confirm: "Turn off two-factor sign-in for {name}? Do this only if you are sure it is them asking."
   make_admin_confirm: "Make {name} an admin? They can then manage accounts. This signs them out everywhere and stops their login link, so send them a new link."
-  make_user_confirm: "Take admin rights from {name}? It applies at once."
+  make_user_confirm: "Take admin rights from {name}? It applies at once. Their admin API keys drop to user level."
   role_changed_toast: "{name} is now: {role}"
   disable_button: "Disable"
   # {name} is replaced with the account's display name. Empty this string to
   # stop asking for confirmation before disabling.
-  disable_confirm: "Disable {name}? They are signed out everywhere and their login link stops working."
+  disable_confirm: "Disable {name}? They are signed out everywhere, their login link stops working, and their API keys stop until the account is enabled again."
   # Shown once it is done. {name} as above. Empty either to switch it off.
   disabled_toast: "{name} disabled"
-  revoked_toast: "{name} is signed out everywhere, and their links have stopped working."
+  revoked_toast: "{name} is signed out everywhere, and their links and keys have stopped working."
   two_factor_reset_toast: "Two-factor sign-in reset for {name}."
   enabled_toast: "{name} enabled. They may need a new link to sign in."
   enable_button: "Enable"
   delete_button: "Delete"
   # Empty this string to stop asking for confirmation before deleting.
-  delete_confirm: "Permanently delete {name}? Their sessions and login links go with the account, and it cannot be undone. Disable the account instead if they might come back."
+  delete_confirm: "Permanently delete {name}? Their sessions, login links and API keys go with the account, and it cannot be undone. Disable the account instead if they might come back."
   # Shown after the role of the one owner account, e.g. "admin (owner)".
   owner_label: "owner"
+
+api_keys:
+  empty: "No API keys yet."
+  all_empty: "No one has an API key yet."
+  search_label: "Search by name"
+  all_search_label: "Search by name or owner"
+  live_only_label: "Hide revoked and expired keys"
+  heading: "API keys"
+  description: "For scripts, cron jobs, and other services. A key does exactly what your account can do -- send it as an Authorization: Bearer header. It is shown once."
+  name_label: "What is it for"
+  name_placeholder: "Bot-1"
+  role_label: "Permission"
+  role_user: "user"
+  role_viewer: "viewer (can only look)"
+  role_admin: "admin (can manage accounts)"
+  # Under the description, with a link to the API reference: api.json in
+  # app.repo, or this server's own copy.
+  spec_text: "What a key can call:"
+  spec_link: "API reference (api.json)"
+  # Beside it: the same reference as tables, config/api.md, on the repository's
+  # site when app.repo is set, else on this server's /docs/api page.
+  doc_link: "readable version (api.md)"
+  days_label: "Expires in (days)"
+  days_placeholder: "leave blank for the default, 0 for never"
+  create_button: "Create key"
+  secret_notice: "Copy this now. It is shown once and cannot be recovered -- if you lose it, revoke the key and create another."
+  copy_button: "Copy"
+  table_name: "Name"
+  table_role: "Permission"
+  table_status: "Status"
+  table_last_used: "Last used"
+  table_expires: "Expires"
+  table_actions: "Actions"
+  status_active: "active"
+  status_revoked: "revoked"
+  status_expired: "expired"
+  never: "never"
+  # Empty expiry_button to take the button away.
+  expiry_button: "Expiry"
+  # {name} is the key's name.
+  expiry_heading: "Change when {name} expires"
+  expiry_help: "Counted from today. 0 means it never expires."
+  expiry_changed: "Expiry changed."
+  # Letting a key make a login link for your account (an agent signing you in
+  # on a browser). Off by default; the button shows the state it is in.
+  # Empty both button strings to take the switch away.
+  sign_in_off_button: "Sign-in links: off"
+  sign_in_on_button: "Sign-in links: on"
+  # Beside the status while it is on.
+  status_sign_in: "can sign in"
+  # Asked before turning it on. Empty it to stop asking.
+  sign_in_confirm: "Let this key make sign-in links for your account? Whoever holds the key could then open a browser signed in as you, with everything you can do there. Each link works once, for 15 minutes. You can turn this off again at any time."
+  sign_in_turned_on: "This key can now make sign-in links."
+  sign_in_turned_off: "This key can no longer make sign-in links. Any unused link it made has stopped working."
+  # The owner's switch for letting one of the owner's admin keys mint keys
+  # for other accounts, as an outside admin tool needs.
+  mint_off_button: "Key minting: off"
+  mint_on_button: "Key minting: on"
+  status_mint: "mints keys"
+  minted_by: "minted by key {key}"
+  mint_confirm: "Let this key mint and revoke API keys for every other account? Whoever holds it can then act as anyone but you, through the keys it makes. Every key it mints is revoked when you revoke this one."
+  mint_turned_on: "This key can now mint keys."
+  mint_turned_off: "This key can no longer mint keys. The keys it already minted keep working until you revoke this one."
+  revoke_button: "Revoke"
+  # Empty this string to stop asking for confirmation before revoking.
+  revoke_confirm: "Revoke this key? Anything using it stops working immediately."
+  delete_button: "Delete"
+  # Under a key an admin made for someone else. {name} is that admin.
+  created_by: "Created by {name}"
+  # Followed by when, as in "Created 3 days ago".
+  created: "Created"
 
 # The readable API and MCP references (static/docs.html, static/js/docs.js):
 # /docs/api and /docs/mcp, linked from the API keys and MCP cards when
@@ -552,6 +655,28 @@ about:
   source: "Source"
   api_reference: "API reference"
   api_link: "api.json"
+portal:
+  heading: "ProjectPortal"
+  description: "Connect ProjectPortal through an account of its own, never yours. Its key may make keys for the accounts it runs, and never signs anyone in. Only you can change that account or cut it off."
+  name_label: "Account name"
+  days_label: "Key lifetime (days)"
+  connect_button: "Connect"
+  paste_hint: "Paste it into ProjectPortal: Catalog → this app → Admin key"
+  status_heading: "Its keys"
+  none: "Not connected."
+  expires: "Expires {date}"
+  never_expires: "Never expires"
+  disconnect_button: "Disconnect"
+  disconnect_confirm: "Disconnect ProjectPortal? Its keys stop working now, and so does every key and login link they made."
+admin_keys:
+  heading: "All API keys"
+  description: "Every key in this app and who owns it. Revoke or delete one to cut off whatever is using it, right away."
+  table_owner: "Owner"
+  create_heading: "Create a key for someone"
+  create_description: "The key acts as that person, at no more than their permission, and they can see that you made it."
+  list_heading: "Every key"
+  user_label: "Account"
+
 # The Logs screen (owner only; static/js/logs.js). Placeholders in {braces}
 # are filled in by the page. Days are UTC dates; times are the viewer's own.
 # kind_* label both the filter buttons and each row's badge.
@@ -619,6 +744,8 @@ logs:
   table_what: "What"
   table_ip: "IP"
   anonymous: "signed out"
+  via_key: "(API key)"
+  via_named_key: "· key {name}"
 
 # The Jobs screen (owner only; static/js/jobs.js). A job you add can have a
 # name here, as job_<name> with dashes as underscores; one without shows its
@@ -649,6 +776,29 @@ jobs:
 # config/defaults.yaml, not something set here.
 settings:
   heading: "Settings"
+  # The routing engines card (static/js/providers.js).
+  engines_heading: "Routing engines and API keys"
+  engines_description: "Other routing engines the planner can ask beside our own map. Keys are stored encrypted in the database, never in config.yaml, and are never shown again after saving. Engines without a key use the address in the Providers section below."
+  engines_engine: "Engine"
+  engines_status: "Status"
+  engines_key: "API key"
+  engines_ready: "Ready"
+  engines_no_key: "Needs a key"
+  engines_off: "Off"
+  engines_free: "No key needed"
+  engines_key_set: "Key set ({hint})"
+  engines_key_placeholder: "Paste the API key"
+  engines_save: "Save key"
+  engines_remove: "Remove key"
+  engines_remove_confirm: "Remove the {engine} key? The planner stops offering {engine} until a new key is added."
+  engines_test: "Test"
+  engines_testing: "Testing…"
+  engines_test_ok: "{engine} answered in {ms} ms: {routes} route(s), {time}, {distance}."
+  engines_test_failed: "{engine}: {message}"
+  engines_get_key: "Get a key"
+  engines_site: "Website"
+  engines_saved: "{engine} key saved."
+  engines_removed: "{engine} key removed."
   description: "This is config.yaml, the file that configures this app. Saving writes only what you changed into the file, keeping its comments. Each setting says when a change takes effect. The file can also be edited by hand: the server notices within a few seconds."
   file: "{file}"
   secret_note: "The secret key is in {path}. It is never shown here; back it up with the database."

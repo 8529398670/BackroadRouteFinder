@@ -45,12 +45,14 @@ from app.routes import (
     account,
     admin,
     api_docs_md,
+    api_keys,
     auth,
     jobs,
     logs,
     meta,
     openapi,
     planner,
+    portal,
     providers,
     saved_routes,
     sessions,
@@ -60,6 +62,7 @@ from app.routes import (
     themes,
     two_factor,
 )
+from app.routes.api_keys import RequireAPIKeys
 from app.routes.helpers import get_config
 from app.routes.helpers import not_found
 
@@ -90,12 +93,14 @@ MODULES = [
     account,
     admin,
     api_docs_md,
+    api_keys,
     auth,
     jobs,
     logs,
     meta,
     openapi,
     planner,
+    portal,
     providers,
     saved_routes,
     sessions,
@@ -112,6 +117,7 @@ MODULES = [
 # other guard. Go's featureGuards (server/routes/routes.go) is the same map.
 FEATURE_GUARDS: dict[str, type[Guard]] = {
     "two_factor": RequireTwoFactor,
+    "api_keys": RequireAPIKeys,
     "logs": RequireLogs,
 }
 

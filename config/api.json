@@ -73,6 +73,89 @@
       }
     },
     "schemas": {
+      "APIKey": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "created_by": {
+            "description": "The admin who made this key for its owner. Absent if the owner made it.",
+            "type": "integer"
+          },
+          "created_by_name": {
+            "type": "string"
+          },
+          "display_name": {
+            "description": "The key's owner. On the admin list only.",
+            "type": "string"
+          },
+          "expired": {
+            "type": "boolean"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "last_used_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "live": {
+            "type": "boolean"
+          },
+          "may_mint_keys": {
+            "description": "Whether this key may make keys for other accounts. Only the owner switches it on.",
+            "type": "boolean"
+          },
+          "may_sign_in": {
+            "description": "Whether this key may make a login link for its own account.",
+            "type": "boolean"
+          },
+          "minted_by_key": {
+            "description": "The key that made this one, or empty. Revoking that key revokes this one.",
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "revoked": {
+            "type": "boolean"
+          },
+          "revoked_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "role": {
+            "enum": [
+              "admin",
+              "user",
+              "viewer"
+            ],
+            "type": "string"
+          },
+          "user_id": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "created_at",
+          "expired",
+          "id",
+          "live",
+          "may_mint_keys",
+          "may_sign_in",
+          "minted_by_key",
+          "name",
+          "revoked",
+          "role",
+          "user_id"
+        ],
+        "type": "object"
+      },
       "BulkReply": {
         "properties": {
           "done": {
@@ -127,6 +210,63 @@
         "required": [
           "index",
           "ok"
+        ],
+        "type": "object"
+      },
+      "EngineInfo": {
+        "properties": {
+          "backroads": {
+            "type": "string"
+          },
+          "free_tier": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "key_hint": {
+            "description": "The key's last four characters, while one is set.",
+            "type": "string"
+          },
+          "key_set": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "needs_key": {
+            "type": "boolean"
+          },
+          "signup_url": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          },
+          "url_setting": {
+            "description": "The providers.* setting holding its address, or empty when it is fixed.",
+            "type": "string"
+          },
+          "usable": {
+            "type": "boolean"
+          },
+          "why_not": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "backroads",
+          "free_tier",
+          "id",
+          "key_hint",
+          "key_set",
+          "name",
+          "needs_key",
+          "signup_url",
+          "url",
+          "url_setting",
+          "usable",
+          "why_not"
         ],
         "type": "object"
       },
@@ -384,6 +524,20 @@
             "type": "string",
             "x-feature": "openapi"
           },
+          "api_key_id": {
+            "description": "API keys only.",
+            "type": "string",
+            "x-feature": "api_keys"
+          },
+          "api_key_name": {
+            "description": "API keys only.",
+            "type": "string",
+            "x-feature": "api_keys"
+          },
+          "api_keys_enabled": {
+            "type": "boolean",
+            "x-feature": "api_keys"
+          },
           "auth": {
             "type": "string"
           },
@@ -417,6 +571,11 @@
           },
           "is_owner": {
             "type": "boolean"
+          },
+          "key": {
+            "$ref": "#/components/schemas/MeKey",
+            "description": "API keys only: what this key may do.",
+            "x-feature": "api_keys"
           },
           "kind": {
             "description": "person, or service for an account that only has API keys and is never signed into (ProjectPortal's own).",
@@ -453,6 +612,11 @@
             ],
             "type": "string",
             "x-feature": "maintenance"
+          },
+          "may_mint_keys": {
+            "description": "API keys only: whether this key may make keys for other accounts.",
+            "type": "boolean",
+            "x-feature": "api_keys"
           },
           "openapi_url": {
             "description": "Where to read this API's reference: config/api.json in app.repo, or /api/api.json when there is no repo.",
@@ -544,6 +708,7 @@
           "account_role",
           "announcement",
           "api_doc_url",
+          "api_keys_enabled",
           "auth",
           "authenticated",
           "capabilities",
@@ -573,6 +738,46 @@
         ],
         "type": "object"
       },
+      "MeKey": {
+        "properties": {
+          "expires_at": {
+            "description": "When the key stops working. Absent when it never does.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "may_mint_keys": {
+            "description": "Whether this key may make keys for other accounts.",
+            "type": "boolean"
+          },
+          "may_sign_in": {
+            "description": "Whether this key may make a login link for its own account.",
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "role": {
+            "description": "The key's own role. The role it acts with is the lower of this and the account's.",
+            "enum": [
+              "admin",
+              "user",
+              "viewer"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "may_mint_keys",
+          "may_sign_in",
+          "name",
+          "role"
+        ],
+        "type": "object"
+      },
       "Member": {
         "properties": {
           "display_name": {
@@ -585,6 +790,94 @@
         "required": [
           "display_name",
           "id"
+        ],
+        "type": "object"
+      },
+      "NewAPIKey": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "created_by": {
+            "description": "The admin who made this key for its owner. Absent if the owner made it.",
+            "type": "integer"
+          },
+          "created_by_name": {
+            "type": "string"
+          },
+          "credential": {
+            "description": "Shown in this response only, and never recoverable.",
+            "type": "string"
+          },
+          "display_name": {
+            "description": "The key's owner. On the admin list only.",
+            "type": "string"
+          },
+          "expired": {
+            "type": "boolean"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "last_used_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "live": {
+            "type": "boolean"
+          },
+          "may_mint_keys": {
+            "description": "Whether this key may make keys for other accounts. Only the owner switches it on.",
+            "type": "boolean"
+          },
+          "may_sign_in": {
+            "description": "Whether this key may make a login link for its own account.",
+            "type": "boolean"
+          },
+          "minted_by_key": {
+            "description": "The key that made this one, or empty. Revoking that key revokes this one.",
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "revoked": {
+            "type": "boolean"
+          },
+          "revoked_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "role": {
+            "enum": [
+              "admin",
+              "user",
+              "viewer"
+            ],
+            "type": "string"
+          },
+          "user_id": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "created_at",
+          "credential",
+          "expired",
+          "id",
+          "live",
+          "may_mint_keys",
+          "may_sign_in",
+          "minted_by_key",
+          "name",
+          "revoked",
+          "role",
+          "user_id"
         ],
         "type": "object"
       },
@@ -609,9 +902,24 @@
       },
       "PlannedRoute": {
         "properties": {
+          "also": {
+            "description": "Other sources that found the same roads.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "compare": {
+            "description": "The plain fastest route on our map, shown for comparison (always last).",
+            "type": "boolean"
+          },
           "delay_seconds": {
             "description": "Of seconds: turning, and waiting at traffic signals and stop signs.",
             "type": "number"
+          },
+          "estimated": {
+            "description": "Planned by another engine: the time is its own, the main-road share is measured on our map.",
+            "type": "boolean"
           },
           "kind": {
             "description": "backroads, or fastest for the plain fastest route.",
@@ -626,14 +934,29 @@
           "meters": {
             "type": "number"
           },
+          "off_map_meters": {
+            "description": "Of meters: not on our map (outside it, or roads it leaves out), counted as backroad.",
+            "type": "number"
+          },
           "runs": {
             "items": {
               "$ref": "#/components/schemas/Run"
             },
             "type": "array"
           },
+          "score": {
+            "description": "seconds plus (penalty - 1) times main_seconds: lower is better.",
+            "type": "number"
+          },
           "seconds": {
             "type": "number"
+          },
+          "source": {
+            "description": "Who planned it: ours, or another engine's id.",
+            "type": "string"
+          },
+          "source_name": {
+            "type": "string"
           },
           "unpaved_meters": {
             "type": "number"
@@ -646,13 +969,20 @@
           }
         },
         "required": [
+          "also",
+          "compare",
           "delay_seconds",
+          "estimated",
           "kind",
           "main_meters",
           "main_seconds",
           "meters",
+          "off_map_meters",
           "runs",
+          "score",
           "seconds",
+          "source",
+          "source_name",
           "unpaved_meters",
           "via"
         ],
@@ -668,6 +998,12 @@
             "description": "Backroads mode on; off plans the plain fastest route.",
             "type": "boolean"
           },
+          "combine": {
+            "default": "best",
+            "description": "best keeps only the best-scoring route; all returns every route, best first.",
+            "pattern": "^(best|all)$",
+            "type": "string"
+          },
           "compare_fastest": {
             "default": true,
             "type": "boolean"
@@ -681,6 +1017,14 @@
           },
           "secondary_is_main": {
             "type": "boolean"
+          },
+          "sources": {
+            "items": {
+              "description": "ours, or another engine: valhalla, osrm, ors, graphhopper, tomtom, here, mapbox, google.",
+              "pattern": "^(ours|valhalla|osrm|ors|graphhopper|tomtom|here|mapbox|google)$",
+              "type": "string"
+            },
+            "type": "array"
           }
         },
         "type": "object"
@@ -701,6 +1045,29 @@
         "required": [
           "lat",
           "lon"
+        ],
+        "type": "object"
+      },
+      "PortalAccount": {
+        "properties": {
+          "display_name": {
+            "type": "string"
+          },
+          "id": {
+            "type": "integer"
+          },
+          "keys": {
+            "description": "Its live keys, newest first.",
+            "items": {
+              "$ref": "#/components/schemas/APIKey"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "display_name",
+          "id",
+          "keys"
         ],
         "type": "object"
       },
@@ -729,6 +1096,10 @@
       },
       "Revoked": {
         "properties": {
+          "api_keys": {
+            "type": "integer",
+            "x-feature": "api_keys"
+          },
           "login_links": {
             "type": "integer"
           },
@@ -737,8 +1108,21 @@
           }
         },
         "required": [
+          "api_keys",
           "login_links",
           "sessions"
+        ],
+        "type": "object"
+      },
+      "RotatedKey": {
+        "properties": {
+          "credential": {
+            "description": "The key's new credential, shown in this response only. The old one stopped working.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "credential"
         ],
         "type": "object"
       },
@@ -751,6 +1135,12 @@
             "default": true,
             "type": "boolean"
           },
+          "combine": {
+            "default": "best",
+            "description": "best keeps only the best-scoring route; all returns every route, best first.",
+            "pattern": "^(best|all)$",
+            "type": "string"
+          },
           "penalty": {
             "default": 8.0,
             "description": "How many times over a minute on a main road counts. 1 is the plain fastest route.",
@@ -760,6 +1150,14 @@
           },
           "secondary_is_main": {
             "type": "boolean"
+          },
+          "sources": {
+            "items": {
+              "description": "ours, or another engine: valhalla, osrm, ors, graphhopper, tomtom, here, mapbox, google.",
+              "pattern": "^(ours|valhalla|osrm|ors|graphhopper|tomtom|here|mapbox|google)$",
+              "type": "string"
+            },
+            "type": "array"
           }
         },
         "type": "object"
@@ -1131,6 +1529,60 @@
             "type": "object"
           }
         ]
+      },
+      "SourceInfo": {
+        "description": "A source the planner can ask, and whether it can be asked now.",
+        "properties": {
+          "backroads": {
+            "description": "How it stays off main roads.",
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "needs_key": {
+            "type": "boolean"
+          },
+          "usable": {
+            "type": "boolean"
+          },
+          "why_not": {
+            "description": "Why it cannot be asked, while usable is false.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "backroads",
+          "id",
+          "name",
+          "needs_key",
+          "usable",
+          "why_not"
+        ],
+        "type": "object"
+      },
+      "SourceProblem": {
+        "description": "A source that gave no route this time, and why.",
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "source_name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "message",
+          "source",
+          "source_name"
+        ],
+        "type": "object"
       },
       "Theme": {
         "description": "A color scheme on the Appearance screen. Colors are #rrggbb. Anything not given is worked out by static/js/theme.js at readable contrast.",
@@ -2615,6 +3067,670 @@
       },
       "x-feature": "two_factor"
     },
+    "/api/admin/keys": {
+      "get": {
+        "operationId": "get_api_admin_keys",
+        "parameters": [
+          {
+            "description": "Rows to return. Default 200.",
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 200,
+              "maximum": 1000,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows to skip: the next value of the previous page.",
+            "in": "query",
+            "name": "offset",
+            "schema": {
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Keep keys whose name or owner contains this, in any case.",
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Leave out revoked and expired keys.",
+            "in": "query",
+            "name": "live",
+            "schema": {
+              "enum": [
+                "true"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Field to sort the whole list by. Rows without it go last.",
+            "in": "query",
+            "name": "sort",
+            "schema": {
+              "enum": [
+                "display_name",
+                "name",
+                "role",
+                "last_used_at",
+                "expires_at",
+                "created_at"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Default asc.",
+            "in": "query",
+            "name": "dir",
+            "schema": {
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "keys": {
+                      "items": {
+                        "$ref": "#/components/schemas/APIKey"
+                      },
+                      "type": "array"
+                    },
+                    "next": {
+                      "description": "Offset of the next page, or null on the last one.",
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "total": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "keys",
+                    "next",
+                    "total"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "$ref": "#/components/responses/E503"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "Every key in the app",
+        "tags": [
+          "API keys"
+        ],
+        "x-required-role": "admin"
+      },
+      "post": {
+        "description": "Any admin may do this for an ordinary user, and only the owner for another admin. Nobody may do it for the owner. The key records who made it and shows that to the person it acts as.",
+        "operationId": "post_api_admin_keys",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "csrf_token": {
+                    "description": "From GET /api/me. Browser sessions only.",
+                    "type": "string"
+                  },
+                  "expires_in_days": {
+                    "description": "Absent or null: the configured default. 0: never expires.",
+                    "maximum": 3650,
+                    "minimum": 0,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "name": {
+                    "maxLength": 80,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "role": {
+                    "default": "user",
+                    "enum": [
+                      "admin",
+                      "user",
+                      "viewer"
+                    ],
+                    "type": "string"
+                  },
+                  "user_id": {
+                    "minimum": 1,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "name",
+                  "user_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NewAPIKey"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "$ref": "#/components/responses/E503"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "Create a key that acts as someone else",
+        "tags": [
+          "API keys"
+        ],
+        "x-required-role": "admin"
+      },
+      "x-feature": "api_keys"
+    },
+    "/api/admin/keys/{key_id}/delete": {
+      "post": {
+        "operationId": "post_api_admin_keys_key_id_delete",
+        "parameters": [
+          {
+            "description": "The key's id, from GET /api/keys (GET /api/admin/keys for anyone's).",
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "csrf_token": {
+                    "description": "From GET /api/me. Browser sessions only.",
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "$ref": "#/components/responses/E503"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "Delete anyone's key",
+        "tags": [
+          "API keys"
+        ],
+        "x-required-role": "admin"
+      },
+      "x-feature": "api_keys"
+    },
+    "/api/admin/keys/{key_id}/expiry": {
+      "post": {
+        "operationId": "post_api_admin_keys_key_id_expiry",
+        "parameters": [
+          {
+            "description": "The key's id, from GET /api/keys (GET /api/admin/keys for anyone's).",
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "csrf_token": {
+                    "description": "From GET /api/me. Browser sessions only.",
+                    "type": "string"
+                  },
+                  "expires_in_days": {
+                    "description": "Counted from now. 0 means it never expires.",
+                    "maximum": 3650,
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "expires_in_days"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIKey"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "$ref": "#/components/responses/E503"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "Change when anyone's key expires",
+        "tags": [
+          "API keys"
+        ],
+        "x-required-role": "admin"
+      },
+      "x-feature": "api_keys"
+    },
+    "/api/admin/keys/{key_id}/rename": {
+      "post": {
+        "operationId": "post_api_admin_keys_key_id_rename",
+        "parameters": [
+          {
+            "description": "The key's id, from GET /api/keys (GET /api/admin/keys for anyone's).",
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "csrf_token": {
+                    "description": "From GET /api/me. Browser sessions only.",
+                    "type": "string"
+                  },
+                  "expect": {
+                    "description": "The name you think it has. Answers 409 if it has another.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "name": {
+                    "description": "1-80 characters.",
+                    "maxLength": 80,
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "ok": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "ok"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "409": {
+            "$ref": "#/components/responses/E409"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "$ref": "#/components/responses/E503"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "Rename anyone's key",
+        "tags": [
+          "API keys"
+        ],
+        "x-required-role": "admin"
+      },
+      "x-feature": "api_keys"
+    },
+    "/api/admin/keys/{key_id}/restore": {
+      "post": {
+        "operationId": "post_api_admin_keys_key_id_restore",
+        "parameters": [
+          {
+            "description": "The key's id, from GET /api/keys (GET /api/admin/keys for anyone's).",
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "csrf_token": {
+                    "description": "From GET /api/me. Browser sessions only.",
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIKey"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "409": {
+            "$ref": "#/components/responses/E409"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "$ref": "#/components/responses/E503"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "Undo deleting anyone's key",
+        "tags": [
+          "API keys"
+        ],
+        "x-required-role": "admin"
+      },
+      "x-feature": "api_keys"
+    },
+    "/api/admin/keys/{key_id}/revoke": {
+      "post": {
+        "description": "Stops the key at once, and every key it made, down the chain. Needs a browser session or a key with may_mint_keys (any other key gets 403 key_minting_off), which may not revoke the owner's keys.",
+        "operationId": "post_api_admin_keys_key_id_revoke",
+        "parameters": [
+          {
+            "description": "The key's id, from GET /api/keys (GET /api/admin/keys for anyone's).",
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "csrf_token": {
+                    "description": "From GET /api/me. Browser sessions only.",
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "$ref": "#/components/responses/E503"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "Revoke anyone's key",
+        "tags": [
+          "API keys"
+        ],
+        "x-mcp-http": "Manages API keys, which no MCP tool does.",
+        "x-required-role": "admin"
+      },
+      "x-feature": "api_keys"
+    },
     "/api/admin/theme-defaults": {
       "get": {
         "description": "The theme list everyone without their own list sees. themes is null while the built-in ones apply.",
@@ -3447,6 +4563,182 @@
         ],
         "x-required-role": "admin"
       }
+    },
+    "/api/admin/users/{user_id}/keys": {
+      "get": {
+        "description": "One account's keys, revoked and expired ones included, newest first. Each row says which key minted it (minted_by_key, empty when a person made it). Needs a browser session or a key with may_mint_keys; any other key gets 403 key_minting_off. Follows the owner ladder: nobody lists the owner's keys this way, and only the owner lists another admin's.",
+        "operationId": "get_api_admin_users_user_id_keys",
+        "parameters": [
+          {
+            "description": "The account's id, from GET /api/admin/users (admin_list_users over MCP).",
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "keys": {
+                      "items": {
+                        "$ref": "#/components/schemas/APIKey"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "keys"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "$ref": "#/components/responses/E503"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "An account's keys",
+        "tags": [
+          "API keys"
+        ],
+        "x-mcp-http": "Manages API keys, which no MCP tool does.",
+        "x-required-role": "admin"
+      },
+      "post": {
+        "description": "Needs a browser session or a key the owner allowed to make keys (may_mint_keys); any other key gets 403 key_minting_off. The role is capped at the account's own; expires_in_days is required (1-365). Never for the owner. The new key records the key that made it, can never make keys or sign-in links itself, and is revoked when that key is revoked or deleted. Answers with the key and its credential, shown only now.",
+        "operationId": "post_api_admin_users_user_id_keys",
+        "parameters": [
+          {
+            "description": "The account's id, from GET /api/admin/users (admin_list_users over MCP).",
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "csrf_token": {
+                    "description": "From GET /api/me. Browser sessions only.",
+                    "type": "string"
+                  },
+                  "expires_in_days": {
+                    "description": "Required: 1-365. A minted key always expires.",
+                    "maximum": 365,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "name": {
+                    "maxLength": 80,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "role": {
+                    "description": "Capped at the account's own role.",
+                    "enum": [
+                      "admin",
+                      "user",
+                      "viewer"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "expires_in_days",
+                  "name",
+                  "role"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NewAPIKey"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "$ref": "#/components/responses/E503"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "Make a key for an account",
+        "tags": [
+          "API keys"
+        ],
+        "x-mcp-http": "Makes an API key, which no MCP tool does.",
+        "x-required-role": "admin"
+      },
+      "x-feature": "api_keys"
     },
     "/api/admin/users/{user_id}/reissue-login": {
       "post": {
@@ -5130,6 +6422,948 @@
         ]
       }
     },
+    "/api/keys": {
+      "get": {
+        "operationId": "get_api_keys",
+        "parameters": [
+          {
+            "description": "Rows to return. Default 200.",
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 200,
+              "maximum": 1000,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows to skip: the next value of the previous page.",
+            "in": "query",
+            "name": "offset",
+            "schema": {
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Keep keys whose name contains this, in any case.",
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Leave out revoked and expired keys.",
+            "in": "query",
+            "name": "live",
+            "schema": {
+              "enum": [
+                "true"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Field to sort the whole list by. Rows without it go last.",
+            "in": "query",
+            "name": "sort",
+            "schema": {
+              "enum": [
+                "name",
+                "role",
+                "last_used_at",
+                "expires_at",
+                "created_at"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Default asc.",
+            "in": "query",
+            "name": "dir",
+            "schema": {
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "keys": {
+                      "items": {
+                        "$ref": "#/components/schemas/APIKey"
+                      },
+                      "type": "array"
+                    },
+                    "next": {
+                      "description": "Offset of the next page, or null on the last one.",
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "total": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "keys",
+                    "next",
+                    "total"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "$ref": "#/components/responses/E503"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "Your API keys",
+        "tags": [
+          "API keys"
+        ]
+      },
+      "post": {
+        "operationId": "post_api_keys",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "csrf_token": {
+                    "description": "From GET /api/me. Browser sessions only.",
+                    "type": "string"
+                  },
+                  "expires_in_days": {
+                    "description": "Absent or null: the configured default. 0: never expires.",
+                    "maximum": 3650,
+                    "minimum": 0,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "name": {
+                    "maxLength": 80,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "role": {
+                    "default": "user",
+                    "enum": [
+                      "admin",
+                      "user",
+                      "viewer"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NewAPIKey"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "$ref": "#/components/responses/E503"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "Create an API key",
+        "tags": [
+          "API keys"
+        ]
+      },
+      "x-feature": "api_keys"
+    },
+    "/api/keys/self/rotate": {
+      "post": {
+        "description": "Gives the calling key a new secret and answers its new credential, shown only now. The old secret stops working at once. The key's id, name, role, grants, lineage and expiry stay as they are, so the keys and links it made keep working; rotating never extends the expiry. A viewer key may call it.",
+        "operationId": "post_api_keys_self_rotate",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "csrf_token": {
+                    "description": "From GET /api/me. Browser sessions only.",
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RotatedKey"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "$ref": "#/components/responses/E503"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "Rotate the calling key",
+        "tags": [
+          "API keys"
+        ],
+        "x-mcp-http": "Makes an API key's credential, which no MCP tool does."
+      },
+      "x-feature": "api_keys"
+    },
+    "/api/keys/{key_id}/delete": {
+      "post": {
+        "operationId": "post_api_keys_key_id_delete",
+        "parameters": [
+          {
+            "description": "The key's id, from GET /api/keys (GET /api/admin/keys for anyone's).",
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "csrf_token": {
+                    "description": "From GET /api/me. Browser sessions only.",
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "$ref": "#/components/responses/E503"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "Delete one of your keys",
+        "tags": [
+          "API keys"
+        ]
+      },
+      "x-feature": "api_keys"
+    },
+    "/api/keys/{key_id}/expiry": {
+      "post": {
+        "operationId": "post_api_keys_key_id_expiry",
+        "parameters": [
+          {
+            "description": "The key's id, from GET /api/keys (GET /api/admin/keys for anyone's).",
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "csrf_token": {
+                    "description": "From GET /api/me. Browser sessions only.",
+                    "type": "string"
+                  },
+                  "expires_in_days": {
+                    "description": "Counted from now. 0 means it never expires.",
+                    "maximum": 3650,
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "expires_in_days"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIKey"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "$ref": "#/components/responses/E503"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "Change when one of your keys expires",
+        "tags": [
+          "API keys"
+        ]
+      },
+      "x-feature": "api_keys"
+    },
+    "/api/keys/{key_id}/mint-keys": {
+      "post": {
+        "description": "Owner only, on one of your own admin-role keys. When on, the key may make keys for other accounts (never the owner's) through POST /api/admin/users/{user_id}/keys, list them, and revoke them. Each key it makes records it, and revoking or deleting this key revokes them all.",
+        "operationId": "post_api_keys_key_id_mint_keys",
+        "parameters": [
+          {
+            "description": "The key's id, from GET /api/keys (GET /api/admin/keys for anyone's).",
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "csrf_token": {
+                    "description": "From GET /api/me. Browser sessions only.",
+                    "type": "string"
+                  },
+                  "may_mint_keys": {
+                    "description": "true lets this key make, list and revoke other accounts' keys, each recording this key and revoked with it.",
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "may_mint_keys"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIKey"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "$ref": "#/components/responses/E503"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "Let one of your keys make keys",
+        "tags": [
+          "API keys"
+        ]
+      },
+      "x-feature": "api_keys"
+    },
+    "/api/keys/{key_id}/rename": {
+      "post": {
+        "operationId": "post_api_keys_key_id_rename",
+        "parameters": [
+          {
+            "description": "The key's id, from GET /api/keys (GET /api/admin/keys for anyone's).",
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "csrf_token": {
+                    "description": "From GET /api/me. Browser sessions only.",
+                    "type": "string"
+                  },
+                  "expect": {
+                    "description": "The name you think it has. Answers 409 if it has another.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "name": {
+                    "description": "1-80 characters.",
+                    "maxLength": 80,
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "ok": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "ok"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "409": {
+            "$ref": "#/components/responses/E409"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "$ref": "#/components/responses/E503"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "Rename one of your keys",
+        "tags": [
+          "API keys"
+        ]
+      },
+      "x-feature": "api_keys"
+    },
+    "/api/keys/{key_id}/restore": {
+      "post": {
+        "operationId": "post_api_keys_key_id_restore",
+        "parameters": [
+          {
+            "description": "The key's id, from GET /api/keys (GET /api/admin/keys for anyone's).",
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "csrf_token": {
+                    "description": "From GET /api/me. Browser sessions only.",
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIKey"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "409": {
+            "$ref": "#/components/responses/E409"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "$ref": "#/components/responses/E503"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "Undo deleting one of your keys",
+        "tags": [
+          "API keys"
+        ]
+      },
+      "x-feature": "api_keys"
+    },
+    "/api/keys/{key_id}/revoke": {
+      "post": {
+        "operationId": "post_api_keys_key_id_revoke",
+        "parameters": [
+          {
+            "description": "The key's id, from GET /api/keys (GET /api/admin/keys for anyone's).",
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "csrf_token": {
+                    "description": "From GET /api/me. Browser sessions only.",
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "$ref": "#/components/responses/E503"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "Revoke one of your keys",
+        "tags": [
+          "API keys"
+        ]
+      },
+      "x-feature": "api_keys"
+    },
+    "/api/keys/{key_id}/rotate": {
+      "post": {
+        "description": "The owner only: gives one of the owner's own keys a new secret and answers its new credential, shown only now. The old secret stops working at once; nothing else about the key changes.",
+        "operationId": "post_api_keys_key_id_rotate",
+        "parameters": [
+          {
+            "description": "The key's id, from GET /api/keys (GET /api/admin/keys for anyone's).",
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "csrf_token": {
+                    "description": "From GET /api/me. Browser sessions only.",
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RotatedKey"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "$ref": "#/components/responses/E503"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "Rotate one of your keys",
+        "tags": [
+          "API keys"
+        ]
+      },
+      "x-feature": "api_keys"
+    },
+    "/api/keys/{key_id}/sign-in": {
+      "post": {
+        "description": "Off by default. When on, the key may ask POST /api/account/login-link for a link that signs your account in on a browser, which then can do everything you can, including what keys may not. The link works once, for at most 15 minutes.",
+        "operationId": "post_api_keys_key_id_sign_in",
+        "parameters": [
+          {
+            "description": "The key's id, from GET /api/keys (GET /api/admin/keys for anyone's).",
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "csrf_token": {
+                    "description": "From GET /api/me. Browser sessions only.",
+                    "type": "string"
+                  },
+                  "may_sign_in": {
+                    "description": "true lets the key make a login link for your account: one that works once, for at most 15 minutes.",
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "may_sign_in"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIKey"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "$ref": "#/components/responses/E503"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "Let one of your keys make sign-in links",
+        "tags": [
+          "API keys"
+        ]
+      },
+      "x-feature": "api_keys"
+    },
     "/api/language": {
       "get": {
         "operationId": "get_api_language",
@@ -6176,6 +8410,542 @@
       },
       "x-feature": "logs"
     },
+    "/api/owner/portal": {
+      "get": {
+        "description": "The service accounts ProjectPortal works through, each with its live keys and when they expire.",
+        "operationId": "get_api_owner_portal",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "accounts": {
+                      "description": "Every service account, oldest first.",
+                      "items": {
+                        "$ref": "#/components/schemas/PortalAccount"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "accounts"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "$ref": "#/components/responses/E503"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "ProjectPortal's accounts",
+        "tags": [
+          "Owner"
+        ],
+        "x-required-role": "owner"
+      },
+      "x-feature": "api_keys"
+    },
+    "/api/owner/portal/connect": {
+      "post": {
+        "description": "Makes the service account named name (ProjectPortal when left out) if there is none, and one admin key for it, lasting days (1-365), that may make keys for other accounts and never makes sign-in links. Answers with the key and its credential, shown only now: paste it into ProjectPortal as this app's admin key.",
+        "operationId": "post_api_owner_portal_connect",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "csrf_token": {
+                    "description": "From GET /api/me. Browser sessions only.",
+                    "type": "string"
+                  },
+                  "days": {
+                    "description": "How long the key lasts, in days.",
+                    "maximum": 365,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "name": {
+                    "default": "ProjectPortal",
+                    "description": "The service account's name. Left out: ProjectPortal.",
+                    "maxLength": 80,
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "days"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NewAPIKey"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "$ref": "#/components/responses/E503"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "Connect ProjectPortal",
+        "tags": [
+          "Owner"
+        ],
+        "x-required-role": "owner"
+      },
+      "x-feature": "api_keys"
+    },
+    "/api/owner/portal/disconnect": {
+      "post": {
+        "description": "Revokes every key of the service account user_id, and with them every key and link those keys made. The account stays, with no way in, until Connect gives it a key again.",
+        "operationId": "post_api_owner_portal_disconnect",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "csrf_token": {
+                    "description": "From GET /api/me. Browser sessions only.",
+                    "type": "string"
+                  },
+                  "user_id": {
+                    "description": "The service account.",
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "user_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "revoked": {
+                      "description": "Its keys revoked. The keys and links they made went with them.",
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "revoked"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "$ref": "#/components/responses/E503"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "Disconnect ProjectPortal",
+        "tags": [
+          "Owner"
+        ],
+        "x-required-role": "owner"
+      },
+      "x-feature": "api_keys"
+    },
+    "/api/owner/providers": {
+      "get": {
+        "description": "Every other routing engine the planner can ask: whether it has a key (never the key itself), its address, and whether it can be asked now.",
+        "operationId": "get_api_owner_providers",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "engines": {
+                      "items": {
+                        "$ref": "#/components/schemas/EngineInfo"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "engines"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "$ref": "#/components/responses/E503"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "Routing engines and their keys",
+        "tags": [
+          "Owner"
+        ],
+        "x-required-role": "owner"
+      },
+      "x-feature": "settings"
+    },
+    "/api/owner/providers/{engine}/key": {
+      "post": {
+        "description": "Saves the key, sealed in the database. It replaces any key the engine had.",
+        "operationId": "post_api_owner_providers_engine_key",
+        "parameters": [
+          {
+            "description": "The engine: valhalla, osrm, ors, graphhopper, tomtom, here, mapbox, google.",
+            "in": "path",
+            "name": "engine",
+            "required": true,
+            "schema": {
+              "pattern": "^(valhalla|osrm|ors|graphhopper|tomtom|here|mapbox|google)$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "csrf_token": {
+                    "description": "From GET /api/me. Browser sessions only.",
+                    "type": "string"
+                  },
+                  "key": {
+                    "description": "The API key, as the engine's dashboard shows it.",
+                    "maxLength": 400,
+                    "minLength": 8,
+                    "pattern": "^[\\x21-\\x7e]+$",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "key"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "engines": {
+                      "items": {
+                        "$ref": "#/components/schemas/EngineInfo"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "engines"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "$ref": "#/components/responses/E503"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "Set a routing engine's API key",
+        "tags": [
+          "Owner"
+        ],
+        "x-required-role": "owner"
+      },
+      "x-feature": "settings"
+    },
+    "/api/owner/providers/{engine}/key/delete": {
+      "post": {
+        "description": "Forgets the key; the planner stops offering the engine if it needs one.",
+        "operationId": "post_api_owner_providers_engine_key_delete",
+        "parameters": [
+          {
+            "description": "The engine: valhalla, osrm, ors, graphhopper, tomtom, here, mapbox, google.",
+            "in": "path",
+            "name": "engine",
+            "required": true,
+            "schema": {
+              "pattern": "^(valhalla|osrm|ors|graphhopper|tomtom|here|mapbox|google)$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "csrf_token": {
+                    "description": "From GET /api/me. Browser sessions only.",
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "engines": {
+                      "items": {
+                        "$ref": "#/components/schemas/EngineInfo"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "engines"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "$ref": "#/components/responses/E503"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "Remove a routing engine's API key",
+        "tags": [
+          "Owner"
+        ],
+        "x-required-role": "owner"
+      },
+      "x-feature": "settings"
+    },
+    "/api/owner/providers/{engine}/test": {
+      "post": {
+        "description": "Asks the engine for a short backroads route in Ohio (Columbus to Delaware) with its current key and address, and says whether it answered. Not cached, so it spends one request.",
+        "operationId": "post_api_owner_providers_engine_test",
+        "parameters": [
+          {
+            "description": "The engine: valhalla, osrm, ors, graphhopper, tomtom, here, mapbox, google.",
+            "in": "path",
+            "name": "engine",
+            "required": true,
+            "schema": {
+              "pattern": "^(valhalla|osrm|ors|graphhopper|tomtom|here|mapbox|google)$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "csrf_token": {
+                    "description": "From GET /api/me. Browser sessions only.",
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    },
+                    "meters": {
+                      "type": "number"
+                    },
+                    "milliseconds": {
+                      "type": "integer"
+                    },
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "routes": {
+                      "type": "integer"
+                    },
+                    "seconds": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "message",
+                    "meters",
+                    "milliseconds",
+                    "ok",
+                    "routes",
+                    "seconds"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "$ref": "#/components/responses/E503"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "Test a routing engine",
+        "tags": [
+          "Owner"
+        ],
+        "x-required-role": "owner"
+      },
+      "x-feature": "settings"
+    },
     "/api/owner/settings": {
       "get": {
         "operationId": "get_api_owner_settings",
@@ -6350,6 +9120,12 @@
                   "backroads": {
                     "type": "boolean"
                   },
+                  "combine": {
+                    "default": "best",
+                    "description": "best keeps only the best-scoring route; all returns every route, best first.",
+                    "pattern": "^(best|all)$",
+                    "type": "string"
+                  },
                   "compare_fastest": {
                     "type": "boolean"
                   },
@@ -6365,6 +9141,16 @@
                   },
                   "secondary_is_main": {
                     "type": "boolean"
+                  },
+                  "sources": {
+                    "items": {
+                      "description": "ours, or another engine: valhalla, osrm, ors, graphhopper, tomtom, here, mapbox, google.",
+                      "pattern": "^(ours|valhalla|osrm|ors|graphhopper|tomtom|here|mapbox|google)$",
+                      "type": "string"
+                    },
+                    "maxItems": 9,
+                    "minItems": 1,
+                    "type": "array"
                   }
                 },
                 "required": [
@@ -6472,7 +9258,7 @@
     },
     "/api/route": {
       "post": {
-        "description": "The route through the waypoints that keeps time on main roads down: each minute on a motorway, trunk or primary road (and secondary, with secondary_is_main) counts penalty times over. Times include turns, traffic signals and stop signs (delay_seconds). With compare_fastest, the plain fastest route comes second. A waypoint with no road within routing.max_snap_m is refused with its index.",
+        "description": "The route through the waypoints that keeps time on main roads down: each minute on a motorway, trunk or primary road (and secondary, with secondary_is_main) counts penalty times over. Times include turns, traffic signals and stop signs (delay_seconds). sources picks who plans: our own router (ours) and/or other engines (see GET /api/routing/status), each asked for its backroads route and alternatives. Every route is measured on our map and scored the same way; combine=best keeps the best, combine=all returns them all, best first. A source that fails is listed in problems and the rest still answer. With compare_fastest, the plain fastest route on our map comes last (compare=true). A waypoint with no road within routing.max_snap_m is refused with its index.",
         "operationId": "post_api_route",
         "requestBody": {
           "content": {
@@ -6482,6 +9268,12 @@
                 "properties": {
                   "allow_unpaved": {
                     "type": "boolean"
+                  },
+                  "combine": {
+                    "default": "best",
+                    "description": "best keeps only the best-scoring route; all returns every route, best first.",
+                    "pattern": "^(best|all)$",
+                    "type": "string"
                   },
                   "compare_fastest": {
                     "default": true,
@@ -6501,6 +9293,17 @@
                   },
                   "secondary_is_main": {
                     "type": "boolean"
+                  },
+                  "sources": {
+                    "description": "Who to ask: our own router and/or other engines.",
+                    "items": {
+                      "description": "ours, or another engine: valhalla, osrm, ors, graphhopper, tomtom, here, mapbox, google.",
+                      "pattern": "^(ours|valhalla|osrm|ors|graphhopper|tomtom|here|mapbox|google)$",
+                      "type": "string"
+                    },
+                    "maxItems": 9,
+                    "minItems": 1,
+                    "type": "array"
                   },
                   "waypoints": {
                     "description": "Start, any stops, destination, in order.",
@@ -6530,6 +9333,12 @@
                     "milliseconds": {
                       "type": "integer"
                     },
+                    "problems": {
+                      "items": {
+                        "$ref": "#/components/schemas/SourceProblem"
+                      },
+                      "type": "array"
+                    },
                     "routes": {
                       "items": {
                         "$ref": "#/components/schemas/PlannedRoute"
@@ -6546,6 +9355,7 @@
                   },
                   "required": [
                     "milliseconds",
+                    "problems",
                     "routes",
                     "snapped"
                   ],
@@ -6627,6 +9437,13 @@
                     "segments": {
                       "type": "integer"
                     },
+                    "sources": {
+                      "description": "Our router and the other engines, in the order to show them.",
+                      "items": {
+                        "$ref": "#/components/schemas/SourceInfo"
+                      },
+                      "type": "array"
+                    },
                     "state": {
                       "description": "missing, loading, ready or error.",
                       "type": "string"
@@ -6642,6 +9459,7 @@
                     "region",
                     "secondary_is_main",
                     "segments",
+                    "sources",
                     "state"
                   ],
                   "type": "object"
@@ -7253,6 +10071,9 @@
     },
     {
       "name": "Sign-in"
+    },
+    {
+      "name": "API keys"
     },
     {
       "name": "Admin"
