@@ -146,14 +146,87 @@
         screen that does one thing is one card.
       -->
       <section id="signed-in" hidden>
-        <!-- The route planner (planner.js, map.js, gpx.js). On a phone the map
-             comes first and the controls follow; from lg up the controls are a
-             column on the left. -->
+        <!-- The route planner (planner.js, map.js, gpx.js). The controls are a
+             toolbar of dropdowns above the map, so the map has the full width;
+             the route's summary follows the map. -->
         <section class="view view-full" data-view="plan" data-path="/plan" id="plan-panel">
           <h2 class="view-title" data-i18n="plan.heading"></h2>
           <p id="plan-map-status" class="alert alert-warning mb-0" role="status" hidden></p>
+          <div class="btn-toolbar gap-2 mb-2" role="toolbar" data-i18n-attr="aria-label:plan.options_heading">
+            <div class="dropdown">
+              <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false" id="plan-menu-stops-toggle">
+                <i class="bi bi-geo-alt" aria-hidden="true"></i> <span data-i18n="plan.stops_heading"></span>
+              </button>
+              <div class="dropdown-menu plan-menu p-3 shadow" id="plan-menu-stops" aria-labelledby="plan-menu-stops-toggle">
+                <ol id="plan-stops" class="list-unstyled d-flex flex-column gap-2 mb-3"></ol>
+                <div class="d-flex flex-wrap gap-2">
+                  <button id="plan-add-stop" type="button" class="btn btn-sm btn-outline-secondary"><i class="bi bi-plus-lg" aria-hidden="true"></i> <span data-i18n="plan.add_stop"></span></button>
+                  <button id="plan-reverse" type="button" class="btn btn-sm btn-outline-secondary"><i class="bi bi-arrow-down-up" aria-hidden="true"></i> <span data-i18n="plan.reverse"></span></button>
+                  <button id="plan-clear" type="button" class="btn btn-sm btn-outline-secondary"><i class="bi bi-x-lg" aria-hidden="true"></i> <span data-i18n="plan.clear"></span></button>
+                </div>
+              </div>
+            </div>
+            <div class="dropdown">
+              <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false" id="plan-menu-how-toggle">
+                <i class="bi bi-sliders" aria-hidden="true"></i> <span data-i18n="plan.options_heading"></span>
+              </button>
+              <div class="dropdown-menu plan-menu plan-menu-scroll p-3 shadow" id="plan-menu-how" aria-labelledby="plan-menu-how-toggle">
+                <div class="form-check form-switch mb-2">
+                  <input class="form-check-input" type="checkbox" role="switch" id="plan-backroads" />
+                  <label class="form-check-label fw-semibold" for="plan-backroads" data-i18n="plan.backroads"></label>
+                </div>
+                <p class="small text-body-secondary" data-i18n="plan.backroads_help"></p>
+                <fieldset id="plan-strength">
+                  <legend class="form-label fs-6 mb-1" data-i18n="plan.strength"></legend>
+                  <div class="btn-group btn-group-sm w-100 mb-2" role="group" id="plan-presets">
+                    <button type="button" class="btn btn-outline-primary" data-penalty="3" data-i18n="plan.preset_balanced"></button>
+                    <button type="button" class="btn btn-outline-primary" data-penalty="8" data-i18n="plan.preset_backroads"></button>
+                    <button type="button" class="btn btn-outline-primary" data-penalty="25" data-i18n="plan.preset_max"></button>
+                  </div>
+                  <div class="d-flex align-items-center gap-2">
+                    <input type="range" class="form-range" id="plan-penalty" min="1.5" max="40" step="0.5" data-i18n-attr="aria-label:plan.strength" />
+                    <output id="plan-penalty-value" for="plan-penalty" class="badge text-bg-light border plan-penalty-value"></output>
+                  </div>
+                  <p id="plan-penalty-meaning" class="small text-body-secondary mb-2"></p>
+                </fieldset>
+                <div class="form-check">
+                  <input class="form-check-input" type="checkbox" id="plan-secondary" />
+                  <label class="form-check-label" for="plan-secondary" data-i18n="plan.secondary_is_main"></label>
+                </div>
+                <div class="form-check">
+                  <input class="form-check-input" type="checkbox" id="plan-unpaved" />
+                  <label class="form-check-label" for="plan-unpaved" data-i18n="plan.allow_unpaved"></label>
+                </div>
+                <div class="form-check mb-2">
+                  <input class="form-check-input" type="checkbox" id="plan-compare" />
+                  <label class="form-check-label" for="plan-compare" data-i18n="plan.compare_fastest"></label>
+                </div>
+                <button id="plan-save-prefs" type="button" class="btn btn-sm btn-link px-0" data-i18n="plan.save_prefs"></button>
+              </div>
+            </div>
+            <div class="dropdown">
+              <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false" id="plan-menu-sources-toggle">
+                <i class="bi bi-hdd-stack" aria-hidden="true"></i> <span data-i18n="plan.sources_heading"></span>
+              </button>
+              <div class="dropdown-menu plan-menu plan-menu-scroll p-3 shadow" id="plan-menu-sources" aria-labelledby="plan-menu-sources-toggle">
+                <p class="small text-body-secondary" data-i18n="plan.sources_help"></p>
+                <div id="plan-sources" class="d-flex flex-column gap-1 mb-2"></div>
+                <fieldset id="plan-combine">
+                  <legend class="form-label fs-6 mb-1" data-i18n="plan.combine_label"></legend>
+                  <div class="form-check">
+                    <input type="radio" class="form-check-input" name="plan-combine" id="plan-combine-best" value="best" />
+                    <label class="form-check-label" for="plan-combine-best" data-i18n="plan.combine_best"></label>
+                  </div>
+                  <div class="form-check">
+                    <input type="radio" class="form-check-input" name="plan-combine" id="plan-combine-all" value="all" />
+                    <label class="form-check-label" for="plan-combine-all" data-i18n="plan.combine_all"></label>
+                  </div>
+                </fieldset>
+              </div>
+            </div>
+          </div>
           <div class="row g-3">
-            <div class="col-12 col-lg-8 order-lg-2">
+            <div class="col-12">
               <section class="card plan-map-card">
                 <div id="plan-map" class="plan-map" data-i18n-attr="aria-label:plan.map_label" role="application"></div>
                 <div class="card-footer small text-body-secondary d-flex flex-wrap gap-3 align-items-center">
@@ -166,76 +239,7 @@
                 </div>
               </section>
             </div>
-
-            <div class="col-12 col-lg-4 order-lg-1 d-flex flex-column gap-3">
-              <section class="card">
-                <div class="card-body">
-                  <h3 class="card-title" data-i18n="plan.stops_heading"></h3>
-                  <ol id="plan-stops" class="list-unstyled d-flex flex-column gap-2 mb-3"></ol>
-                  <div class="d-flex flex-wrap gap-2">
-                    <button id="plan-add-stop" type="button" class="btn btn-sm btn-outline-secondary"><i class="bi bi-plus-lg" aria-hidden="true"></i> <span data-i18n="plan.add_stop"></span></button>
-                    <button id="plan-reverse" type="button" class="btn btn-sm btn-outline-secondary"><i class="bi bi-arrow-down-up" aria-hidden="true"></i> <span data-i18n="plan.reverse"></span></button>
-                    <button id="plan-clear" type="button" class="btn btn-sm btn-outline-secondary"><i class="bi bi-x-lg" aria-hidden="true"></i> <span data-i18n="plan.clear"></span></button>
-                  </div>
-                </div>
-              </section>
-
-              <section class="card">
-                <div class="card-body">
-                  <h3 class="card-title" data-i18n="plan.options_heading"></h3>
-                  <div class="form-check form-switch mb-2">
-                    <input class="form-check-input" type="checkbox" role="switch" id="plan-backroads" />
-                    <label class="form-check-label fw-semibold" for="plan-backroads" data-i18n="plan.backroads"></label>
-                  </div>
-                  <p class="small text-body-secondary" data-i18n="plan.backroads_help"></p>
-                  <fieldset id="plan-strength">
-                    <legend class="form-label fs-6 mb-1" data-i18n="plan.strength"></legend>
-                    <div class="btn-group btn-group-sm w-100 mb-2" role="group" id="plan-presets">
-                      <button type="button" class="btn btn-outline-primary" data-penalty="3" data-i18n="plan.preset_balanced"></button>
-                      <button type="button" class="btn btn-outline-primary" data-penalty="8" data-i18n="plan.preset_backroads"></button>
-                      <button type="button" class="btn btn-outline-primary" data-penalty="25" data-i18n="plan.preset_max"></button>
-                    </div>
-                    <div class="d-flex align-items-center gap-2">
-                      <input type="range" class="form-range" id="plan-penalty" min="1.5" max="40" step="0.5" data-i18n-attr="aria-label:plan.strength" />
-                      <output id="plan-penalty-value" for="plan-penalty" class="badge text-bg-light border plan-penalty-value"></output>
-                    </div>
-                    <p id="plan-penalty-meaning" class="small text-body-secondary mb-2"></p>
-                  </fieldset>
-                  <div class="form-check">
-                    <input class="form-check-input" type="checkbox" id="plan-secondary" />
-                    <label class="form-check-label" for="plan-secondary" data-i18n="plan.secondary_is_main"></label>
-                  </div>
-                  <div class="form-check">
-                    <input class="form-check-input" type="checkbox" id="plan-unpaved" />
-                    <label class="form-check-label" for="plan-unpaved" data-i18n="plan.allow_unpaved"></label>
-                  </div>
-                  <div class="form-check mb-2">
-                    <input class="form-check-input" type="checkbox" id="plan-compare" />
-                    <label class="form-check-label" for="plan-compare" data-i18n="plan.compare_fastest"></label>
-                  </div>
-                  <button id="plan-save-prefs" type="button" class="btn btn-sm btn-link px-0" data-i18n="plan.save_prefs"></button>
-                </div>
-              </section>
-
-              <section class="card">
-                <div class="card-body">
-                  <h3 class="card-title" data-i18n="plan.sources_heading"></h3>
-                  <p class="small text-body-secondary" data-i18n="plan.sources_help"></p>
-                  <div id="plan-sources" class="d-flex flex-column gap-1 mb-2"></div>
-                  <fieldset id="plan-combine">
-                    <legend class="form-label fs-6 mb-1" data-i18n="plan.combine_label"></legend>
-                    <div class="form-check">
-                      <input type="radio" class="form-check-input" name="plan-combine" id="plan-combine-best" value="best" />
-                      <label class="form-check-label" for="plan-combine-best" data-i18n="plan.combine_best"></label>
-                    </div>
-                    <div class="form-check">
-                      <input type="radio" class="form-check-input" name="plan-combine" id="plan-combine-all" value="all" />
-                      <label class="form-check-label" for="plan-combine-all" data-i18n="plan.combine_all"></label>
-                    </div>
-                  </fieldset>
-                </div>
-              </section>
-
+            <div class="col-12">
               <section class="card" id="plan-result" hidden>
                 <div class="card-body">
                   <h3 class="card-title" data-i18n="plan.result_heading"></h3>

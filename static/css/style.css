@@ -786,15 +786,19 @@ body { padding-left: env(safe-area-inset-left); padding-right: env(safe-area-ins
    --------------------------------------------------------------------------- */
 :root { --plan-back: #198754; --plan-main: #dc3545; --plan-fastest: #6c757d; --plan-via: #0d6efd; }
 
-/* Phone first: the map takes most of the screen's height above the controls;
-   from lg up it is a column beside them, as tall as the window allows. */
+/* The map has the page's full width; the controls are dropdowns in a toolbar
+   above it. Phone first: the map takes most of the screen's height; from lg up
+   it is as tall as the window allows. */
 .plan-map-card { overflow: hidden; }
-.plan-map { height: 58vh; min-height: 320px; width: 100%; z-index: 0; }
+.plan-map { height: 62vh; min-height: 320px; width: 100%; z-index: 0; }
 .plan-map-picking { cursor: crosshair; }
 .plan-map-picking .leaflet-grab { cursor: crosshair; }
+/* A dropdown holds a whole panel of controls, so it is wider than a menu and
+   never wider than the phone; the long ones scroll inside the window. */
+.plan-menu { width: min(26rem, calc(100vw - 1.5rem)); z-index: 1100; }
+.plan-menu-scroll { max-height: calc(100vh - 10rem); overflow-y: auto; }
 @media (min-width: 992px) {
-  .plan-map-card { position: sticky; top: 4.5rem; }
-  .plan-map { height: calc(100vh - 12rem); min-height: 480px; }
+  .plan-map { height: calc(100vh - 13rem); min-height: 480px; }
 }
 
 /* Pins: a round label, A for the start, B for the destination, numbers between. */

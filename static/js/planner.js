@@ -147,6 +147,14 @@ const Planner = {
     this.setStop( index , this.pointStop( lat , lon ) );
   },
 
+  // Close the toolbar's dropdowns so the map is clear to click.
+  closeMenus() {
+    document.querySelectorAll( "#plan-panel [data-bs-toggle='dropdown']" ).forEach( ( toggle ) => {
+      const menu = bootstrap.Dropdown.getInstance( toggle );
+      if ( menu ) menu.hide();
+    } );
+  },
+
   addStop() {
     this.change( "undo.plan_stops" , ( state ) => { state.stops.splice( state.stops.length - 1 , 0 , null ); } );
     this.picking = this.stops.length - 2;
@@ -230,7 +238,7 @@ const Planner = {
         class: "btn btn-outline-secondary",
         attrs: { type: "button" , title: Format.fill( "plan.pick_on_map" , { stop: name } ) , "aria-label": Format.fill( "plan.pick_on_map" , { stop: name } ) },
         children: [ Dom.el( "i" , { class: "bi bi-crosshair" , attrs: { "aria-hidden": "true" } } ) ],
-        on: { click: () => { this.picking = index; this.showHint(); } },
+        on: { click: () => { this.picking = index; this.showHint(); this.closeMenus(); } },
       } ),
     ];
     if ( kind === "via" ) {
