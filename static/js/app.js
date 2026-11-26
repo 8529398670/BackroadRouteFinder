@@ -193,6 +193,7 @@ const App = {
     About.init( me );
     loading.push( Planner.init( me ) );
     loading.push( SavedRoutes.init( me ) );
+    loading.push( ProviderKeys.init( me ) );
 
     // A viewer looks and changes nothing: the server refuses every write with
     // 403 view_only, so the controls that would write (data-write) are hidden
@@ -215,7 +216,7 @@ const App = {
       loading.push( Logs.init( me ) );
       loading.push( Jobs.init( me ) );
       loading.push( Settings.init( me ) );
-      loading.push( ProviderKeys.init( me ) );
+      loading.push( MapData.init( me ) );
       const version = I18n.get( "nav.version" );
       if ( version !== "" ) {
         Dom.text( Dom.get( "sidebar-version" ) , version.replace( "{version}" , me.version ) );

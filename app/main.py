@@ -32,6 +32,7 @@ from app.core.skill_origin import skill_origin
 from app.routes import build_routes
 from app.routing import files as map_files
 from app.routing.graph import Holder as GraphHolder
+from app.routing.tasks import Runner as MapTasks
 
 # How often config.yaml is checked for edits made outside the Settings screen.
 CONFIG_POLL_SECONDS = 2
@@ -139,6 +140,8 @@ def build_app(
     # The road graph loads in the background; routes say so until it is ready.
     app.state.graph = GraphHolder(map_files.graph_path(cfg))
     app.state.graph.start()
+    # Downloads and builds started from the Map data screen.
+    app.state.map_tasks = MapTasks()
     return app
 
 

@@ -62,6 +62,7 @@
           <!-- The planner first: it is what the app is for. -->
           <a class="nav-link" href="/plan" data-nav="plan"><i class="bi bi-signpost-split" aria-hidden="true"></i><span data-i18n="nav.plan"></span></a>
           <a class="nav-link" href="/routes" data-nav="routes"><i class="bi bi-bookmark-star" aria-hidden="true"></i><span data-i18n="nav.routes"></span></a>
+          <a class="nav-link" href="/settings" data-nav="my-settings"><i class="bi bi-gear" aria-hidden="true"></i><span data-i18n="nav.my_settings"></span></a>
           <!-- Account: its second line names who is signed in (App.labelAccount). -->
           <a class="nav-link" href="/account" data-nav="account"><i class="bi bi-person-circle" aria-hidden="true"></i><span class="nav-link-text"><span data-i18n="nav.account"></span><span id="sidebar-user" class="nav-link-sub"></span><span id="view-only-badge" class="badge text-bg-secondary align-self-start mt-1" data-i18n="nav.view_only" hidden></span></span></a>
           <a class="nav-link" href="/appearance" data-nav="appearance"><i class="bi bi-palette" aria-hidden="true"></i><span data-i18n="nav.appearance"></span></a>
@@ -73,6 +74,7 @@
             <a class="nav-link" href="/admin/users" data-nav="users"><i class="bi bi-people" aria-hidden="true"></i><span data-i18n="nav.users"></span></a>
             <a class="nav-link" href="/admin/api-keys" data-nav="all-keys"><i class="bi bi-shield-lock" aria-hidden="true"></i><span data-i18n="nav.all_keys"></span></a>
             <a class="nav-link" href="/admin/logs" data-nav="logs"><i class="bi bi-journal-text" aria-hidden="true"></i><span data-i18n="nav.logs"></span></a>
+            <a class="nav-link" href="/admin/map-data" data-nav="map-data"><i class="bi bi-map" aria-hidden="true"></i><span data-i18n="nav.map_data"></span></a>
             <a class="nav-link" href="/admin/jobs" data-nav="jobs"><i class="bi bi-clock-history" aria-hidden="true"></i><span data-i18n="nav.jobs"></span></a>
             <a class="nav-link" href="/admin/settings" data-nav="settings"><i class="bi bi-sliders" aria-hidden="true"></i><span data-i18n="nav.settings"></span></a>
           </div>
@@ -279,6 +281,53 @@
 
         <!-- Everything about you: who you are, how you sign in, and what can
              act as you. A feature's card stays hidden until its own JS shows it. -->
+        <!-- Everyone's own settings; see js/providers.js. The shared-keys card is the owner's. -->
+        <section class="view" data-view="my-settings" data-path="/settings" id="my-settings-panel">
+          <h2 class="view-title" data-i18n="my_settings.heading"></h2>
+          <section class="card mb-3" id="engines-card" data-path="/settings/engines">
+            <div class="card-body">
+              <h3 class="card-title" data-i18n="settings.engines_heading"></h3>
+              <p class="small text-body-secondary" data-i18n="settings.engines_description"></p>
+              <div class="table-responsive">
+                <table class="table align-middle mb-0">
+                  <thead>
+                    <tr>
+                      <th scope="col" data-i18n="settings.engines_engine"></th>
+                      <th scope="col" data-i18n="settings.engines_status"></th>
+                      <th scope="col" data-i18n="settings.engines_key"></th>
+                    </tr>
+                  </thead>
+                  <tbody id="engines-rows"></tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+
+          <section class="card mb-3" id="shared-keys-card" data-path="/settings/shared-keys" hidden>
+            <div class="card-body">
+              <h3 class="card-title" data-i18n="settings.shared_heading"></h3>
+              <p class="small text-body-secondary" data-i18n="settings.shared_description"></p>
+              <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+                <span class="small fw-semibold" data-i18n="settings.shared_all_label"></span>
+                <button type="button" id="shared-all-shared" class="btn btn-sm btn-outline-primary"><i class="bi bi-people" aria-hidden="true"></i> <span data-i18n="settings.shared_all_shared"></span></button>
+                <button type="button" id="shared-all-own" class="btn btn-sm btn-outline-primary"><i class="bi bi-person-lock" aria-hidden="true"></i> <span data-i18n="settings.shared_all_own"></span></button>
+              </div>
+              <div class="table-responsive">
+                <table class="table align-middle mb-0">
+                  <thead>
+                    <tr>
+                      <th scope="col" data-i18n="settings.engines_engine"></th>
+                      <th scope="col" data-i18n="settings.shared_key"></th>
+                      <th scope="col" data-i18n="settings.shared_policy"></th>
+                    </tr>
+                  </thead>
+                  <tbody id="shared-rows"></tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+        </section>
+
         <section class="view" data-view="account" data-path="/account" id="account-panel">
           <h2 class="view-title" data-i18n="account.heading"></h2>
 
@@ -859,6 +908,105 @@
           </section>
         </section>
 
+        <!-- Owner only: download extracts, build maps, switch maps; see js/mapdata.js. -->
+        <section class="view" data-view="map-data" data-path="/admin/map-data" id="map-data-panel" hidden>
+          <h2 class="view-title" data-i18n="mapdata.heading"></h2>
+          <p class="view-description" data-i18n="mapdata.description"></p>
+
+          <section class="card mb-3">
+            <div class="card-body">
+              <h3 class="card-title" data-i18n="mapdata.loaded_heading"></h3>
+              <div id="mapdata-loaded"></div>
+            </div>
+          </section>
+
+          <section class="card mb-3" id="mapdata-task-card" hidden>
+            <div class="card-body">
+              <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+                <h3 class="card-title mb-0 me-auto" id="mapdata-task-title"></h3>
+                <span id="mapdata-task-state"></span>
+                <button type="button" id="mapdata-cancel" class="btn btn-sm btn-outline-danger" hidden><i class="bi bi-stop-circle" aria-hidden="true"></i> <span data-i18n="mapdata.cancel"></span></button>
+              </div>
+              <div class="progress mb-2" id="mapdata-progress-wrap" role="progressbar" aria-valuemin="0" aria-valuemax="100" hidden>
+                <div class="progress-bar" id="mapdata-progress"></div>
+              </div>
+              <pre id="mapdata-log" class="mapdata-log small mb-0"></pre>
+            </div>
+          </section>
+
+          <section class="card mb-3">
+            <div class="card-body">
+              <h3 class="card-title" data-i18n="mapdata.pick_heading"></h3>
+              <p class="small text-body-secondary" data-i18n="mapdata.pick_description"></p>
+              <div id="mapdata-no-build" class="alert alert-warning small" role="status" hidden></div>
+              <div class="row g-2 align-items-center mb-2">
+                <div class="col-12 col-md-6">
+                  <label for="mapdata-filter" class="visually-hidden" data-i18n="mapdata.filter"></label>
+                  <input id="mapdata-filter" class="form-control form-control-sm" type="search" autocomplete="off" data-i18n-attr="placeholder:mapdata.filter" />
+                </div>
+                <div class="col-12 col-md-6 d-flex flex-wrap gap-2 justify-content-md-end">
+                  <button type="button" id="mapdata-select-downloaded" class="btn btn-sm btn-outline-secondary" data-i18n="mapdata.select_downloaded"></button>
+                  <button type="button" id="mapdata-select-none" class="btn btn-sm btn-outline-secondary" data-i18n="mapdata.select_none"></button>
+                </div>
+              </div>
+              <div class="form-check border rounded p-2 ps-5 mb-2">
+                <input class="form-check-input" type="checkbox" id="mapdata-us" />
+                <label class="form-check-label" for="mapdata-us"><span class="fw-semibold" data-i18n="mapdata.us"></span> <span id="mapdata-us-note" class="small text-body-secondary"></span></label>
+              </div>
+              <div id="mapdata-states" class="row row-cols-1 row-cols-sm-2 row-cols-lg-3 row-cols-xxl-4 g-1 mapdata-states"></div>
+              <div id="mapdata-warning" class="alert alert-warning small mt-3 mb-0" role="status" hidden></div>
+              <div class="d-flex flex-wrap align-items-center gap-2 mt-3">
+                <span id="mapdata-summary" class="small text-body-secondary me-auto"></span>
+                <div class="form-check form-switch mb-0">
+                  <input class="form-check-input" type="checkbox" id="mapdata-activate" checked />
+                  <label class="form-check-label small" for="mapdata-activate" data-i18n="mapdata.activate_after"></label>
+                </div>
+                <button type="button" id="mapdata-download" class="btn btn-outline-primary"><i class="bi bi-cloud-download" aria-hidden="true"></i> <span data-i18n="mapdata.download"></span></button>
+                <button type="button" id="mapdata-build" class="btn btn-primary"><i class="bi bi-hammer" aria-hidden="true"></i> <span data-i18n="mapdata.build"></span></button>
+              </div>
+            </div>
+          </section>
+
+          <section class="card mb-3">
+            <div class="card-body">
+              <h3 class="card-title" data-i18n="mapdata.graphs_heading"></h3>
+              <div class="table-responsive">
+                <table id="mapdata-graphs" class="table align-middle mb-0" data-empty="mapdata.graphs_empty">
+                  <thead>
+                    <tr>
+                      <th scope="col" data-i18n="mapdata.table_map"></th>
+                      <th scope="col" data-i18n="mapdata.table_size"></th>
+                      <th scope="col" data-i18n="mapdata.table_built"></th>
+                      <th scope="col" data-i18n="mapdata.table_actions"></th>
+                    </tr>
+                  </thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+
+          <section class="card">
+            <div class="card-body">
+              <h3 class="card-title" data-i18n="mapdata.extracts_heading"></h3>
+              <p class="small text-body-secondary mb-2"><code id="mapdata-folder"></code> <span id="mapdata-disk"></span></p>
+              <div class="table-responsive">
+                <table id="mapdata-extracts" class="table align-middle mb-0" data-empty="mapdata.extracts_empty">
+                  <thead>
+                    <tr>
+                      <th scope="col" data-i18n="mapdata.table_area"></th>
+                      <th scope="col" data-i18n="mapdata.table_size"></th>
+                      <th scope="col" data-i18n="mapdata.table_downloaded"></th>
+                      <th scope="col" data-i18n="mapdata.table_actions"></th>
+                    </tr>
+                  </thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+        </section>
+
         <!-- Background jobs, owner only; see jobs.js. -->
         <section class="view" data-view="jobs" data-path="/admin/jobs" id="jobs-panel" hidden>
           <h2 class="view-title" data-i18n="jobs.heading"></h2>
@@ -887,24 +1035,6 @@
         <!-- Owner only: config.yaml, one field per setting. See js/settings.js. -->
         <section class="view" data-view="settings" data-path="/admin/settings" id="settings-panel" hidden>
           <h2 class="view-title" data-i18n="settings.heading"></h2>
-          <section class="card mb-3" id="engines-card">
-            <div class="card-body">
-              <h3 class="card-title" data-i18n="settings.engines_heading"></h3>
-              <p class="small text-body-secondary" data-i18n="settings.engines_description"></p>
-              <div class="table-responsive">
-                <table class="table align-middle mb-0">
-                  <thead>
-                    <tr>
-                      <th scope="col" data-i18n="settings.engines_engine"></th>
-                      <th scope="col" data-i18n="settings.engines_status"></th>
-                      <th scope="col" data-i18n="settings.engines_key"></th>
-                    </tr>
-                  </thead>
-                  <tbody id="engines-rows"></tbody>
-                </table>
-              </div>
-            </div>
-          </section>
           <p class="view-description" data-i18n="settings.description"></p>
           <section class="card">
             <div class="card-body">
@@ -1043,6 +1173,7 @@
   <script src="/js/gpx.js"></script>
   <script src="/js/planner.js"></script>
   <script src="/js/providers.js"></script>
+  <script src="/js/mapdata.js"></script>
   <script src="/js/saved_routes.js"></script>
   <script src="/js/app.js"></script>
 </body>

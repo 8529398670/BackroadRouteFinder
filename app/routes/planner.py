@@ -13,6 +13,7 @@ from app.apidocs import QUERY, NoInput, Reply, route
 from app.apidocs import Request as RequestType
 from app.core.security import actor_from
 from app.models import saved_routes
+from app.models.users import get_owner_id
 from app.routes.helpers import Refused, get_config, get_store
 from app.models import provider_keys
 from app.routing import costs, geocode, router, sources
@@ -83,7 +84,7 @@ def _ready_graph(request: Request):
         return holder.graph
     if holder.state == "loading":
         raise Refused(503, "the map is still loading; try again in a few seconds")
-    raise Refused(503, "the map has not been built yet: scripts/run.sh manage fetch-osm, then manage build-graph")
+    raise Refused(503, "the map has not been built yet: the owner can download and build one on the Map data screen")
 
 
 # --- plan --------------------------------------------------------------------
@@ -118,11 +119,29 @@ def source_name(source: str) -> str:
     return "Our map" if source == OURS else ENGINES[source].name
 
 
+def engine_urls(request: Request) -> dict[str, str]:
+    providers = get_config(request).file.providers
+    return {engine_id: getattr(providers, engine.url_key) for engine_id, engine in ENGINES.items() if engine.url_key}
+
+
+def is_owner(request: Request) -> bool:
+    actor = actor_from(request)
+    return actor is not None and actor.user.id == get_owner_id(get_store(request))
+
+
 def access_of(request: Request) -> sources.Access:
+    """The engines as the signed-in person may use them: their own keys, and
+    the owner's shared ones where the policy lets them (provider_keys.effective)."""
     cfg = get_config(request)
-    providers = cfg.file.providers
-    urls = {engine_id: getattr(providers, engine.url_key) for engine_id, engine in ENGINES.items() if engine.url_key}
-    return sources.Access(keys=provider_keys.get_all(get_store(request), cfg.secret_key), urls=urls, timeout=float(providers.timeout_s))
+    store = get_store(request)
+    actor = actor_from(request)
+    owner = is_owner(request)
+    shared = provider_keys.get_all(store, cfg.secret_key)
+    own = provider_keys.get_user_keys(store, cfg.secret_key, actor.user.id) if actor is not None else {}
+    policy = provider_keys.get_policy(store)
+    keys, _ = provider_keys.effective(shared, own, policy, owner)
+    own_required = frozenset() if owner else frozenset(e for e, mode in policy.items() if mode == provider_keys.OWN)
+    return sources.Access(keys=keys, urls=engine_urls(request), timeout=float(cfg.file.providers.timeout_s), own_required=own_required)
 
 
 @route(
@@ -226,7 +245,7 @@ def routing_status(request: Request, body: NoInput) -> RoutingStatusReply:
     return RoutingStatusReply(
         state=holder.state,
         error=holder.error,
-        region=routing.region,
+        region=holder.region,
         built_at=meta.get("built_at", ""),
         nodes=meta.get("nodes", 0),
         segments=meta.get("segments", 0),

@@ -378,6 +378,6 @@ def transfer_owner(store: Store, user_id: int) -> User | None:
         # admin goes with the promotion.
         if user.expires_at is not None:
             user.expires_at = None
-            tx.put(BUCKET_USERS, user_id, user.to_record())
+            tx.put(BUCKET_USERS, user_id, {**record, **user.to_record()})
         _set_owner_tx(tx, user_id)
     return user

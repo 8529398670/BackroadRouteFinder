@@ -78,10 +78,14 @@ const Planner = {
     const box = Dom.get( "plan-map-status" );
     const state = this.status ? this.status.state : "missing";
     let text = "";
-    if ( state === "missing" ) text = I18n.get( "plan.map_missing" );
+    if ( state === "missing" ) text = I18n.get( this.me && this.me.is_owner ? "plan.map_missing_owner" : "plan.map_missing" );
     else if ( state === "loading" ) text = I18n.get( "plan.map_loading" );
     else if ( state === "error" ) text = Format.fill( "plan.map_error" , { error: this.status.error } );
     Dom.text( box , text );
+    if ( state === "missing" && this.me && this.me.is_owner ) {
+      box.appendChild( document.createTextNode( " " ) );
+      box.appendChild( Dom.el( "a" , { class: "alert-link" , text: I18n.get( "plan.map_missing_link" ) , attrs: { href: "/admin/map-data" } } ) );
+    }
     Dom.show( box , text !== "" );
     // Still loading: ask again shortly, then plan whatever is waiting.
     if ( state === "loading" ) {
@@ -350,10 +354,10 @@ const Planner = {
         Dom.el( "span" , { text: source.id === "ours" ? I18n.get( "plan.source_ours" ) : source.name } ),
       ] } );
       if ( !source.usable ) {
-        const note = this.me && this.me.is_owner
-          ? Dom.el( "a" , { class: "small ms-2" , text: I18n.get( "plan.source_unusable_owner" ) , attrs: { href: "/admin/settings" , title: source.why_not } } )
+        // Anyone can add their own key on Settings (Nav follows the link).
+        const note = source.needs_key
+          ? Dom.el( "a" , { class: "small ms-2" , text: I18n.get( "plan.source_unusable_owner" ) , attrs: { href: "/settings" , title: source.why_not } } )
           : Dom.el( "span" , { class: "small text-body-secondary ms-2" , text: I18n.get( "plan.source_unusable" ) , attrs: { title: source.why_not } } );
-        if ( note.tagName === "A" ) note.addEventListener( "click" , ( event ) => { event.preventDefault(); Nav.go( "/admin/settings" ); } );
         label.appendChild( note );
       }
       return Dom.el( "div" , { class: "form-check" , children: [ input , label ] } );

@@ -225,16 +225,29 @@
             "type": "string"
           },
           "key_hint": {
-            "description": "The key's last four characters, while one is set.",
+            "description": "Your key's last four characters, while one is set.",
             "type": "string"
           },
           "key_set": {
+            "description": "Whether you have your own key for it.",
             "type": "boolean"
           },
           "name": {
             "type": "string"
           },
           "needs_key": {
+            "type": "boolean"
+          },
+          "policy": {
+            "description": "shared: people without their own key use the owner's. own: everyone but the owner brings their own.",
+            "enum": [
+              "shared",
+              "own"
+            ],
+            "type": "string"
+          },
+          "shared_key_set": {
+            "description": "Whether the owner has set a shared key for it.",
             "type": "boolean"
           },
           "signup_url": {
@@ -250,6 +263,10 @@
           "usable": {
             "type": "boolean"
           },
+          "using": {
+            "description": "Which key your plans use: yours, shared, or none.",
+            "type": "string"
+          },
           "why_not": {
             "type": "string"
           }
@@ -262,10 +279,13 @@
           "key_set",
           "name",
           "needs_key",
+          "policy",
+          "shared_key_set",
           "signup_url",
           "url",
           "url_setting",
           "usable",
+          "using",
           "why_not"
         ],
         "type": "object"
@@ -502,6 +522,166 @@
         "required": [
           "error",
           "maintenance"
+        ],
+        "type": "object"
+      },
+      "MapArea": {
+        "properties": {
+          "approx_mb": {
+            "description": "Roughly how big its download is.",
+            "type": "integer"
+          },
+          "downloaded": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MapFile"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "approx_mb",
+          "downloaded",
+          "name",
+          "slug"
+        ],
+        "type": "object"
+      },
+      "MapFile": {
+        "properties": {
+          "bytes": {
+            "type": "integer"
+          },
+          "modified": {
+            "description": "When it was written, ISO 8601.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "bytes",
+          "modified"
+        ],
+        "type": "object"
+      },
+      "MapGraph": {
+        "properties": {
+          "active": {
+            "type": "boolean"
+          },
+          "areas": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "file": {
+            "$ref": "#/components/schemas/MapFile"
+          },
+          "region": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "active",
+          "areas",
+          "file",
+          "region"
+        ],
+        "type": "object"
+      },
+      "MapLoaded": {
+        "properties": {
+          "areas": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "built_at": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          },
+          "nodes": {
+            "type": "integer"
+          },
+          "region": {
+            "type": "string"
+          },
+          "segments": {
+            "type": "integer"
+          },
+          "state": {
+            "description": "missing, loading, ready or error.",
+            "type": "string"
+          },
+          "switching": {
+            "description": "Another map is loading; this one answers until it is ready.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "areas",
+          "built_at",
+          "error",
+          "nodes",
+          "region",
+          "segments",
+          "state",
+          "switching"
+        ],
+        "type": "object"
+      },
+      "MapTask": {
+        "properties": {
+          "finished": {
+            "type": "string"
+          },
+          "id": {
+            "type": "integer"
+          },
+          "lines": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "started": {
+            "type": "string"
+          },
+          "state": {
+            "description": "running, done, failed or cancelled.",
+            "type": "string"
+          },
+          "step": {
+            "type": "integer"
+          },
+          "steps": {
+            "type": "integer"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "finished",
+          "id",
+          "lines",
+          "started",
+          "state",
+          "step",
+          "steps",
+          "title"
         ],
         "type": "object"
       },
@@ -1496,6 +1676,48 @@
           "stale",
           "version",
           "writable"
+        ],
+        "type": "object"
+      },
+      "SharedEngine": {
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "key_hint": {
+            "description": "The shared key's last four characters, while one is set.",
+            "type": "string"
+          },
+          "key_set": {
+            "description": "Whether a shared key is set.",
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "needs_key": {
+            "type": "boolean"
+          },
+          "policy": {
+            "description": "shared: people without their own key use the owner's. own: everyone but the owner brings their own.",
+            "enum": [
+              "shared",
+              "own"
+            ],
+            "type": "string"
+          },
+          "signup_url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "key_hint",
+          "key_set",
+          "name",
+          "needs_key",
+          "policy",
+          "signup_url"
         ],
         "type": "object"
       },
@@ -8410,6 +8632,626 @@
       },
       "x-feature": "logs"
     },
+    "/api/owner/mapdata": {
+      "get": {
+        "description": "The map the server routes on, the extracts downloaded and maps built so far, every state that can be downloaded, and the download or build running now (with its output).",
+        "operationId": "get_api_owner_mapdata",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "areas": {
+                      "items": {
+                        "$ref": "#/components/schemas/MapArea"
+                      },
+                      "type": "array"
+                    },
+                    "can_build": {
+                      "description": "Whether osmium is installed here, which building needs.",
+                      "type": "boolean"
+                    },
+                    "disk_free_bytes": {
+                      "type": "integer"
+                    },
+                    "folder": {
+                      "type": "string"
+                    },
+                    "graphs": {
+                      "items": {
+                        "$ref": "#/components/schemas/MapGraph"
+                      },
+                      "type": "array"
+                    },
+                    "loaded": {
+                      "$ref": "#/components/schemas/MapLoaded"
+                    },
+                    "memory_bytes": {
+                      "description": "This machine's memory, 0 when unknown.",
+                      "type": "integer"
+                    },
+                    "task": {
+                      "oneOf": [
+                        {
+                          "$ref": "#/components/schemas/MapTask"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "us": {
+                      "$ref": "#/components/schemas/MapArea"
+                    }
+                  },
+                  "required": [
+                    "areas",
+                    "can_build",
+                    "disk_free_bytes",
+                    "folder",
+                    "graphs",
+                    "loaded",
+                    "memory_bytes",
+                    "task",
+                    "us"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "$ref": "#/components/responses/E503"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "Map data",
+        "tags": [
+          "Owner"
+        ],
+        "x-required-role": "owner"
+      },
+      "x-feature": "settings"
+    },
+    "/api/owner/mapdata/activate": {
+      "post": {
+        "description": "Switches the server to a map built earlier, without a restart. The current one keeps answering until the new one has loaded. Remembered across restarts.",
+        "operationId": "post_api_owner_mapdata_activate",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "csrf_token": {
+                    "description": "From GET /api/me. Browser sessions only.",
+                    "type": "string"
+                  },
+                  "region": {
+                    "description": "A built map's name, as GET /api/owner/mapdata lists it.",
+                    "pattern": "^[a-z0-9][a-z0-9_+-]{0,127}$",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "region"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "areas": {
+                      "items": {
+                        "$ref": "#/components/schemas/MapArea"
+                      },
+                      "type": "array"
+                    },
+                    "can_build": {
+                      "description": "Whether osmium is installed here, which building needs.",
+                      "type": "boolean"
+                    },
+                    "disk_free_bytes": {
+                      "type": "integer"
+                    },
+                    "folder": {
+                      "type": "string"
+                    },
+                    "graphs": {
+                      "items": {
+                        "$ref": "#/components/schemas/MapGraph"
+                      },
+                      "type": "array"
+                    },
+                    "loaded": {
+                      "$ref": "#/components/schemas/MapLoaded"
+                    },
+                    "memory_bytes": {
+                      "description": "This machine's memory, 0 when unknown.",
+                      "type": "integer"
+                    },
+                    "task": {
+                      "oneOf": [
+                        {
+                          "$ref": "#/components/schemas/MapTask"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "us": {
+                      "$ref": "#/components/schemas/MapArea"
+                    }
+                  },
+                  "required": [
+                    "areas",
+                    "can_build",
+                    "disk_free_bytes",
+                    "folder",
+                    "graphs",
+                    "loaded",
+                    "memory_bytes",
+                    "task",
+                    "us"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "409": {
+            "$ref": "#/components/responses/E409"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "$ref": "#/components/responses/E503"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "Route on another map",
+        "tags": [
+          "Owner"
+        ],
+        "x-required-role": "owner"
+      },
+      "x-feature": "settings"
+    },
+    "/api/owner/mapdata/cancel": {
+      "post": {
+        "description": "Stops the download or build running now. A cut-off download leaves no file behind.",
+        "operationId": "post_api_owner_mapdata_cancel",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "csrf_token": {
+                    "description": "From GET /api/me. Browser sessions only.",
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "areas": {
+                      "items": {
+                        "$ref": "#/components/schemas/MapArea"
+                      },
+                      "type": "array"
+                    },
+                    "can_build": {
+                      "description": "Whether osmium is installed here, which building needs.",
+                      "type": "boolean"
+                    },
+                    "disk_free_bytes": {
+                      "type": "integer"
+                    },
+                    "folder": {
+                      "type": "string"
+                    },
+                    "graphs": {
+                      "items": {
+                        "$ref": "#/components/schemas/MapGraph"
+                      },
+                      "type": "array"
+                    },
+                    "loaded": {
+                      "$ref": "#/components/schemas/MapLoaded"
+                    },
+                    "memory_bytes": {
+                      "description": "This machine's memory, 0 when unknown.",
+                      "type": "integer"
+                    },
+                    "task": {
+                      "oneOf": [
+                        {
+                          "$ref": "#/components/schemas/MapTask"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "us": {
+                      "$ref": "#/components/schemas/MapArea"
+                    }
+                  },
+                  "required": [
+                    "areas",
+                    "can_build",
+                    "disk_free_bytes",
+                    "folder",
+                    "graphs",
+                    "loaded",
+                    "memory_bytes",
+                    "task",
+                    "us"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "409": {
+            "$ref": "#/components/responses/E409"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "$ref": "#/components/responses/E503"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "Stop the map task",
+        "tags": [
+          "Owner"
+        ],
+        "x-required-role": "owner"
+      },
+      "x-feature": "settings"
+    },
+    "/api/owner/mapdata/delete": {
+      "post": {
+        "description": "Deletes a downloaded extract or a built map to free disk space. The map the server is routing on cannot be deleted.",
+        "operationId": "post_api_owner_mapdata_delete",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "csrf_token": {
+                    "description": "From GET /api/me. Browser sessions only.",
+                    "type": "string"
+                  },
+                  "kind": {
+                    "description": "extract (a downloaded .osm.pbf) or map (a built .npz).",
+                    "pattern": "^(extract|map)$",
+                    "type": "string"
+                  },
+                  "name": {
+                    "description": "The area's slug, or the map's name.",
+                    "pattern": "^[a-z0-9][a-z0-9_+-]{0,127}$",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "areas": {
+                      "items": {
+                        "$ref": "#/components/schemas/MapArea"
+                      },
+                      "type": "array"
+                    },
+                    "can_build": {
+                      "description": "Whether osmium is installed here, which building needs.",
+                      "type": "boolean"
+                    },
+                    "disk_free_bytes": {
+                      "type": "integer"
+                    },
+                    "folder": {
+                      "type": "string"
+                    },
+                    "graphs": {
+                      "items": {
+                        "$ref": "#/components/schemas/MapGraph"
+                      },
+                      "type": "array"
+                    },
+                    "loaded": {
+                      "$ref": "#/components/schemas/MapLoaded"
+                    },
+                    "memory_bytes": {
+                      "description": "This machine's memory, 0 when unknown.",
+                      "type": "integer"
+                    },
+                    "task": {
+                      "oneOf": [
+                        {
+                          "$ref": "#/components/schemas/MapTask"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "us": {
+                      "$ref": "#/components/schemas/MapArea"
+                    }
+                  },
+                  "required": [
+                    "areas",
+                    "can_build",
+                    "disk_free_bytes",
+                    "folder",
+                    "graphs",
+                    "loaded",
+                    "memory_bytes",
+                    "task",
+                    "us"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "409": {
+            "$ref": "#/components/responses/E409"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "$ref": "#/components/responses/E503"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "Delete a map file",
+        "tags": [
+          "Owner"
+        ],
+        "x-required-role": "owner"
+      },
+      "x-feature": "settings"
+    },
+    "/api/owner/mapdata/run": {
+      "post": {
+        "description": "Downloads the areas' extracts from Geofabrik (missing ones, all, or none), builds one map from them, and switches the server to it -- each step optional. Runs in the background; GET /api/owner/mapdata shows its progress. One task at a time.",
+        "operationId": "post_api_owner_mapdata_run",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "activate": {
+                    "default": true,
+                    "description": "Switch the server to the new map once it is built.",
+                    "type": "boolean"
+                  },
+                  "areas": {
+                    "items": {
+                      "description": "A state's Geofabrik slug (ohio, new-york), or us.",
+                      "pattern": "^[a-z][a-z-]{1,40}$",
+                      "type": "string"
+                    },
+                    "maxItems": 53,
+                    "minItems": 1,
+                    "type": "array"
+                  },
+                  "build": {
+                    "default": true,
+                    "description": "Build one map from the areas after downloading.",
+                    "type": "boolean"
+                  },
+                  "csrf_token": {
+                    "description": "From GET /api/me. Browser sessions only.",
+                    "type": "string"
+                  },
+                  "download": {
+                    "default": "missing",
+                    "description": "Which extracts to fetch first: missing ones, all (fresh copies), or none.",
+                    "pattern": "^(missing|all|none)$",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "areas"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "areas": {
+                      "items": {
+                        "$ref": "#/components/schemas/MapArea"
+                      },
+                      "type": "array"
+                    },
+                    "can_build": {
+                      "description": "Whether osmium is installed here, which building needs.",
+                      "type": "boolean"
+                    },
+                    "disk_free_bytes": {
+                      "type": "integer"
+                    },
+                    "folder": {
+                      "type": "string"
+                    },
+                    "graphs": {
+                      "items": {
+                        "$ref": "#/components/schemas/MapGraph"
+                      },
+                      "type": "array"
+                    },
+                    "loaded": {
+                      "$ref": "#/components/schemas/MapLoaded"
+                    },
+                    "memory_bytes": {
+                      "description": "This machine's memory, 0 when unknown.",
+                      "type": "integer"
+                    },
+                    "task": {
+                      "oneOf": [
+                        {
+                          "$ref": "#/components/schemas/MapTask"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "us": {
+                      "$ref": "#/components/schemas/MapArea"
+                    }
+                  },
+                  "required": [
+                    "areas",
+                    "can_build",
+                    "disk_free_bytes",
+                    "folder",
+                    "graphs",
+                    "loaded",
+                    "memory_bytes",
+                    "task",
+                    "us"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "409": {
+            "$ref": "#/components/responses/E409"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "$ref": "#/components/responses/E503"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "Download and build a map",
+        "tags": [
+          "Owner"
+        ],
+        "x-required-role": "owner"
+      },
+      "x-feature": "settings"
+    },
     "/api/owner/portal": {
       "get": {
         "description": "The service accounts ProjectPortal works through, each with its live keys and when they expire.",
@@ -8620,7 +9462,7 @@
     },
     "/api/owner/providers": {
       "get": {
-        "description": "Every other routing engine the planner can ask: whether it has a key (never the key itself), its address, and whether it can be asked now.",
+        "description": "The keys the owner shares with everyone (never the keys themselves), and per engine whether people may use them or must bring their own.",
         "operationId": "get_api_owner_providers",
         "responses": {
           "200": {
@@ -8630,7 +9472,7 @@
                   "properties": {
                     "engines": {
                       "items": {
-                        "$ref": "#/components/schemas/EngineInfo"
+                        "$ref": "#/components/schemas/SharedEngine"
                       },
                       "type": "array"
                     }
@@ -8659,7 +9501,94 @@
             "sessionCookie": []
           }
         ],
-        "summary": "Routing engines and their keys",
+        "summary": "Shared routing engine keys",
+        "tags": [
+          "Owner"
+        ],
+        "x-required-role": "owner"
+      },
+      "x-feature": "settings"
+    },
+    "/api/owner/providers/policy": {
+      "post": {
+        "description": "Per engine: shared lets people without their own key use the owner's; own makes everyone but the owner bring their own key.",
+        "operationId": "post_api_owner_providers_policy",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "csrf_token": {
+                    "description": "From GET /api/me. Browser sessions only.",
+                    "type": "string"
+                  },
+                  "engines": {
+                    "additionalProperties": {
+                      "description": "shared: people without their own key use the owner's. own: everyone but the owner brings their own.",
+                      "enum": [
+                        "own",
+                        "shared"
+                      ],
+                      "type": "string"
+                    },
+                    "description": "Engine id -> shared or own. Engines left out keep theirs.",
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "engines"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "engines": {
+                      "items": {
+                        "$ref": "#/components/schemas/SharedEngine"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "engines"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "$ref": "#/components/responses/E503"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "Who may use the shared keys",
         "tags": [
           "Owner"
         ],
@@ -8669,7 +9598,7 @@
     },
     "/api/owner/providers/{engine}/key": {
       "post": {
-        "description": "Saves the key, sealed in the database. It replaces any key the engine had.",
+        "description": "Saves the shared key, sealed in the database. It replaces any shared key the engine had.",
         "operationId": "post_api_owner_providers_engine_key",
         "parameters": [
           {
@@ -8718,7 +9647,7 @@
                   "properties": {
                     "engines": {
                       "items": {
-                        "$ref": "#/components/schemas/EngineInfo"
+                        "$ref": "#/components/schemas/SharedEngine"
                       },
                       "type": "array"
                     }
@@ -8753,7 +9682,7 @@
             "sessionCookie": []
           }
         ],
-        "summary": "Set a routing engine's API key",
+        "summary": "Set a shared routing engine key",
         "tags": [
           "Owner"
         ],
@@ -8763,7 +9692,7 @@
     },
     "/api/owner/providers/{engine}/key/delete": {
       "post": {
-        "description": "Forgets the key; the planner stops offering the engine if it needs one.",
+        "description": "Forgets the shared key; people without their own key stop being offered the engine.",
         "operationId": "post_api_owner_providers_engine_key_delete",
         "parameters": [
           {
@@ -8802,7 +9731,7 @@
                   "properties": {
                     "engines": {
                       "items": {
-                        "$ref": "#/components/schemas/EngineInfo"
+                        "$ref": "#/components/schemas/SharedEngine"
                       },
                       "type": "array"
                     }
@@ -8837,7 +9766,7 @@
             "sessionCookie": []
           }
         ],
-        "summary": "Remove a routing engine's API key",
+        "summary": "Remove a shared routing engine key",
         "tags": [
           "Owner"
         ],
@@ -8847,7 +9776,7 @@
     },
     "/api/owner/providers/{engine}/test": {
       "post": {
-        "description": "Asks the engine for a short backroads route in Ohio (Columbus to Delaware) with its current key and address, and says whether it answered. Not cached, so it spends one request.",
+        "description": "Like POST /api/providers/{engine}/test, but always with the shared key.",
         "operationId": "post_api_owner_providers_engine_test",
         "parameters": [
           {
@@ -8938,7 +9867,7 @@
             "sessionCookie": []
           }
         ],
-        "summary": "Test a routing engine",
+        "summary": "Test a shared routing engine key",
         "tags": [
           "Owner"
         ],
@@ -9217,6 +10146,341 @@
         "summary": "Change your planner defaults",
         "tags": [
           "Planner"
+        ]
+      }
+    },
+    "/api/providers": {
+      "get": {
+        "description": "Every other routing engine the planner can ask: whether you have your own key (never the key itself), whether the owner shares one, which your plans use, and whether it can be asked now.",
+        "operationId": "get_api_providers",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "engines": {
+                      "items": {
+                        "$ref": "#/components/schemas/EngineInfo"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "engines"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "$ref": "#/components/responses/E503"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "Routing engines and your keys",
+        "tags": [
+          "Settings"
+        ]
+      }
+    },
+    "/api/providers/{engine}/key": {
+      "post": {
+        "description": "Saves your own key, sealed in the database. Your plans use it instead of any shared key.",
+        "operationId": "post_api_providers_engine_key",
+        "parameters": [
+          {
+            "description": "The engine: valhalla, osrm, ors, graphhopper, tomtom, here, mapbox, google.",
+            "in": "path",
+            "name": "engine",
+            "required": true,
+            "schema": {
+              "pattern": "^(valhalla|osrm|ors|graphhopper|tomtom|here|mapbox|google)$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "csrf_token": {
+                    "description": "From GET /api/me. Browser sessions only.",
+                    "type": "string"
+                  },
+                  "key": {
+                    "description": "The API key, as the engine's dashboard shows it.",
+                    "maxLength": 400,
+                    "minLength": 8,
+                    "pattern": "^[\\x21-\\x7e]+$",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "key"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "engines": {
+                      "items": {
+                        "$ref": "#/components/schemas/EngineInfo"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "engines"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "$ref": "#/components/responses/E503"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "Set your key for a routing engine",
+        "tags": [
+          "Settings"
+        ]
+      }
+    },
+    "/api/providers/{engine}/key/delete": {
+      "post": {
+        "description": "Forgets your key; your plans fall back to the shared key, where the owner allows it.",
+        "operationId": "post_api_providers_engine_key_delete",
+        "parameters": [
+          {
+            "description": "The engine: valhalla, osrm, ors, graphhopper, tomtom, here, mapbox, google.",
+            "in": "path",
+            "name": "engine",
+            "required": true,
+            "schema": {
+              "pattern": "^(valhalla|osrm|ors|graphhopper|tomtom|here|mapbox|google)$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "csrf_token": {
+                    "description": "From GET /api/me. Browser sessions only.",
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "engines": {
+                      "items": {
+                        "$ref": "#/components/schemas/EngineInfo"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "engines"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "$ref": "#/components/responses/E503"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "Remove your key for a routing engine",
+        "tags": [
+          "Settings"
+        ]
+      }
+    },
+    "/api/providers/{engine}/test": {
+      "post": {
+        "description": "Asks the engine for a short backroads route in Ohio (Columbus to Delaware) with the key your plans would use, and says whether it answered. Not cached, so it spends one request.",
+        "operationId": "post_api_providers_engine_test",
+        "parameters": [
+          {
+            "description": "The engine: valhalla, osrm, ors, graphhopper, tomtom, here, mapbox, google.",
+            "in": "path",
+            "name": "engine",
+            "required": true,
+            "schema": {
+              "pattern": "^(valhalla|osrm|ors|graphhopper|tomtom|here|mapbox|google)$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "csrf_token": {
+                    "description": "From GET /api/me. Browser sessions only.",
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    },
+                    "meters": {
+                      "type": "number"
+                    },
+                    "milliseconds": {
+                      "type": "integer"
+                    },
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "routes": {
+                      "type": "integer"
+                    },
+                    "seconds": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "message",
+                    "meters",
+                    "milliseconds",
+                    "ok",
+                    "routes",
+                    "seconds"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "$ref": "#/components/responses/E503"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "Test a routing engine",
+        "tags": [
+          "Settings"
         ]
       }
     },
@@ -10089,6 +11353,9 @@
     },
     {
       "name": "Saved routes"
+    },
+    {
+      "name": "Settings"
     }
   ]
 }

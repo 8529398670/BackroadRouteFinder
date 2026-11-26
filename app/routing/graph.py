@@ -155,7 +155,16 @@ class Holder:
         self.state = "missing"
         self.error = ""
         self.load_seconds = 0.0
+        self.switching = False
+        # The file the graph in memory came from (path is the one asked for,
+        # which differs while a switch is loading).
+        self.loaded_path: Path | None = None
         self._lock = threading.Lock()
+
+    @property
+    def region(self) -> str:
+        """The name of the map answering now."""
+        return (self.loaded_path or self.path).stem
 
     def start(self) -> None:
         """Load in a background thread, if there is a file to load."""
@@ -168,20 +177,38 @@ class Holder:
             self.state = "loading"
         threading.Thread(target=self._load, name="graph-load", daemon=True).start()
 
+    def switch(self, path: Path) -> None:
+        """Route on another graph file (the Map data screen). The one loaded
+        now keeps answering until the new one is ready; if the new one fails
+        to load, the old one stays and error says why."""
+        with self._lock:
+            if self.state == "loading" or self.switching:
+                raise RuntimeError("a map is already loading")
+            self.path = path
+            if self.graph is None:
+                self.state = "loading"
+            else:
+                self.switching = True
+        threading.Thread(target=self._load, name="graph-load", daemon=True).start()
+
     def _load(self) -> None:
         began = time.monotonic()
         try:
             graph = load(self.path)
         except Exception as error:  # noqa: BLE001 -- reported on the status route, never fatal
             traceback.print_exc()
-            self.state, self.error = "error", str(error)
+            if self.switching:
+                self.switching, self.error = False, f"could not load {self.path.name}: {error}"
+            else:
+                self.state, self.error = "error", str(error)
             return
         # The index that lays other engines' routes on this map (match.py),
         # built now so the first plan that asks one does not wait for it.
         from app.routing import match
         match._long_pieces(graph)
         self.graph = graph
+        self.loaded_path = self.path
         self.load_seconds = round(time.monotonic() - began, 1)
-        self.state, self.error = "ready", ""
+        self.state, self.error, self.switching = "ready", "", False
         print(f"[routing] graph loaded from {self.path}: {graph.node_count:,} intersections, "
               f"{len(graph.seg_a):,} segments, {len(graph.turns.to):,} turns, in {self.load_seconds}s", flush=True)

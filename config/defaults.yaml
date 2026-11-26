@@ -252,8 +252,8 @@ routing:
 # Other routing engines, asked beside our own router when a plan picks them
 # (the planner's Sources card). Each one's route is laid on our map, so all are
 # measured the same way and the best can be chosen. API keys are secrets and
-# are not here: the owner enters them on the Settings screen ("Routing
-# engines and API keys"), and they are kept sealed in the database.
+# are not here: everyone enters their own on the Settings screen, the owner
+# can share keys with everyone there, and all are kept sealed in the database.
 providers:
   # Valhalla, no key. The FOSSGIS public server is free for light use; point
   # this at your own Valhalla to use it more. Empty switches it off. [live]

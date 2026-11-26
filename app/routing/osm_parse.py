@@ -34,6 +34,7 @@ class Ways:
     names: list[str]        # "" is index 0
     signals: np.ndarray     # int64 ids of highway=traffic_signals nodes
     stops: np.ndarray       # int64 ids of highway=stop nodes
+    way_ids: np.ndarray     # int64 OSM way id per way, so extracts can be merged
 
 
 def _oneway(tags, highway: str) -> int:
@@ -78,6 +79,7 @@ def read(pbf: Path, progress=print) -> Ways:
 
     refs, lat, lon = array("q"), array("d"), array("d")
     starts = array("q", [0])
+    way_ids = array("q")
     road_class, kmh, oneway, unpaved, name_id = array("B"), array("f"), array("b"), array("B"), array("i")
     names: list[str] = [""]
     name_index: dict[str, int] = {"": 0}
@@ -124,6 +126,7 @@ def read(pbf: Path, progress=print) -> Ways:
         lat.extend(way_lat)
         lon.extend(way_lon)
         starts.append(len(refs))
+        way_ids.append(way.id)
         road_class.append(classes.CLASS_INDEX[highway])
         kmh.append(classes.speed_kmh(highway, tags.get("maxspeed")))
         oneway.append(_oneway(tags, highway))
@@ -153,4 +156,47 @@ def read(pbf: Path, progress=print) -> Ways:
         names=names,
         signals=np.frombuffer(signals, dtype=np.int64).copy(),
         stops=np.frombuffer(stops, dtype=np.int64).copy(),
+        way_ids=np.frombuffer(way_ids, dtype=np.int64).copy(),
+    )
+
+
+def merge(parts: list[Ways], progress=print) -> Ways:
+    """Several extracts (neighbouring states) as one. Geofabrik's extracts keep
+    every way that crosses a border whole, in both states, so a way found in
+    more than one is kept once -- otherwise each of its nodes would look like an
+    intersection, and the road would be there twice."""
+    if len(parts) == 1:
+        return parts[0]
+    names: list[str] = [""]
+    name_index: dict[str, int] = {"": 0}
+    name_ids = []
+    for part in parts:
+        remap = np.empty(len(part.names), dtype=np.int32)
+        for i, label in enumerate(part.names):
+            if label not in name_index:
+                name_index[label] = len(names)
+                names.append(label)
+            remap[i] = name_index[label]
+        name_ids.append(remap[part.name_id])
+    way_ids = np.concatenate([p.way_ids for p in parts])
+    lengths = np.concatenate([np.diff(p.starts) for p in parts])
+    _, first = np.unique(way_ids, return_index=True)
+    keep = np.zeros(len(way_ids), dtype=bool)
+    keep[first] = True
+    at = np.repeat(keep, lengths)
+    progress(f"  merged {len(parts)} extracts: {len(way_ids):,} ways, {int((~keep).sum()):,} on a border kept once")
+    return Ways(
+        refs=np.concatenate([p.refs for p in parts])[at],
+        lat=np.concatenate([p.lat for p in parts])[at],
+        lon=np.concatenate([p.lon for p in parts])[at],
+        starts=np.concatenate(([0], np.cumsum(lengths[keep]))).astype(np.int64),
+        road_class=np.concatenate([p.road_class for p in parts])[keep],
+        kmh=np.concatenate([p.kmh for p in parts])[keep],
+        oneway=np.concatenate([p.oneway for p in parts])[keep],
+        unpaved=np.concatenate([p.unpaved for p in parts])[keep],
+        name_id=np.concatenate(name_ids)[keep],
+        names=names,
+        signals=np.unique(np.concatenate([p.signals for p in parts])),
+        stops=np.unique(np.concatenate([p.stops for p in parts])),
+        way_ids=way_ids[keep],
     )

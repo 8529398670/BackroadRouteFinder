@@ -58,10 +58,13 @@ class Plan:
 
 @dataclass(frozen=True)
 class Access:
-    """Where each other engine is and its key: what makes it usable."""
+    """Where each other engine is and the key this person asks it with: what
+    makes it usable. own_required are the engines whose shared key this
+    person may not use (the owner's policy), for why_not."""
     keys: dict[str, str]
     urls: dict[str, str]
     timeout: float
+    own_required: frozenset[str] = frozenset()
 
     def usable(self, engine_id: str) -> bool:
         engine = ENGINES[engine_id]
@@ -76,7 +79,9 @@ class Access:
         engine = ENGINES[engine_id]
         if engine.url_key and not self.urls.get(engine_id):
             return f"switched off (providers.{engine.url_key} is empty)"
-        return "no API key yet: the owner can add one on the Settings screen"
+        if engine_id in self.own_required:
+            return "needs your own API key: add it on the Settings screen"
+        return "no API key yet: add your own on the Settings screen, or ask the owner for a shared one"
 
 
 def score(summary: Summary, penalty: float) -> float:

@@ -54,9 +54,10 @@ Usage:
   rotate-key      --yes                 move to a new secret key; the server must be
                                         stopped (in Docker: docker/rotate-key.sh)
   paths                                 where this app keeps its state
-  fetch-osm                             download the OpenStreetMap extract
+  fetch-osm       [--state slug ...]    download the OpenStreetMap extract (or US states)
                                         (routing.pbf_url) into <app dir>/mapdata/
-  build-graph     [--pbf path]          turn the extract into the router's graph;
+  build-graph     [--pbf path | --state slug ...]
+                                        turn the extract(s) into the router's graph;
                                         needs app/requirements-build.txt (osmium),
                                         then restart the server to load it
   logs            [--day 2026-11-02] [--q "status:5xx"] [--limit 50]
@@ -182,9 +183,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     commands.add_parser("paths", help="where this app keeps its state")
 
-    commands.add_parser("fetch-osm", help="download the OpenStreetMap extract into <app dir>/mapdata/")
+    p = commands.add_parser("fetch-osm", help="download the OpenStreetMap extract into <app dir>/mapdata/")
+    p.add_argument("--state", action="append", default=[], help="a US state's Geofabrik slug (ohio, new-york), or us for the whole country; repeatable")
     p = commands.add_parser("build-graph", help="turn the extract into the router's graph")
     p.add_argument("--pbf", default="", help="an extract to build from instead of mapdata/<region>.osm.pbf")
+    p.add_argument("--state", action="append", default=[], help="build one map from these downloaded states (repeatable), named after them")
 
     p = commands.add_parser("logs", help="the activity log: days, or one day's entries")
     p.add_argument("--day", default="", help="a UTC date, YYYY-MM-DD; without it, list the days")
@@ -209,7 +212,7 @@ def run(arguments: list[str]) -> None:
         return
     # The map files are public data in their own directory: no database.
     if args.command == "fetch-osm":
-        command_fetch_osm(cfg)
+        command_fetch_osm(cfg, args)
         return
     if args.command == "build-graph":
         command_build_graph(cfg, args)
@@ -598,38 +601,63 @@ def command_paths(cfg: config.Config) -> None:
     print("copy can miss writes still in app.db-wal.")
 
 
-def command_fetch_osm(cfg: config.Config) -> None:
-    from app.routing import files
+def command_fetch_osm(cfg: config.Config, args: argparse.Namespace) -> None:
+    from app.routing import files, regions
 
-    target = files.pbf_path(cfg)
-    url = cfg.file.routing.pbf_url
-    print(f"downloading {url}\n  to {target}")
-    try:
-        size = files.download(url, target)
-    except OSError as error:
-        raise ManageError(f"download failed: {error}") from None
-    print(f"done: {size / 1e6:.0f} MB. Next: manage build-graph")
+    jobs = []
+    for slug in args.state:
+        if not regions.valid(slug):
+            raise ManageError(f"unknown state {slug!r}: use a Geofabrik slug like ohio or new-york, or us")
+        jobs.append((regions.url_of(slug), files.pbf_for(cfg, slug)))
+    if not jobs:
+        jobs.append((cfg.file.routing.pbf_url, files.pbf_path(cfg)))
+    for url, target in jobs:
+        print(f"downloading {url}\n  to {target}", flush=True)
+        try:
+            size = files.download(url, target, progress=lambda line: print(line, flush=True))
+        except OSError as error:
+            raise ManageError(f"download failed: {error}") from None
+        print(f"done: {size / 1e6:.0f} MB", flush=True)
+    print("Next: manage build-graph", flush=True)
 
 
 def command_build_graph(cfg: config.Config, args: argparse.Namespace) -> None:
-    from app.routing import files
+    from app.routing import files, regions
 
     try:
         from app.routing import build, osm_parse
     except ImportError as error:
         raise ManageError(f"{error}: install the build tools first: .venv/bin/pip install -r app/requirements-build.txt") from None
-    source = Path(args.pbf) if args.pbf else files.pbf_path(cfg)
-    if not source.is_file():
-        raise ManageError(f"no extract at {source}: run manage fetch-osm first, or pass --pbf")
-    out = files.graph_path(cfg)
-    print(f"reading {source}")
+    if args.state:
+        for slug in args.state:
+            if not regions.valid(slug):
+                raise ManageError(f"unknown state {slug!r}")
+        region = regions.region_name(args.state)
+        slugs = [regions.US] if region == regions.US else sorted(set(args.state))
+        sources = [files.pbf_for(cfg, slug) for slug in slugs]
+        out = files.graph_for(cfg, region)
+    else:
+        slugs = []
+        sources = [Path(args.pbf) if args.pbf else files.pbf_path(cfg)]
+        out = files.graph_path(cfg)
+    for source in sources:
+        if not source.is_file():
+            raise ManageError(f"no extract at {source}: run manage fetch-osm first, or pass --pbf")
     try:
         import osmium  # noqa: F401
     except ImportError as error:
         raise ManageError(f"{error}: install the build tools first: .venv/bin/pip install -r app/requirements-build.txt") from None
-    ways = osm_parse.read(source)
-    print("building the graph")
-    meta = build.build(ways, out, source.name)
-    print(f"wrote {out}: {meta['nodes']:,} intersections, {meta['segments']:,} segments, "
-          f"{meta['bytes'] / 1e6:.0f} MB, in {meta['seconds']}s")
-    print("Restart the server (scripts/run.sh) to route on it.")
+    say = lambda line: print(line, flush=True)  # noqa: E731
+    parts = []
+    for source in sources:
+        say(f"reading {source}")
+        parts.append(osm_parse.read(source, progress=say))
+    ways = osm_parse.merge(parts, progress=say)
+    del parts
+    say("building the graph")
+    meta = build.build(ways, out, ",".join(s.name for s in sources), progress=say)
+    if slugs:
+        files.write_areas(cfg, out.stem, slugs)
+    say(f"wrote {out}: {meta['nodes']:,} intersections, {meta['segments']:,} segments, "
+        f"{meta['bytes'] / 1e6:.0f} MB, in {meta['seconds']}s")
+    print("Use it from the Map data screen, or restart the server (scripts/run.sh).", flush=True)

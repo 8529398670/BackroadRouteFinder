@@ -817,3 +817,11 @@ body { padding-left: env(safe-area-inset-left); padding-right: env(safe-area-ins
 .plan-share-main { background: var(--plan-main); }
 .plan-badge-main { background: var(--plan-main); }
 .plan-penalty-value { min-width: 3.25rem; }
+
+/* Map data screen: the download/build output, and the state list. */
+.mapdata-log { max-height: 16rem; overflow: auto; white-space: pre-wrap; background: var(--bs-tertiary-bg); border-radius: var(--bs-border-radius); padding: 0.5rem 0.75rem; }
+.mapdata-log:empty { display: none; }
+.mapdata-states .form-check { padding-left: 2.25rem; }
+
+/* Settings: room for a pasted key beside its Save button. */
+.engines-key { min-width: 16rem; }

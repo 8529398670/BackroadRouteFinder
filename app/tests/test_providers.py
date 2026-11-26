@@ -149,6 +149,79 @@ class KeysTest(unittest.TestCase):
         self.store.put(db.BUCKET_META, provider_keys.META_KEY, record)
         self.assertEqual(provider_keys.get_all(self.store, new_key), {"mapbox": "pk.abcdefghijklmnop"})
 
+    def test_own_keys_and_rotation(self) -> None:
+        from app.models import users
+
+        user = users.create_user(self.store, "Grace", "user")
+        self.assertTrue(provider_keys.set_user_key(self.store, self.key, user.id, "here", "mine12345678"))
+        self.assertEqual(provider_keys.get_user_keys(self.store, self.key, user.id), {"here": "mine12345678"})
+        record = self.store.get(db.BUCKET_USERS, user.id)
+        self.assertNotIn("mine12345678", str(record))
+        new_key = encryption.generate_key_hex()
+        sealed.rekey_record(self.key, new_key)(db.BUCKET_USERS, record)
+        self.store.put(db.BUCKET_USERS, user.id, record)
+        self.assertEqual(provider_keys.get_user_keys(self.store, new_key, user.id), {"here": "mine12345678"})
+        self.assertTrue(provider_keys.delete_user_key(self.store, user.id, "here"))
+        self.assertFalse(provider_keys.delete_user_key(self.store, user.id, "here"))
+
+    def test_policy(self) -> None:
+        self.assertEqual(set(provider_keys.get_policy(self.store).values()), {"shared"})
+        provider_keys.set_policy(self.store, {"here": "own", "bogus": "own", "tomtom": "nonsense"})
+        policy = provider_keys.get_policy(self.store)
+        self.assertEqual(policy["here"], "own")
+        self.assertEqual(policy["tomtom"], "shared")
+        self.assertNotIn("bogus", policy)
+
+    def test_effective(self) -> None:
+        shared = {"here": "S" * 10, "tomtom": "T" * 10}
+        own = {"tomtom": "U" * 10}
+        policy = {engine_id: "shared" for engine_id in ENGINES} | {"here": "own"}
+        keys, origin = provider_keys.effective(shared, own, policy, is_owner=False)
+        self.assertEqual(keys, {"tomtom": "U" * 10})            # own wins; here's shared key is not inherited
+        self.assertEqual(origin, {"tomtom": "yours"})
+        keys, origin = provider_keys.effective(shared, {}, policy, is_owner=True)
+        self.assertEqual(origin, {"here": "shared", "tomtom": "shared"})  # the owner always has them
+        policy["here"] = "shared"
+        keys, _ = provider_keys.effective(shared, {}, policy, is_owner=False)
+        self.assertEqual(keys["here"], "S" * 10)
+        access = sources.Access(keys={}, urls={}, timeout=5, own_required=frozenset({"here"}))
+        self.assertIn("your own", access.why_not("here"))
+
+
+class MapDataTest(unittest.TestCase):
+    def test_region_names(self) -> None:
+        from app.routing import regions
+
+        self.assertEqual(regions.region_name(["ohio"]), "ohio")
+        self.assertEqual(regions.region_name(["ohio", "indiana", "ohio"]), "indiana_ohio")
+        self.assertEqual(regions.region_name(["ohio", "us"]), "us")
+        self.assertTrue(regions.region_name(list(regions.STATES)).startswith("states-"))
+        self.assertTrue(regions.url_of("new-york").endswith("/us/new-york-latest.osm.pbf"))
+
+    def test_merge_keeps_border_ways_once(self) -> None:
+        import numpy as np
+
+        from app.routing import osm_parse
+
+        def ways(ids, names, refs_per_way):
+            refs = [r for way in refs_per_way for r in way]
+            starts = np.concatenate(([0], np.cumsum([len(w) for w in refs_per_way])))
+            return osm_parse.Ways(
+                refs=np.array(refs, dtype=np.int64), lat=np.array(refs, dtype=np.float64), lon=np.array(refs, dtype=np.float64),
+                starts=starts.astype(np.int64), road_class=np.zeros(len(ids), dtype=np.uint8), kmh=np.ones(len(ids), dtype=np.float32),
+                oneway=np.zeros(len(ids), dtype=np.int8), unpaved=np.zeros(len(ids), dtype=bool),
+                name_id=np.arange(1, len(ids) + 1, dtype=np.int32), names=[""] + names,
+                signals=np.array([1], dtype=np.int64), stops=np.array([], dtype=np.int64), way_ids=np.array(ids, dtype=np.int64))
+
+        a = ways([10, 11], ["A St", "Border Rd"], [[1, 2], [2, 3, 4]])
+        b = ways([11, 12], ["Border Rd", "B Ave"], [[2, 3, 4], [4, 5]])
+        merged = osm_parse.merge([a, b], progress=lambda _line: None)
+        self.assertEqual(list(merged.way_ids), [10, 11, 12])
+        self.assertEqual(list(merged.refs), [1, 2, 2, 3, 4, 4, 5])
+        self.assertEqual(list(merged.starts), [0, 2, 5, 7])
+        self.assertEqual([merged.names[i] for i in merged.name_id], ["A St", "Border Rd", "B Ave"])
+        self.assertEqual(list(merged.signals), [1])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,5 +1,13 @@
-"""Other routing engines' API keys (app/routing/providers), entered by the
-owner on the Settings screen.
+"""Other routing engines' API keys (app/routing/providers).
+
+Two kinds, both entered on the Settings screen:
+- shared keys, set by the owner for everyone (one meta record);
+- each person's own keys, on their user record.
+
+Which one a plan uses is the owner's policy, per engine: "shared" lets
+everyone use the owner's key when they have none of their own, "own" makes
+everyone (but the owner) bring their own. Someone's own key always wins over
+the shared one, so their plans spend their own quota.
 
 They are secrets, so they are not in config.yaml (which holds none, and may be
 committed or shared). They are kept in one meta record, each sealed with
@@ -10,24 +18,29 @@ back: the screens see only whether a key is set and its last four characters.
 from __future__ import annotations
 
 from app.core import encryption
-from app.core.db import BUCKET_META, Record, Store
+from app.core.db import BUCKET_META, BUCKET_USERS, Record, Store
 from app.routing.providers import ENGINES
 
 META_KEY = "provider_keys"
 FIELD_PREFIX = "provider_key_"
 MAX_KEY_LENGTH = 400
 
-# Every engine's field, for sealed.py's rotation.
+POLICY_KEY = "provider_key_policy"
+SHARED = "shared"
+OWN = "own"
+POLICIES = (SHARED, OWN)
+
+# Every engine's field, for sealed.py's rotation: the shared keys' meta record
+# and every user record use the same field names.
 SEALED_META_FIELDS: dict[str, str] = {FIELD_PREFIX + engine_id: encryption.PURPOSE_PROVIDERS for engine_id in ENGINES}
+SEALED_USER_FIELDS: dict[str, str] = dict(SEALED_META_FIELDS)
 
 
 def _subkey(secret_key: str) -> str:
     return encryption.subkey(secret_key, encryption.PURPOSE_PROVIDERS)
 
 
-def get_all(store: Store, secret_key: str) -> dict[str, str]:
-    """Engine id -> key, for every engine that has one."""
-    record = store.get(BUCKET_META, META_KEY) or {}
+def _open_all(record: Record, secret_key: str) -> dict[str, str]:
     out: dict[str, str] = {}
     for engine_id in ENGINES:
         sealed = record.get(FIELD_PREFIX + engine_id, "")
@@ -38,6 +51,68 @@ def get_all(store: Store, secret_key: str) -> dict[str, str]:
         except encryption.CipherTextError:
             continue
     return out
+
+
+def get_all(store: Store, secret_key: str) -> dict[str, str]:
+    """The shared keys: engine id -> key, for every engine that has one."""
+    return _open_all(store.get(BUCKET_META, META_KEY) or {}, secret_key)
+
+
+def get_user_keys(store: Store, secret_key: str, user_id: int) -> dict[str, str]:
+    """One person's own keys: engine id -> key."""
+    return _open_all(store.get(BUCKET_USERS, user_id) or {}, secret_key)
+
+
+def set_user_key(store: Store, secret_key: str, user_id: int, engine_id: str, key: str) -> bool:
+    sealed = encryption.xchacha_encrypt_string(_subkey(secret_key), key)
+
+    def mutate(record: Record) -> None:
+        record[FIELD_PREFIX + engine_id] = sealed
+
+    return store.update_value(BUCKET_USERS, user_id, mutate) is not None
+
+
+def delete_user_key(store: Store, user_id: int, engine_id: str) -> bool:
+    found = False
+
+    def mutate(record: Record) -> None:
+        nonlocal found
+        found = record.pop(FIELD_PREFIX + engine_id, None) is not None
+
+    store.update_value(BUCKET_USERS, user_id, mutate)
+    return found
+
+
+def get_policy(store: Store) -> dict[str, str]:
+    """Engine id -> "shared" or "own", for every engine (shared by default)."""
+    record = store.get(BUCKET_META, POLICY_KEY) or {}
+    engines = record.get("engines") or {}
+    return {engine_id: engines.get(engine_id) if engines.get(engine_id) in POLICIES else SHARED for engine_id in ENGINES}
+
+
+def set_policy(store: Store, policy: dict[str, str]) -> dict[str, str]:
+    merged = get_policy(store)
+    merged.update({engine_id: mode for engine_id, mode in policy.items() if engine_id in ENGINES and mode in POLICIES})
+
+    def mutate(record: Record) -> None:
+        record["engines"] = merged
+
+    if store.update_value(BUCKET_META, POLICY_KEY, mutate) is None:
+        store.put(BUCKET_META, POLICY_KEY, {"engines": merged})
+    return merged
+
+
+def effective(shared: dict[str, str], own: dict[str, str], policy: dict[str, str], is_owner: bool) -> tuple[dict[str, str], dict[str, str]]:
+    """The key each engine is asked with for one person, and where it came
+    from ("yours" or "shared"). The owner always has the shared keys."""
+    keys: dict[str, str] = {}
+    origin: dict[str, str] = {}
+    for engine_id in ENGINES:
+        if own.get(engine_id):
+            keys[engine_id], origin[engine_id] = own[engine_id], "yours"
+        elif shared.get(engine_id) and (is_owner or policy.get(engine_id, SHARED) == SHARED):
+            keys[engine_id], origin[engine_id] = shared[engine_id], "shared"
+    return keys, origin
 
 
 def hint(key: str) -> str:

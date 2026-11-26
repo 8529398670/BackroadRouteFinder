@@ -10,13 +10,13 @@ from typing import Callable
 from app.core import encryption
 from app.core.db import Record
 from app.core.db import BUCKET_META, BUCKET_USERS
-from app.models.provider_keys import SEALED_META_FIELDS
+from app.models.provider_keys import SEALED_META_FIELDS, SEALED_USER_FIELDS
 
 # Every field sealed on its own, by bucket, with the purpose whose subkey of
 # secret.key seals it (see encryption.subkey). Anything else that seals a field
 # belongs here too, or that field is lost at the next rotation.
 SEALED_FIELDS: dict[str, dict[str, str]] = {
-    BUCKET_USERS: {"totp_secret": encryption.PURPOSE_TOTP, "totp_pending": encryption.PURPOSE_TOTP},
+    BUCKET_USERS: {"totp_secret": encryption.PURPOSE_TOTP, "totp_pending": encryption.PURPOSE_TOTP, **SEALED_USER_FIELDS},
     BUCKET_META: SEALED_META_FIELDS,
 }
 

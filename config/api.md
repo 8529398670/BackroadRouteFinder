@@ -16,6 +16,7 @@ This file is generated: do not edit it. Change the docs next to the handlers and
 - [Monitoring](#monitoring)
 - [Planner](#planner)
 - [Saved routes](#saved-routes)
+- [Settings](#settings)
 - [Schemas](#schemas)
 
 ## Calling the API
@@ -1779,13 +1780,19 @@ Runs POST /api/admin/users/{user_id}/sessions/{session_id}/revoke once per item:
 | POST | [`/api/owner/logs/ip-names/delete`](#post-apiownerlogsip-namesdelete) | Take a name off an address or a range | browser session only, the owner |
 | POST | [`/api/owner/logs/prune`](#post-apiownerlogsprune) | Apply the retention rules now | browser session only, the owner |
 | GET | [`/api/owner/logs/stream`](#get-apiownerlogsstream) | New log entries as they happen | browser session only, the owner |
+| GET | [`/api/owner/mapdata`](#get-apiownermapdata) | Map data | browser session only, the owner |
+| POST | [`/api/owner/mapdata/activate`](#post-apiownermapdataactivate) | Route on another map | browser session only, the owner |
+| POST | [`/api/owner/mapdata/cancel`](#post-apiownermapdatacancel) | Stop the map task | browser session only, the owner |
+| POST | [`/api/owner/mapdata/delete`](#post-apiownermapdatadelete) | Delete a map file | browser session only, the owner |
+| POST | [`/api/owner/mapdata/run`](#post-apiownermapdatarun) | Download and build a map | browser session only, the owner |
 | GET | [`/api/owner/portal`](#get-apiownerportal) | ProjectPortal's accounts | browser session only, the owner |
 | POST | [`/api/owner/portal/connect`](#post-apiownerportalconnect) | Connect ProjectPortal | browser session only, the owner |
 | POST | [`/api/owner/portal/disconnect`](#post-apiownerportaldisconnect) | Disconnect ProjectPortal | browser session only, the owner |
-| GET | [`/api/owner/providers`](#get-apiownerproviders) | Routing engines and their keys | browser session only, the owner |
-| POST | [`/api/owner/providers/{engine}/key`](#post-apiownerprovidersenginekey) | Set a routing engine's API key | browser session only, the owner |
-| POST | [`/api/owner/providers/{engine}/key/delete`](#post-apiownerprovidersenginekeydelete) | Remove a routing engine's API key | browser session only, the owner |
-| POST | [`/api/owner/providers/{engine}/test`](#post-apiownerprovidersenginetest) | Test a routing engine | browser session only, the owner |
+| GET | [`/api/owner/providers`](#get-apiownerproviders) | Shared routing engine keys | browser session only, the owner |
+| POST | [`/api/owner/providers/policy`](#post-apiownerproviderspolicy) | Who may use the shared keys | browser session only, the owner |
+| POST | [`/api/owner/providers/{engine}/key`](#post-apiownerprovidersenginekey) | Set a shared routing engine key | browser session only, the owner |
+| POST | [`/api/owner/providers/{engine}/key/delete`](#post-apiownerprovidersenginekeydelete) | Remove a shared routing engine key | browser session only, the owner |
+| POST | [`/api/owner/providers/{engine}/test`](#post-apiownerprovidersenginetest) | Test a shared routing engine key | browser session only, the owner |
 | GET | [`/api/owner/settings`](#get-apiownersettings) | config.yaml, as a form | browser session only, the owner |
 | POST | [`/api/owner/settings`](#post-apiownersettings) | Save settings | browser session only, the owner |
 
@@ -2015,6 +2022,162 @@ New log entries as they happen
 
 Text, as `text/event-stream`.
 
+### GET /api/owner/mapdata
+
+Map data
+
+The map the server routes on, the extracts downloaded and maps built so far, every state that can be downloaded, and the download or build running now (with its output).
+
+|  |  |
+|---|---|
+| Who may call | browser session only, the owner |
+| Errors | 404, 429, 503 |
+
+**Reply 200**: Success
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `areas` | array of [`MapArea`](#maparea) | yes |  |  |
+| `can_build` | boolean | yes |  | Whether osmium is installed here, which building needs. |
+| `disk_free_bytes` | integer | yes |  |  |
+| `folder` | string | yes |  |  |
+| `graphs` | array of [`MapGraph`](#mapgraph) | yes |  |  |
+| `loaded` | [`MapLoaded`](#maploaded) | yes |  |  |
+| `memory_bytes` | integer | yes |  | This machine's memory, 0 when unknown. |
+| `task` | [`MapTask`](#maptask) or null | yes |  |  |
+| `us` | [`MapArea`](#maparea) | yes |  |  |
+
+### POST /api/owner/mapdata/activate
+
+Route on another map
+
+Switches the server to a map built earlier, without a restart. The current one keeps answering until the new one has loaded. Remembered across restarts.
+
+|  |  |
+|---|---|
+| Who may call | browser session only, the owner |
+| Errors | 400, 403, 404, 409, 429, 503 |
+
+**Request body**
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `csrf_token` | string | no |  | From GET /api/me. Browser sessions only. |
+| `region` | string | yes |  | A built map's name, as GET /api/owner/mapdata lists it. |
+
+**Reply 200**: Success
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `areas` | array of [`MapArea`](#maparea) | yes |  |  |
+| `can_build` | boolean | yes |  | Whether osmium is installed here, which building needs. |
+| `disk_free_bytes` | integer | yes |  |  |
+| `folder` | string | yes |  |  |
+| `graphs` | array of [`MapGraph`](#mapgraph) | yes |  |  |
+| `loaded` | [`MapLoaded`](#maploaded) | yes |  |  |
+| `memory_bytes` | integer | yes |  | This machine's memory, 0 when unknown. |
+| `task` | [`MapTask`](#maptask) or null | yes |  |  |
+| `us` | [`MapArea`](#maparea) | yes |  |  |
+
+### POST /api/owner/mapdata/cancel
+
+Stop the map task
+
+Stops the download or build running now. A cut-off download leaves no file behind.
+
+|  |  |
+|---|---|
+| Who may call | browser session only, the owner |
+| Errors | 400, 403, 404, 409, 429, 503 |
+
+**Request body**
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `csrf_token` | string | no |  | From GET /api/me. Browser sessions only. |
+
+**Reply 200**: Success
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `areas` | array of [`MapArea`](#maparea) | yes |  |  |
+| `can_build` | boolean | yes |  | Whether osmium is installed here, which building needs. |
+| `disk_free_bytes` | integer | yes |  |  |
+| `folder` | string | yes |  |  |
+| `graphs` | array of [`MapGraph`](#mapgraph) | yes |  |  |
+| `loaded` | [`MapLoaded`](#maploaded) | yes |  |  |
+| `memory_bytes` | integer | yes |  | This machine's memory, 0 when unknown. |
+| `task` | [`MapTask`](#maptask) or null | yes |  |  |
+| `us` | [`MapArea`](#maparea) | yes |  |  |
+
+### POST /api/owner/mapdata/delete
+
+Delete a map file
+
+Deletes a downloaded extract or a built map to free disk space. The map the server is routing on cannot be deleted.
+
+|  |  |
+|---|---|
+| Who may call | browser session only, the owner |
+| Errors | 400, 403, 404, 409, 429, 503 |
+
+**Request body**
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `csrf_token` | string | no |  | From GET /api/me. Browser sessions only. |
+| `kind` | string | yes |  | extract (a downloaded .osm.pbf) or map (a built .npz). |
+| `name` | string | yes |  | The area's slug, or the map's name. |
+
+**Reply 200**: Success
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `areas` | array of [`MapArea`](#maparea) | yes |  |  |
+| `can_build` | boolean | yes |  | Whether osmium is installed here, which building needs. |
+| `disk_free_bytes` | integer | yes |  |  |
+| `folder` | string | yes |  |  |
+| `graphs` | array of [`MapGraph`](#mapgraph) | yes |  |  |
+| `loaded` | [`MapLoaded`](#maploaded) | yes |  |  |
+| `memory_bytes` | integer | yes |  | This machine's memory, 0 when unknown. |
+| `task` | [`MapTask`](#maptask) or null | yes |  |  |
+| `us` | [`MapArea`](#maparea) | yes |  |  |
+
+### POST /api/owner/mapdata/run
+
+Download and build a map
+
+Downloads the areas' extracts from Geofabrik (missing ones, all, or none), builds one map from them, and switches the server to it -- each step optional. Runs in the background; GET /api/owner/mapdata shows its progress. One task at a time.
+
+|  |  |
+|---|---|
+| Who may call | browser session only, the owner |
+| Errors | 400, 403, 404, 409, 429, 503 |
+
+**Request body**
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `activate` | boolean | no | default `true` | Switch the server to the new map once it is built. |
+| `areas` | array of string | yes |  |  |
+| `build` | boolean | no | default `true` | Build one map from the areas after downloading. |
+| `csrf_token` | string | no |  | From GET /api/me. Browser sessions only. |
+| `download` | string | no | default `missing` | Which extracts to fetch first: missing ones, all (fresh copies), or none. |
+
+**Reply 200**: Success
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `areas` | array of [`MapArea`](#maparea) | yes |  |  |
+| `can_build` | boolean | yes |  | Whether osmium is installed here, which building needs. |
+| `disk_free_bytes` | integer | yes |  |  |
+| `folder` | string | yes |  |  |
+| `graphs` | array of [`MapGraph`](#mapgraph) | yes |  |  |
+| `loaded` | [`MapLoaded`](#maploaded) | yes |  |  |
+| `memory_bytes` | integer | yes |  | This machine's memory, 0 when unknown. |
+| `task` | [`MapTask`](#maptask) or null | yes |  |  |
+| `us` | [`MapArea`](#maparea) | yes |  |  |
+
 ### GET /api/owner/portal
 
 ProjectPortal's accounts
@@ -2082,9 +2245,9 @@ Revokes every key of the service account user_id, and with them every key and li
 
 ### GET /api/owner/providers
 
-Routing engines and their keys
+Shared routing engine keys
 
-Every other routing engine the planner can ask: whether it has a key (never the key itself), its address, and whether it can be asked now.
+The keys the owner shares with everyone (never the keys themselves), and per engine whether people may use them or must bring their own.
 
 |  |  |
 |---|---|
@@ -2095,13 +2258,37 @@ Every other routing engine the planner can ask: whether it has a key (never the 
 
 | Field | Type | Required | Limits | Description |
 |---|---|---|---|---|
-| `engines` | array of [`EngineInfo`](#engineinfo) | yes |  |  |
+| `engines` | array of [`SharedEngine`](#sharedengine) | yes |  |  |
+
+### POST /api/owner/providers/policy
+
+Who may use the shared keys
+
+Per engine: shared lets people without their own key use the owner's; own makes everyone but the owner bring their own key.
+
+|  |  |
+|---|---|
+| Who may call | browser session only, the owner |
+| Errors | 400, 403, 404, 429, 503 |
+
+**Request body**
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `csrf_token` | string | no |  | From GET /api/me. Browser sessions only. |
+| `engines` | map of string | yes |  | Engine id -> shared or own. Engines left out keep theirs. |
+
+**Reply 200**: Success
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `engines` | array of [`SharedEngine`](#sharedengine) | yes |  |  |
 
 ### POST /api/owner/providers/{engine}/key
 
-Set a routing engine's API key
+Set a shared routing engine key
 
-Saves the key, sealed in the database. It replaces any key the engine had.
+Saves the shared key, sealed in the database. It replaces any shared key the engine had.
 
 |  |  |
 |---|---|
@@ -2125,13 +2312,13 @@ Saves the key, sealed in the database. It replaces any key the engine had.
 
 | Field | Type | Required | Limits | Description |
 |---|---|---|---|---|
-| `engines` | array of [`EngineInfo`](#engineinfo) | yes |  |  |
+| `engines` | array of [`SharedEngine`](#sharedengine) | yes |  |  |
 
 ### POST /api/owner/providers/{engine}/key/delete
 
-Remove a routing engine's API key
+Remove a shared routing engine key
 
-Forgets the key; the planner stops offering the engine if it needs one.
+Forgets the shared key; people without their own key stop being offered the engine.
 
 |  |  |
 |---|---|
@@ -2154,13 +2341,13 @@ Forgets the key; the planner stops offering the engine if it needs one.
 
 | Field | Type | Required | Limits | Description |
 |---|---|---|---|---|
-| `engines` | array of [`EngineInfo`](#engineinfo) | yes |  |  |
+| `engines` | array of [`SharedEngine`](#sharedengine) | yes |  |  |
 
 ### POST /api/owner/providers/{engine}/test
 
-Test a routing engine
+Test a shared routing engine key
 
-Asks the engine for a short backroads route in Ohio (Columbus to Delaware) with its current key and address, and says whether it answered. Not cached, so it spends one request.
+Like POST /api/providers/{engine}/test, but always with the shared key.
 
 |  |  |
 |---|---|
@@ -2599,6 +2786,125 @@ Bring back a saved route deleted in the last 10 minutes.
 
 [`SavedRoute`](#savedroute).
 
+## Settings
+
+| Method | Path | Summary | Who may call |
+|---|---|---|---|
+| GET | [`/api/providers`](#get-apiproviders) | Routing engines and your keys | browser session or API key, anyone signed in |
+| POST | [`/api/providers/{engine}/key`](#post-apiprovidersenginekey) | Set your key for a routing engine | browser session or API key, anyone signed in |
+| POST | [`/api/providers/{engine}/key/delete`](#post-apiprovidersenginekeydelete) | Remove your key for a routing engine | browser session or API key, anyone signed in |
+| POST | [`/api/providers/{engine}/test`](#post-apiprovidersenginetest) | Test a routing engine | browser session or API key, anyone signed in |
+
+### GET /api/providers
+
+Routing engines and your keys
+
+Every other routing engine the planner can ask: whether you have your own key (never the key itself), whether the owner shares one, which your plans use, and whether it can be asked now.
+
+|  |  |
+|---|---|
+| Who may call | browser session or API key, anyone signed in |
+| Errors | 401, 429, 503 |
+
+**Reply 200**: Success
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `engines` | array of [`EngineInfo`](#engineinfo) | yes |  |  |
+
+### POST /api/providers/{engine}/key
+
+Set your key for a routing engine
+
+Saves your own key, sealed in the database. Your plans use it instead of any shared key.
+
+|  |  |
+|---|---|
+| Who may call | browser session or API key, anyone signed in |
+| Errors | 400, 401, 403, 429, 503 |
+
+**Parameters**
+
+| Name | In | Type | Required | Limits | Description |
+|---|---|---|---|---|---|
+| `engine` | path | string | yes |  | The engine: valhalla, osrm, ors, graphhopper, tomtom, here, mapbox, google. |
+
+**Request body**
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `csrf_token` | string | no |  | From GET /api/me. Browser sessions only. |
+| `key` | string | yes | 8 to 400 characters | The API key, as the engine's dashboard shows it. |
+
+**Reply 200**: Success
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `engines` | array of [`EngineInfo`](#engineinfo) | yes |  |  |
+
+### POST /api/providers/{engine}/key/delete
+
+Remove your key for a routing engine
+
+Forgets your key; your plans fall back to the shared key, where the owner allows it.
+
+|  |  |
+|---|---|
+| Who may call | browser session or API key, anyone signed in |
+| Errors | 400, 401, 403, 404, 429, 503 |
+
+**Parameters**
+
+| Name | In | Type | Required | Limits | Description |
+|---|---|---|---|---|---|
+| `engine` | path | string | yes |  | The engine: valhalla, osrm, ors, graphhopper, tomtom, here, mapbox, google. |
+
+**Request body**
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `csrf_token` | string | no |  | From GET /api/me. Browser sessions only. |
+
+**Reply 200**: Success
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `engines` | array of [`EngineInfo`](#engineinfo) | yes |  |  |
+
+### POST /api/providers/{engine}/test
+
+Test a routing engine
+
+Asks the engine for a short backroads route in Ohio (Columbus to Delaware) with the key your plans would use, and says whether it answered. Not cached, so it spends one request.
+
+|  |  |
+|---|---|
+| Who may call | browser session or API key, anyone signed in |
+| Errors | 400, 401, 403, 429, 503 |
+
+**Parameters**
+
+| Name | In | Type | Required | Limits | Description |
+|---|---|---|---|---|---|
+| `engine` | path | string | yes |  | The engine: valhalla, osrm, ors, graphhopper, tomtom, here, mapbox, google. |
+
+**Request body**
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `csrf_token` | string | no |  | From GET /api/me. Browser sessions only. |
+
+**Reply 200**: Success
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `message` | string | yes |  |  |
+| `meters` | number | yes |  |  |
+| `milliseconds` | integer | yes |  |  |
+| `ok` | boolean | yes |  |  |
+| `routes` | integer | yes |  |  |
+| `seconds` | number | yes |  |  |
+
 ## Schemas
 
 The shapes the routes above refer to by name.
@@ -2651,14 +2957,17 @@ The shapes the routes above refer to by name.
 | `backroads` | string | yes |  |  |
 | `free_tier` | string | yes |  |  |
 | `id` | string | yes |  |  |
-| `key_hint` | string | yes |  | The key's last four characters, while one is set. |
-| `key_set` | boolean | yes |  |  |
+| `key_hint` | string | yes |  | Your key's last four characters, while one is set. |
+| `key_set` | boolean | yes |  | Whether you have your own key for it. |
 | `name` | string | yes |  |  |
 | `needs_key` | boolean | yes |  |  |
+| `policy` | string | yes | one of `shared`, `own` | shared: people without their own key use the owner's. own: everyone but the owner brings their own. |
+| `shared_key_set` | boolean | yes |  | Whether the owner has set a shared key for it. |
 | `signup_url` | string | yes |  |  |
 | `url` | string | yes |  |  |
 | `url_setting` | string | yes |  | The providers.* setting holding its address, or empty when it is fixed. |
 | `usable` | boolean | yes |  |  |
+| `using` | string | yes |  | Which key your plans use: yours, shared, or none. |
 | `why_not` | string | yes |  |  |
 
 ### Error
@@ -2729,6 +3038,57 @@ The shapes the routes above refer to by name.
 |---|---|---|---|---|
 | `error` | string | yes |  |  |
 | `maintenance` | string | yes | one of `read_only`, `full` |  |
+
+### MapArea
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `approx_mb` | integer | yes |  | Roughly how big its download is. |
+| `downloaded` | [`MapFile`](#mapfile) or null | yes |  |  |
+| `name` | string | yes |  |  |
+| `slug` | string | yes |  |  |
+
+### MapFile
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `bytes` | integer | yes |  |  |
+| `modified` | string | yes |  | When it was written, ISO 8601. |
+
+### MapGraph
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `active` | boolean | yes |  |  |
+| `areas` | array of string | yes |  |  |
+| `file` | [`MapFile`](#mapfile) | yes |  |  |
+| `region` | string | yes |  |  |
+
+### MapLoaded
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `areas` | array of string | yes |  |  |
+| `built_at` | string | yes |  |  |
+| `error` | string | yes |  |  |
+| `nodes` | integer | yes |  |  |
+| `region` | string | yes |  |  |
+| `segments` | integer | yes |  |  |
+| `state` | string | yes |  | missing, loading, ready or error. |
+| `switching` | boolean | yes |  | Another map is loading; this one answers until it is ready. |
+
+### MapTask
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `finished` | string | yes |  |  |
+| `id` | integer | yes |  |  |
+| `lines` | array of string | yes |  |  |
+| `started` | string | yes |  |  |
+| `state` | string | yes |  | running, done, failed or cancelled. |
+| `step` | integer | yes |  |  |
+| `steps` | integer | yes |  |  |
+| `title` | string | yes |  |  |
 
 ### Me
 
@@ -2986,6 +3346,18 @@ The shapes the routes above refer to by name.
 | `stale` | boolean | yes |  |  |
 | `version` | string | yes |  | Send it back when saving: a changed file is refused with a 409. |
 | `writable` | boolean | yes |  |  |
+
+### SharedEngine
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `id` | string | yes |  |  |
+| `key_hint` | string | yes |  | The shared key's last four characters, while one is set. |
+| `key_set` | boolean | yes |  | Whether a shared key is set. |
+| `name` | string | yes |  |  |
+| `needs_key` | boolean | yes |  |  |
+| `policy` | string | yes | one of `shared`, `own` | shared: people without their own key use the owner's. own: everyone but the owner brings their own. |
+| `signup_url` | string | yes |  |  |
 
 ### SignIn
 
