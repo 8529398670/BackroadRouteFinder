@@ -1448,7 +1448,7 @@
           "alternatives": {
             "default": 5,
             "description": "How many routes to offer, best first: the best and up to this many less one alternatives on different roads.",
-            "maximum": 10,
+            "maximum": 36,
             "minimum": 1,
             "type": "integer"
           },
@@ -1459,7 +1459,7 @@
           },
           "combine": {
             "default": "best",
-            "description": "Older than alternatives: best is 1 route, all is up to 12. Ignored when alternatives is given.",
+            "description": "Older than alternatives: best is 1 route, all is up to 36. Ignored when alternatives is given.",
             "pattern": "^(best|all)$",
             "type": "string"
           },
@@ -1697,7 +1697,7 @@
           },
           "alternatives": {
             "description": "How many routes to offer, best first: the best and up to this many less one alternatives on different roads.",
-            "maximum": 10,
+            "maximum": 36,
             "minimum": 1,
             "type": [
               "integer",
@@ -1710,7 +1710,7 @@
           },
           "combine": {
             "default": "best",
-            "description": "Older than alternatives: best is 1 route, all is up to 12. Ignored when alternatives is given.",
+            "description": "Older than alternatives: best is 1 route, all is up to 36. Ignored when alternatives is given.",
             "pattern": "^(best|all)$",
             "type": "string"
           },
@@ -1901,8 +1901,23 @@
           "options": {
             "$ref": "#/components/schemas/RouteOptions"
           },
+          "share": {
+            "description": "Who else may view it; only its owner is told.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ShareSettings"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "summary": {
             "$ref": "#/components/schemas/RouteSummary"
+          },
+          "token": {
+            "description": "Its link is /r/<token>.",
+            "type": "string"
           },
           "updated_at": {
             "format": "date-time",
@@ -2210,6 +2225,23 @@
         ],
         "type": "object"
       },
+      "ShareSettings": {
+        "description": "Who may view a route besides its owner.",
+        "properties": {
+          "link": {
+            "description": "Anyone signed in who has the link (/r/<token>) may view it.",
+            "type": "boolean"
+          },
+          "users": {
+            "description": "The people (user ids, from GET /api/team) it is shared with by name.",
+            "items": {
+              "type": "integer"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
       "SharedEngine": {
         "properties": {
           "id": {
@@ -2249,6 +2281,27 @@
           "needs_key",
           "policy",
           "signup_url"
+        ],
+        "type": "object"
+      },
+      "SharedRoute": {
+        "properties": {
+          "mine": {
+            "description": "It is your own route.",
+            "type": "boolean"
+          },
+          "owner_name": {
+            "description": "Who it belongs to.",
+            "type": "string"
+          },
+          "route": {
+            "$ref": "#/components/schemas/SavedRoute"
+          }
+        },
+        "required": [
+          "mine",
+          "owner_name",
+          "route"
         ],
         "type": "object"
       },
@@ -11022,7 +11075,7 @@
                   },
                   "alternatives": {
                     "description": "How many routes to offer, best first: the best and up to this many less one alternatives on different roads.",
-                    "maximum": 10,
+                    "maximum": 36,
                     "minimum": 1,
                     "type": [
                       "integer",
@@ -11034,7 +11087,7 @@
                   },
                   "combine": {
                     "default": "best",
-                    "description": "Older than alternatives: best is 1 route, all is up to 12. Ignored when alternatives is given.",
+                    "description": "Older than alternatives: best is 1 route, all is up to 36. Ignored when alternatives is given.",
                     "pattern": "^(best|all)$",
                     "type": "string"
                   },
@@ -11585,8 +11638,8 @@
                     ]
                   },
                   "alternatives": {
-                    "description": "How many routes to offer, best first (1-10). Left out: 1 with combine=best, the most with combine=all.",
-                    "maximum": 10,
+                    "description": "How many routes to offer, best first (1-36). Left out: 1 with combine=best, the most with combine=all.",
+                    "maximum": 36,
                     "minimum": 1,
                     "type": [
                       "integer",
@@ -11595,7 +11648,7 @@
                   },
                   "combine": {
                     "default": "best",
-                    "description": "Older than alternatives: best is 1 route, all is up to 12. Ignored when alternatives is given.",
+                    "description": "Older than alternatives: best is 1 route, all is up to 36. Ignored when alternatives is given.",
                     "pattern": "^(best|all)$",
                     "type": "string"
                   },
@@ -12422,9 +12475,241 @@
         ]
       }
     },
+    "/api/saved-routes/{route_id}/share": {
+      "post": {
+        "description": "Set who may view one of your routes: anyone signed in with its link, and/or people by name. Send link false and no users to make it private again.",
+        "operationId": "post_api_saved_routes_route_id_share",
+        "parameters": [
+          {
+            "description": "The saved route's id, from GET /api/saved-routes.",
+            "in": "path",
+            "name": "route_id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "csrf_token": {
+                    "description": "From GET /api/me. Browser sessions only.",
+                    "type": "string"
+                  },
+                  "link": {
+                    "description": "Let anyone signed in who has the link view it.",
+                    "type": "boolean"
+                  },
+                  "users": {
+                    "description": "User ids to share it with by name (GET /api/team). Replaces the list; ids of people who cannot sign in, and your own, are left out.",
+                    "items": {
+                      "type": "integer"
+                    },
+                    "maxItems": 200,
+                    "type": "array"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SavedRoute"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "$ref": "#/components/responses/E503"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "Share a saved route",
+        "tags": [
+          "Saved routes"
+        ]
+      }
+    },
+    "/api/shared-routes": {
+      "get": {
+        "description": "Other people's routes they shared with you by name, most recently changed first, a page at a time. Routes shared only by link are not listed; open their link.",
+        "operationId": "get_api_shared_routes",
+        "parameters": [
+          {
+            "description": "Rows to return. Default 200.",
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 200,
+              "maximum": 1000,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows to skip: the next value of the previous page.",
+            "in": "query",
+            "name": "offset",
+            "schema": {
+              "minimum": 0,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "next": {
+                      "description": "Offset of the next page, or null on the last one.",
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "routes": {
+                      "items": {
+                        "$ref": "#/components/schemas/SharedRoute"
+                      },
+                      "type": "array"
+                    },
+                    "total": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "next",
+                    "routes",
+                    "total"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "$ref": "#/components/responses/E503"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "Routes shared with you",
+        "tags": [
+          "Saved routes"
+        ]
+      }
+    },
+    "/api/shared-routes/{token}": {
+      "get": {
+        "description": "The route behind a link, if it is yours or shared with you (by link or by name), to plan it again. A route not shared with you answers 404, the same as no route.",
+        "operationId": "get_api_shared_routes_token",
+        "parameters": [
+          {
+            "description": "The token from the route's link, /r/<token>.",
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SharedRoute"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "$ref": "#/components/responses/E503"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "A route by its link",
+        "tags": [
+          "Saved routes"
+        ]
+      }
+    },
     "/api/team": {
       "get": {
-        "description": "People with an active account, a page at a time: id and display name.",
+        "description": "People with an active account (not service accounts), a page at a time: id and display name.",
         "operationId": "get_api_team",
         "parameters": [
           {

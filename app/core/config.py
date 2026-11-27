@@ -834,7 +834,7 @@ def validate(file: File) -> list[str]:
     check(4 <= routing.loop_points <= 8, "routing.loop_points must be 4-8")
     check(1 <= routing.loop_reuse <= 10, "routing.loop_reuse must be 1-10")
     check(50 <= routing.max_snap_m <= 20000, "routing.max_snap_m must be 50-20000")
-    check(1 <= routing.alternatives <= 10, "routing.alternatives must be 1-10")
+    check(1 <= routing.alternatives <= 36, "routing.alternatives must be 1-36")
     check(128 <= routing.build_memory_mb <= 65536, "routing.build_memory_mb must be 128-65536")
     check(routing.geocoder_url == "" or routing.geocoder_url.startswith("https://"),
           "routing.geocoder_url must be empty or an https:// address")

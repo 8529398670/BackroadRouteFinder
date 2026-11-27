@@ -25,7 +25,7 @@ from app.routing.search import NoRoute
 from app.routing.snap import Snap
 from app.routing.summarize import Summary, join
 
-MAX_ROUTES = 12
+MAX_ROUTES = 36
 _pool = concurrent.futures.ThreadPoolExecutor(max_workers=8, thread_name_prefix="provider")
 
 

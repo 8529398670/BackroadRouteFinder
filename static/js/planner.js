@@ -59,10 +59,16 @@ const Planner = {
   places: [],
   // A saved route's pick ({source, rank}), chosen once its plan comes back.
   pendingPick: null,
+  // The saved route on screen, while what is planned is still that route:
+  // { token , id , mine , owner_name , share }. The address bar is its link,
+  // /r/<token>; any change to the stops or options lets go of it.
+  link: null,
   // After Reverse: { line , waypoints }, the old route turned round, to pick
   // the alternative that retraces it once the reversed trip plans.
   pendingReverse: null,
-  ALTERNATIVES: [ 1 , 2 , 3 , 4 , 5 , 6 , 7 , 8 , 9 , 10 ],
+  ALTERNATIVES: [ 1 , 2 , 3 , 4 , 5 , 6 , 7 , 8 , 9 , 10 , 12 , 15 , 18 , 20 , 24 , 30 , 36 ],
+  // Above this many routes, a plan takes noticeably longer (our router plans each one).
+  ALTERNATIVES_SLOW: 12,
   picking: null,
   turn: 0,
   status: null,
@@ -88,7 +94,9 @@ const Planner = {
       if ( event.key === "Escape" && this.isLockPicking() ) this.startLock();
     } );
     window.addEventListener( "nav" , ( event ) => {
-      if ( event.detail.screen === "plan" ) window.setTimeout( () => RouteMap.resize() , 0 );
+      if ( event.detail.screen !== "plan" ) return;
+      window.setTimeout( () => RouteMap.resize() , 0 );
+      this.openLinkInPath();
     } );
     window.addEventListener( "resize" , () => RouteMap.resize() );
 
@@ -120,9 +128,17 @@ const Planner = {
     } );
     const many = Dom.get( "plan-alternatives" );
     this.ALTERNATIVES.forEach( ( n ) => many.appendChild( Dom.el( "option" , { text: String( n ) , attrs: { value: String( n ) } } ) ) );
-    many.addEventListener( "change" , () => this.setOption( "alternatives" , Number( many.value ) ) );
+    many.addEventListener( "change" , () => {
+      this.setOption( "alternatives" , Number( many.value ) );
+      this.renderAlternativesNote();
+    } );
     Dom.onPress( Dom.get( "plan-save-prefs" ) , () => this.savePrefs() );
     Dom.onPress( Dom.get( "plan-save" ) , () => this.saveRoute() );
+    Dom.onPress( Dom.get( "plan-share" ) , async () => {
+      if ( !this.link ) return;
+      const updated = await SavedRoutes.share( { id: this.link.id , token: this.link.token , share: this.link.share } );
+      if ( updated && this.link && this.link.token === updated.token ) this.link.share = updated.share;
+    } );
     Dom.all( "#plan-export-menu [data-export]" ).forEach( ( item ) => {
       item.addEventListener( "click" , () => this.exportAs( item.dataset.export ) );
     } );
@@ -209,7 +225,7 @@ const Planner = {
   snapshot() {
     return {
       stops: this.copyPoints( this.stops ) , loopPoints: this.copyPoints( this.loopPoints ) , options: this.copyOptions( this.options ),
-      shape: this.copyPoints( this.shape ) , lock: this.lock , lockPending: this.lockPending,
+      shape: this.copyPoints( this.shape ) , lock: this.lock , lockPending: this.lockPending , link: this.link,
     };
   },
 
@@ -220,7 +236,9 @@ const Planner = {
     this.shape = this.copyPoints( state.shape || [] );
     this.lock = state.lock || null;
     this.lockPending = state.lockPending || null;
+    this.link = state.link || null;
     this.picking = null;
+    this.renderLink();
     this.renderStops();
     this.renderOptions();
     this.schedulePlan( fit );
@@ -229,6 +247,8 @@ const Planner = {
   change( labelKey , mutate , merge , fit ) {
     const before = this.snapshot();
     const after = this.snapshot();
+    // What is planned is no longer the saved route (open() sets it again).
+    after.link = null;
     mutate( after );
     Undo.run( {
       label: I18n.get( labelKey ),
@@ -404,9 +424,10 @@ const Planner = {
     } );
   },
 
-  // Opening a saved route (saved_routes.js): its stops and options, undoable
-  // like any other change, and the map moves to show it.
-  open( saved ) {
+  // Opening a saved route (saved_routes.js), or one shared with us (shared:
+  // its owner_name and mine, from GET /api/shared-routes): its stops and
+  // options, undoable like any other change, and the map moves to show it.
+  open( saved , shared ) {
     this.change( "undo.plan_stops" , ( state ) => {
       const points = saved.waypoints.map( ( point ) => ( { lat: point.lat , lon: point.lon , label: point.label } ) );
       const loop = saved.options.loop;
@@ -435,10 +456,65 @@ const Planner = {
       state.shape = ( saved.options.shape || [] ).map( ( point ) => ( { lat: point.lat , lon: point.lon , leg: point.leg } ) );
       const lock = saved.options.lock;
       state.lock = lock ? Object.assign( { id: this.newLockId() , middle: lock.middle } , lock.keep ) : null;
+      state.link = saved.token ? this.linkOf( saved , shared ) : null;
     } , null , true );
     this.pendingPick = saved.options.pick || null;
     this.rememberPlaces( saved.waypoints );
-    Nav.go( "/plan" );
+    Nav.go( this.link ? this.linkPath( this.link.token ) : "/plan" );
+  },
+
+  // --- a saved route's link (/r/<token>, saved_routes.py) -----------------------
+
+  linkOf( saved , shared ) {
+    const mine = shared ? Boolean( shared.mine ) : true;
+    return { token: saved.token , id: saved.id , mine: mine , owner_name: shared ? shared.owner_name : "" , share: saved.share || null };
+  },
+
+  linkPath( token ) {
+    return "/r/" + encodeURIComponent( token );
+  },
+
+  // The token in the address bar, when it is a route's link.
+  tokenInPath() {
+    const match = /^\/r\/([A-Za-z0-9_-]{8,64})\/?$/.exec( window.location.pathname );
+    return match ? match[ 1 ] : null;
+  },
+
+  // A link opened (pasted, reloaded, Back): the route behind it, if it is
+  // ours or shared with us; otherwise say so and show the empty planner.
+  async openLinkInPath() {
+    const token = this.tokenInPath();
+    if ( !token || ( this.link && this.link.token === token ) || this.opening === token ) return;
+    this.opening = token;
+    try {
+      const shared = await Api.request( "/api/shared-routes/" + encodeURIComponent( token ) );
+      if ( this.tokenInPath() === token ) this.open( shared.route , shared );
+    } catch ( error ) {
+      if ( this.tokenInPath() === token ) {
+        window.history.replaceState( null , "" , "/plan" );
+        Dom.toast( error.status === 404 ? I18n.get( "routes.link_gone" ) : error.message , "error" );
+      }
+    } finally {
+      this.opening = null;
+    }
+  },
+
+  // The address bar and the banner follow the link: the route's link while
+  // it is on screen unchanged, /plan once it is changed.
+  renderLink() {
+    const link = this.link;
+    const banner = Dom.get( "plan-shared" );
+    if ( link && !link.mine ) Dom.text( banner , Format.fill( "routes.shared_banner" , { owner: link.owner_name || "?" } ) );
+    Dom.show( banner , Boolean( link && !link.mine ) );
+    Dom.show( Dom.get( "plan-share" ) , Boolean( link && link.mine ) );
+    const path = Nav.clean( window.location.pathname );
+    const shown = this.linkShown;
+    this.linkShown = Boolean( link );
+    if ( path !== "/plan" && !path.startsWith( "/r/" ) ) return;
+    // A link being opened (just loaded, its route not here yet) stays put.
+    if ( !link && !shown && path.startsWith( "/r/" ) ) return;
+    const want = link ? this.linkPath( link.token ) : "/plan";
+    if ( path !== want ) window.history.replaceState( null , "" , want );
   },
 
   // --- the stops card ----------------------------------------------------------
@@ -833,6 +909,20 @@ const Planner = {
     } );
     Dom.swap( Dom.get( "plan-sources" ) , ...rows );
     Dom.get( "plan-alternatives" ).value = String( this.options.alternatives || 1 );
+    this.renderAlternativesNote();
+  },
+
+  // Under "Routes to offer": how many came back when fewer than asked for,
+  // and that a big number is slow (but spends no more of other engines' quota).
+  renderAlternativesNote() {
+    const asked = this.options.alternatives || 1;
+    const found = this.result ? this.choices().length : 0;
+    const lines = [];
+    if ( this.result && found < asked ) lines.push( Format.fill( "plan.alternatives_found" , { n: found , asked: asked } ) );
+    if ( asked > this.ALTERNATIVES_SLOW ) lines.push( I18n.get( "plan.alternatives_slow" ) );
+    const note = Dom.get( "plan-alternatives-note" );
+    note.textContent = lines.join( " " );
+    Dom.show( note , lines.length > 0 );
   },
 
   async savePrefs() {
@@ -1394,6 +1484,7 @@ const Planner = {
     } ) );
     Dom.swap( Dom.get( "plan-problems" ) , ...problems );
     Dom.show( Dom.get( "plan-problems" ) , problems.length > 0 );
+    this.renderAlternativesNote();
 
     const choices = this.choices();
     const chosen = this.chosen();
@@ -1473,10 +1564,20 @@ const Planner = {
     if ( answer === null || !made ) return;
     this.rememberPlaces( stops );
     const id = made.id;
+    // What is on screen is now this saved route: its link is the address.
+    const link = this.linkOf( made , null );
+    this.link = link;
+    this.renderLink();
+    // Undoing the save lets go of its link, if it is still the one on screen.
+    const forget = () => {
+      if ( !this.link || this.link.token !== link.token ) return;
+      this.link = null;
+      this.renderLink();
+    };
     Undo.record( {
       label: I18n.get( "undo.route_save" ),
       toast: true,
-      undo: async () => { await Api.post( "/api/saved-routes/" + id + "/delete" ); SavedRoutes.refresh(); },
+      undo: async () => { await Api.post( "/api/saved-routes/" + id + "/delete" ); forget(); SavedRoutes.refresh(); },
       redo: async () => { await Api.post( "/api/saved-routes/" + id + "/restore" ); SavedRoutes.refresh(); },
     } );
     SavedRoutes.refresh();

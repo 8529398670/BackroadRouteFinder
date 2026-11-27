@@ -52,3 +52,18 @@ class CorridorTest(GridCase):
             g0 = int(self.graph.seg_g0[s])
             lat, lon = float(self.graph.geom_lat[g0]), float(self.graph.geom_lon[g0])
             self.assertIn(s, grid.segments_near(self.graph, lat, lon, 10))
+
+
+from app.tests.route_support import RoutesTestCase  # noqa: E402  (skips this class without httpx2 only)
+
+
+class AlternativesLimitTest(RoutesTestCase):
+    """Card: routes to offer goes up to 36."""
+
+    def test_up_to_36(self) -> None:
+        body = {"backroads": True, "penalty": 8, "compare_fastest": True, "csrf_token": self.csrf(self.user_cookie)}
+        status, reply = self.call("POST", "/api/planner/prefs", cookie=self.user_cookie, body={**body, "alternatives": 36})
+        self.assertEqual(status, 200, reply)
+        self.assertEqual(reply["prefs"]["alternatives"], 36)
+        status, reply = self.call("POST", "/api/planner/prefs", cookie=self.user_cookie, body={**body, "alternatives": 37})
+        self.assertEqual(status, 400, reply)

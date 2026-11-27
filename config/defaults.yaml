@@ -269,7 +269,9 @@ routing:
 
   # How many routes the planner offers to choose between, best first, for
   # anyone who has not picked their own: the best and up to this many less
-  # one alternatives on different roads. 1-10. [live]
+  # one alternatives on different roads. 1-36. Above 12 a plan takes longer:
+  # our router plans each extra route itself (other engines still get one
+  # request per plan and send at most about 3 routes each). [live]
   alternatives: 5
 
   # How much memory building a map may use at once, in MB: the build works a

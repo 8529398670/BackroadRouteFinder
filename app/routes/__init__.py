@@ -217,6 +217,8 @@ def build_routes(static_server: StaticServer, live_reload: Watcher | None = None
         # shows a page; the link is spent by the POST that page sends when the
         # person confirms. See auth.py and join.py.
         Route("/login/{credential:path}", static_server.serve_login_page),
+        # A shared route's link opens the planner on it (saved_routes.py).
+        Route("/r/{token}", static_server.serve_route_link),
         # The readable API and MCP references (app/routes/api_docs_md.py).
         Route("/docs/{page:path}", static_server.serve_docs_page),
     ]

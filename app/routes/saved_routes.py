@@ -1,4 +1,4 @@
-"""Saved routes: each person's own list. See app/models/saved_routes.py."""
+"""Saved routes: each person's own list, and sharing them. See app/models/saved_routes.py."""
 from __future__ import annotations
 
 from typing import Annotated, ClassVar
@@ -10,7 +10,7 @@ from starlette.requests import Request
 from app.apidocs import PATH, Reply, route
 from app.apidocs import Request as RequestType
 from app.core.security import actor_from
-from app.models import saved_routes
+from app.models import saved_routes, users
 from app.routes.helpers import DateTime, Page, Paged, Refused, cut_page, get_store
 from app.routes.planner import MAX_POINTS, MAX_SHAPE, MAX_WAYPOINTS, OURS, Alternatives, Keep, Point, ShapePoint, Combine, LegacySecondary, LegacyUnpaved, LoopSpec, Penalty, RoadFactors, RoadRules, Source
 from app.routing import costs
@@ -64,6 +64,13 @@ class RouteSummary(Reply):
     main_meters: float = 0
 
 
+class ShareSettings(Reply):
+    api_name: ClassVar[str] = "ShareSettings"
+    api_doc: ClassVar[str] = "Who may view a route besides its owner."
+    link: Annotated[bool, Meta(description="Anyone signed in who has the link (/r/<token>) may view it.")] = False
+    users: Annotated[list[int], Meta(description="The people (user ids, from GET /api/team) it is shared with by name.")] = msgspec.field(default_factory=list)
+
+
 class SavedRoute(Reply):
     api_name: ClassVar[str] = "SavedRoute"
     id: int
@@ -73,9 +80,11 @@ class SavedRoute(Reply):
     summary: RouteSummary
     created_at: DateTime
     updated_at: DateTime
+    token: Annotated[str, Meta(description="Its link is /r/<token>.")] = ""
+    share: Annotated[ShareSettings | None, Meta(description="Who else may view it; only its owner is told.")] = None
 
 
-def _reply(route: saved_routes.SavedRoute) -> SavedRoute:
+def _reply(route: saved_routes.SavedRoute, owner: bool = True) -> SavedRoute:
     return SavedRoute(
         id=route.id,
         name=route.name,
@@ -84,6 +93,8 @@ def _reply(route: saved_routes.SavedRoute) -> SavedRoute:
         summary=RouteSummary(**route.summary),
         created_at=route.created_at,
         updated_at=route.updated_at,
+        token=route.token,
+        share=ShareSettings(link=route.share_link, users=route.share_users) if owner else None,
     )
 
 
@@ -215,3 +226,85 @@ def restore_saved_route(request: Request, body: RouteIDAction) -> SavedRoute:
         return _reply(saved_routes.restore(get_store(request), _owner(request), body.route_id))
     except saved_routes.NotFound as error:
         raise Refused(404, str(error)) from None
+
+
+# --- sharing ---------------------------------------------------------------------
+
+class ShareRoute(RequestType):
+    route_id: RouteID
+    link: Annotated[bool, Meta(description="Let anyone signed in who has the link view it.")] = False
+    users: Annotated[list[int], Meta(max_length=saved_routes.MAX_SHARED_USERS, description="User ids to share it with by name (GET /api/team). "
+                                     "Replaces the list; ids of people who cannot sign in, and your own, are left out.",
+                                     extra={"error": f"at most {saved_routes.MAX_SHARED_USERS} people"})] = msgspec.field(default_factory=list)
+
+
+@route(
+    "POST /api/saved-routes/{route_id}/share", summary="Share a saved route",
+    tag="Saved routes", errors=(404,),
+    description="Set who may view one of your routes: anyone signed in with its link, and/or people by name. "
+                "Send link false and no users to make it private again.",
+)
+def share_saved_route(request: Request, body: ShareRoute) -> SavedRoute:
+    store = get_store(request)
+    people = [user_id for user_id in dict.fromkeys(body.users) if _can_share_with(store, user_id)]
+    try:
+        return _reply(saved_routes.set_share(store, _owner(request), body.route_id, body.link, people))
+    except saved_routes.NotFound as error:
+        raise Refused(404, str(error)) from None
+
+
+def _can_share_with(store, user_id: int) -> bool:
+    user = users.get_user(store, user_id)
+    return user is not None and not user.disabled and not user.is_service
+
+
+def _owner_name(store, user_id: int) -> str:
+    user = users.get_user(store, user_id)
+    return user.display_name if user is not None else ""
+
+
+class SharedRoute(Reply):
+    api_name: ClassVar[str] = "SharedRoute"
+    route: SavedRoute
+    owner_name: Annotated[str, Meta(description="Who it belongs to.")]
+    mine: Annotated[bool, Meta(description="It is your own route.")]
+
+
+class SharedRoutesReply(Paged):
+    routes: list[SharedRoute]
+
+
+@route(
+    "GET /api/shared-routes", summary="Routes shared with you",
+    tag="Saved routes",
+    description="Other people's routes they shared with you by name, most recently changed first, a page at a time. "
+                "Routes shared only by link are not listed; open their link.",
+)
+def list_shared_routes(request: Request, body: Page) -> SharedRoutesReply:
+    store = get_store(request)
+    me = _owner(request)
+    rows = [SharedRoute(route=_reply(route, owner=False), owner_name=_owner_name(store, route.owner_id), mine=False)
+            for route in saved_routes.shared_with(store, me)]
+    page = cut_page(rows, body)
+    return SharedRoutesReply(routes=page.pop("rows"), **page)
+
+
+class TokenPath(RequestType):
+    token: Annotated[str, PATH, Meta(max_length=64, description="The token from the route's link, /r/<token>.")]
+
+
+@route(
+    "GET /api/shared-routes/{token}", summary="A route by its link",
+    tag="Saved routes", errors=(404,),
+    description="The route behind a link, if it is yours or shared with you (by link or by name), to plan it again. "
+                "A route not shared with you answers 404, the same as no route.",
+)
+def get_shared_route(request: Request, body: TokenPath) -> SharedRoute:
+    store = get_store(request)
+    me = _owner(request)
+    try:
+        route = saved_routes.find_by_token(store, body.token, me)
+    except saved_routes.NotFound as error:
+        raise Refused(404, str(error)) from None
+    mine = route.owner_id == me
+    return SharedRoute(route=_reply(route, owner=mine), owner_name=_owner_name(store, route.owner_id), mine=mine)

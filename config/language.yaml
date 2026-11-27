@@ -174,6 +174,8 @@ plan:
   source_unusable_owner: "Add a key in Settings"
   source_unusable: "Not set up"
   alternatives_label: "Routes to offer"
+  alternatives_found: "Found {n} of {asked}: there were no more on different enough roads."
+  alternatives_slow: "Above 12 takes longer, because our map plans each extra route itself. Other sources still get one request per plan and send at most about 3 routes each, so no extra quota is used."
   choice_name: "Route {n} · {source}"
   sources_need_one: "Pick at least one source."
   # A route from another engine: its time is its own, the main-road share is measured on our map.
@@ -259,6 +261,25 @@ routes:
   stops_more: "{from} → {to} (+{n} stops)"
   stops: "{from} → {to}"
   loop: "Loop around {center} ({radius})"
+  # Sharing a route: its link (/r/<token>) and who may view it.
+  share: "Share"
+  copy_link: "Copy link"
+  share_title: "Share “{name}”"
+  share_link: "Anyone signed in with the link can view it"
+  share_link_help: "The link: {url}"
+  share_people: "Share with people"
+  share_nobody: "Nobody else has an account yet. Turn on the link, or add people first."
+  share_save: "Save and copy link"
+  shared_private: "Only you can see it now."
+  link_copied: "Link copied."
+  link_copy_failed: "Copy this link: {url}"
+  link_gone: "That route isn't shared with you, or it was deleted."
+  shared_banner: "Shared by {owner}: view only. Save it to keep your own copy."
+  shared_heading: "Shared with me"
+  shared_empty: "Nobody has shared a route with you yet."
+  col_owner: "Shared by"
+  shared_badge_link: "Link"
+  shared_badge_people: "{n} people"
 
 # Short confirmations shown as a toast at the bottom of the screen.
 ui:

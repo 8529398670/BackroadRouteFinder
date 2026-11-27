@@ -32,10 +32,11 @@ class ListTeamReply(Paged):
 @route(
     "GET /api/team", summary="List team",
     tag="Account",
-    description="People with an active account, a page at a time: id and display name.",
+    description="People with an active account (not service accounts), a page at a time: id and display name.",
 )
 def list_team(request: Request, body: Page) -> ListTeamReply:
     """Over HTTP and as the MCP list_team tool."""
-    rows = [Member(id=user.id, display_name=user.display_name) for user in users.list_users(get_store(request)) if not user.disabled]
+    rows = [Member(id=user.id, display_name=user.display_name) for user in users.list_users(get_store(request))
+            if not user.disabled and not user.is_service]  # a service account (the portal) is not a person to pick
     page = cut_page(rows, body)
     return ListTeamReply(members=page.pop("rows"), **page)

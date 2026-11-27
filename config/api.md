@@ -545,7 +545,7 @@ The account this API key belongs to, the role it acts with (role -- never higher
 
 List team
 
-People with an active account, a page at a time: id and display name.
+People with an active account (not service accounts), a page at a time: id and display name.
 
 |  |  |
 |---|---|
@@ -2683,9 +2683,9 @@ Save how the planner opens for you. Send the whole set; a loop setting or road_f
 | Field | Type | Required | Limits | Description |
 |---|---|---|---|---|
 | `allow_unpaved` | boolean or null | no |  | Deprecated, use road_rules: true is unpaved and track use. |
-| `alternatives` | integer or null | no | 1 to 10 | How many routes to offer, best first: the best and up to this many less one alternatives on different roads. |
+| `alternatives` | integer or null | no | 1 to 36 | How many routes to offer, best first: the best and up to this many less one alternatives on different roads. |
 | `backroads` | boolean | yes |  |  |
-| `combine` | string | no | default `best` | Older than alternatives: best is 1 route, all is up to 12. Ignored when alternatives is given. |
+| `combine` | string | no | default `best` | Older than alternatives: best is 1 route, all is up to 36. Ignored when alternatives is given. |
 | `compare_fastest` | boolean | yes |  |  |
 | `csrf_token` | string | no |  | From GET /api/me. Browser sessions only. |
 | `loop_points` | integer or null | no | 4 to 8 |  |
@@ -2721,8 +2721,8 @@ The route through the waypoints that keeps time on main roads down: each minute 
 | Field | Type | Required | Limits | Description |
 |---|---|---|---|---|
 | `allow_unpaved` | boolean or null | no |  | Deprecated, use road_rules: true is unpaved and track use. |
-| `alternatives` | integer or null | no | 1 to 10 | How many routes to offer, best first (1-10). Left out: 1 with combine=best, the most with combine=all. |
-| `combine` | string | no | default `best` | Older than alternatives: best is 1 route, all is up to 12. Ignored when alternatives is given. |
+| `alternatives` | integer or null | no | 1 to 36 | How many routes to offer, best first (1-36). Left out: 1 with combine=best, the most with combine=all. |
+| `combine` | string | no | default `best` | Older than alternatives: best is 1 route, all is up to 36. Ignored when alternatives is given. |
 | `compare_fastest` | boolean | no | default `true` | Also plan the plain fastest route, for comparison. |
 | `csrf_token` | string | no |  | From GET /api/me. Browser sessions only. |
 | `keep` | [`Keep`](#keep) or null | no |  | Lock a route's ends and plan only its middle again (not with a loop). |
@@ -2791,6 +2791,9 @@ Whether the map is loaded, what it covers, and the server's planner defaults.
 | POST | [`/api/saved-routes/{route_id}/delete`](#post-apisaved-routesroute_iddelete) | Delete a saved route | browser session or API key, anyone signed in |
 | POST | [`/api/saved-routes/{route_id}/rename`](#post-apisaved-routesroute_idrename) | Rename a saved route | browser session or API key, anyone signed in |
 | POST | [`/api/saved-routes/{route_id}/restore`](#post-apisaved-routesroute_idrestore) | Restore a deleted saved route | browser session or API key, anyone signed in |
+| POST | [`/api/saved-routes/{route_id}/share`](#post-apisaved-routesroute_idshare) | Share a saved route | browser session or API key, anyone signed in |
+| GET | [`/api/shared-routes`](#get-apishared-routes) | Routes shared with you | browser session or API key, anyone signed in |
+| GET | [`/api/shared-routes/{token}`](#get-apishared-routestoken) | A route by its link | browser session or API key, anyone signed in |
 
 ### GET /api/saved-routes
 
@@ -2948,6 +2951,82 @@ Bring back a saved route deleted in the last 10 minutes.
 **Reply 200**: Success
 
 [`SavedRoute`](#savedroute).
+
+### POST /api/saved-routes/{route_id}/share
+
+Share a saved route
+
+Set who may view one of your routes: anyone signed in with its link, and/or people by name. Send link false and no users to make it private again.
+
+|  |  |
+|---|---|
+| Who may call | browser session or API key, anyone signed in |
+| Errors | 400, 401, 403, 404, 429, 503 |
+
+**Parameters**
+
+| Name | In | Type | Required | Limits | Description |
+|---|---|---|---|---|---|
+| `route_id` | path | integer | yes |  | The saved route's id, from GET /api/saved-routes. |
+
+**Request body**
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `csrf_token` | string | no |  | From GET /api/me. Browser sessions only. |
+| `link` | boolean | no |  | Let anyone signed in who has the link view it. |
+| `users` | array of integer | no |  | User ids to share it with by name (GET /api/team). Replaces the list; ids of people who cannot sign in, and your own, are left out. |
+
+**Reply 200**: Success
+
+[`SavedRoute`](#savedroute).
+
+### GET /api/shared-routes
+
+Routes shared with you
+
+Other people's routes they shared with you by name, most recently changed first, a page at a time. Routes shared only by link are not listed; open their link.
+
+|  |  |
+|---|---|
+| Who may call | browser session or API key, anyone signed in |
+| Errors | 400, 401, 429, 503 |
+
+**Parameters**
+
+| Name | In | Type | Required | Limits | Description |
+|---|---|---|---|---|---|
+| `limit` | query | integer | no | 1 to 1000; default `200` | Rows to return. Default 200. |
+| `offset` | query | integer | no | at least 0 | Rows to skip: the next value of the previous page. |
+
+**Reply 200**: Success
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `next` | integer or null | yes |  | Offset of the next page, or null on the last one. |
+| `routes` | array of [`SharedRoute`](#sharedroute) | yes |  |  |
+| `total` | integer | yes |  |  |
+
+### GET /api/shared-routes/{token}
+
+A route by its link
+
+The route behind a link, if it is yours or shared with you (by link or by name), to plan it again. A route not shared with you answers 404, the same as no route.
+
+|  |  |
+|---|---|
+| Who may call | browser session or API key, anyone signed in |
+| Errors | 400, 401, 404, 429, 503 |
+
+**Parameters**
+
+| Name | In | Type | Required | Limits | Description |
+|---|---|---|---|---|---|
+| `token` | path | string | yes | at most 64 characters | The token from the route's link, /r/<token>. |
+
+**Reply 200**: Success
+
+[`SharedRoute`](#sharedroute).
 
 ## Settings
 
@@ -3419,9 +3498,9 @@ The shapes the routes above refer to by name.
 
 | Field | Type | Required | Limits | Description |
 |---|---|---|---|---|
-| `alternatives` | integer | no | 1 to 10; default `5` | How many routes to offer, best first: the best and up to this many less one alternatives on different roads. |
+| `alternatives` | integer | no | 1 to 36; default `5` | How many routes to offer, best first: the best and up to this many less one alternatives on different roads. |
 | `backroads` | boolean | no | default `true` | Backroads mode on; off plans the plain fastest route. |
-| `combine` | string | no | default `best` | Older than alternatives: best is 1 route, all is up to 12. Ignored when alternatives is given. |
+| `combine` | string | no | default `best` | Older than alternatives: best is 1 route, all is up to 36. Ignored when alternatives is given. |
 | `compare_fastest` | boolean | no | default `true` |  |
 | `loop_points` | integer | no | 4 to 8; default `6` |  |
 | `loop_radius` | number | no | 0.5 to 200; default `20` |  |
@@ -3493,9 +3572,9 @@ The shapes the routes above refer to by name.
 | Field | Type | Required | Limits | Description |
 |---|---|---|---|---|
 | `allow_unpaved` | boolean or null | no |  | Deprecated, use road_rules: true is unpaved and track use. |
-| `alternatives` | integer or null | no | 1 to 10 | How many routes to offer, best first: the best and up to this many less one alternatives on different roads. |
+| `alternatives` | integer or null | no | 1 to 36 | How many routes to offer, best first: the best and up to this many less one alternatives on different roads. |
 | `backroads` | boolean | no | default `true` |  |
-| `combine` | string | no | default `best` | Older than alternatives: best is 1 route, all is up to 12. Ignored when alternatives is given. |
+| `combine` | string | no | default `best` | Older than alternatives: best is 1 route, all is up to 36. Ignored when alternatives is given. |
 | `lock` | [`SavedLock`](#savedlock) or null | no |  | Its locked ends, if it was locked. |
 | `loop` | [`Loop`](#loop) or null | no |  | A loop round a center, planned in place of the waypoints. |
 | `penalty` | number | no | 1 to 100; default `8` | How many times over a minute on a main road counts. 1 is the plain fastest route. |
@@ -3544,7 +3623,9 @@ The shapes the routes above refer to by name.
 | `id` | integer | yes |  |  |
 | `name` | string | yes |  |  |
 | `options` | [`RouteOptions`](#routeoptions) | yes |  |  |
+| `share` | [`ShareSettings`](#sharesettings) or null | no |  | Who else may view it; only its owner is told. |
 | `summary` | [`RouteSummary`](#routesummary) | yes |  |  |
+| `token` | string | no |  | Its link is /r/<token>. |
 | `updated_at` | string (date-time) | yes |  |  |
 | `waypoints` | array of [`Waypoint`](#waypoint) | yes |  |  |
 
@@ -3612,6 +3693,13 @@ The shapes the routes above refer to by name.
 | `leg` | integer | yes | at least 0 | The leg it is on: 0 from the first point driven through to the next, and so on (with a loop, between the points it drives through, as snapped lists them). |
 | `lon` | number | yes | -180 to 180 |  |
 
+### ShareSettings
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `link` | boolean | no |  | Anyone signed in who has the link (/r/<token>) may view it. |
+| `users` | array of integer | no |  | The people (user ids, from GET /api/team) it is shared with by name. |
+
 ### SharedEngine
 
 | Field | Type | Required | Limits | Description |
@@ -3623,6 +3711,14 @@ The shapes the routes above refer to by name.
 | `needs_key` | boolean | yes |  |  |
 | `policy` | string | yes | one of `shared`, `own` | shared: people without their own key use the owner's. own: everyone but the owner brings their own. |
 | `signup_url` | string | yes |  |  |
+
+### SharedRoute
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `mine` | boolean | yes |  | It is your own route. |
+| `owner_name` | string | yes |  | Who it belongs to. |
+| `route` | [`SavedRoute`](#savedroute) | yes |  |  |
 
 ### SignIn
 

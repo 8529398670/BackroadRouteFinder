@@ -31,10 +31,10 @@ SOURCE_IDS = (OURS, *ENGINES)
 
 Source = Annotated[str, Meta(pattern="^(" + "|".join(SOURCE_IDS) + ")$", description="ours, or another engine: " + ", ".join(ENGINES) + ".",
                              extra={"error": "unknown source"})]
-Combine = Annotated[str, Meta(pattern="^(best|all)$", description="Older than alternatives: best is 1 route, all is up to 12. Ignored when alternatives is given.",
+Combine = Annotated[str, Meta(pattern="^(best|all)$", description="Older than alternatives: best is 1 route, all is up to 36. Ignored when alternatives is given.",
                               extra={"error": "combine must be best or all"})]
-Alternatives = Annotated[int, Meta(ge=1, le=10, description="How many routes to offer, best first: the best and up to this many less one alternatives on different roads.",
-                                   extra={"error": "alternatives must be 1-10"})]
+Alternatives = Annotated[int, Meta(ge=1, le=36, description="How many routes to offer, best first: the best and up to this many less one alternatives on different roads.",
+                                   extra={"error": "alternatives must be 1-36"})]
 
 Penalty = Annotated[float, Meta(ge=1, le=100, description="How many times over a minute on a main road counts. 1 is the plain fastest route.", extra={"error": "penalty must be 1-100"})]
 
@@ -175,7 +175,7 @@ class PlanRoute(RequestType):
     sources: Annotated[list[Source], Meta(min_length=1, max_length=len(SOURCE_IDS), description="Who to ask: our own router and/or other engines.",
                                           extra={"error": "pick at least one source"})] = msgspec.field(default_factory=lambda: [OURS])
     combine: Combine = "best"
-    alternatives: Annotated[Alternatives | None, Meta(description="How many routes to offer, best first (1-10). Left out: 1 with combine=best, the most with combine=all.")] = None
+    alternatives: Annotated[Alternatives | None, Meta(description="How many routes to offer, best first (1-36). Left out: 1 with combine=best, the most with combine=all.")] = None
     shape: Annotated[list[ShapePoint], Meta(max_length=MAX_SHAPE, description=f"Nudges: points every route is pulled through (up to {MAX_SHAPE}).",
                                             extra={"error": f"at most {MAX_SHAPE} nudges"})] = msgspec.field(default_factory=list)
     keep: Annotated[Keep | None, Meta(description="Lock a route's ends and plan only its middle again (not with a loop).")] = None

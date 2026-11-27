@@ -16,6 +16,8 @@
 // if the server has them switched on); Nav only offers what was un-hidden. So
 // app.js calls Nav.init() last, once every screen has had its say.
 //
+// A shared route's link, /r/<token>, is the planner too (planner.js opens it).
+//
 // After every change of screen Nav sends a "nav" event on window, which is
 // how a screen hears it was opened (Jobs, Sessions and Logs refresh then).
 const Nav = {
@@ -101,6 +103,8 @@ const Nav = {
   // The screen (and card, if the path names one) a path opens, when this user
   // has that screen and the card is showing. null for anything else.
   find( path ) {
+    // A saved route's link (/r/<token>) is the planner, which opens it.
+    if ( /^\/r\/[A-Za-z0-9_-]+$/.test( path ) && this.available( "plan" ) ) return { name: "plan" , card: null };
     const node = Dom.all( "[data-path]" ).find( ( each ) => each.getAttribute( "data-path" ) === path );
     const view = node && node.closest( ".view" );
     if ( !view || !this.available( view.getAttribute( "data-view" ) ) ) return null;

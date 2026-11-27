@@ -220,6 +220,18 @@ class StaticServer:
         response.headers["referrer-policy"] = "no-referrer"
         return response
 
+    async def serve_route_link(self, request: Request) -> Response:
+        """A shared route's link, /r/<token>: the ordinary app page, which
+        reads the token from its path and opens the route in the planner (if
+        the person signed in may see it; app/routes/saved_routes.py). Like a
+        login link, the token stays out of caches and Referer headers."""
+        path = self.resolve(self.index_file)
+        if path is None or not path.is_file():
+            return _not_found(request)
+        response = await self._send(request, path, keep=False)
+        response.headers["referrer-policy"] = "no-referrer"
+        return response
+
     async def _send(self, request: Request, path: Path, keep: bool = True) -> Response:
         """Serve a file resolve() has already approved, by the caching rule at
         the top of this module. keep=False is for the pages routes serve (one

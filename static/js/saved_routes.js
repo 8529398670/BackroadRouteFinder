@@ -1,6 +1,7 @@
-// The Saved routes screen: your routes, to open in the planner, rename or
-// delete. Deleting is soft on the server, so it asks nothing and offers Undo,
-// which restores it.
+// The Saved routes screen: your routes, to open in the planner, rename,
+// share or delete, and the routes other people shared with you by name.
+// Deleting is soft on the server, so it asks nothing and offers Undo, which
+// restores it. A route's link is /r/<token> (planner.js opens it).
 const SavedRoutes = {
   async init() {
     window.addEventListener( "nav" , ( event ) => {
@@ -14,7 +15,81 @@ const SavedRoutes = {
   },
 
   async refresh() {
-    await Pager.load( "routes-table" , "routes" , ( offset ) => this.fetchPage( offset ) , ( route ) => this.row( route ) );
+    await Promise.all( [
+      Pager.load( "routes-table" , "routes" , ( offset ) => this.fetchPage( offset ) , ( route ) => this.row( route ) ),
+      Pager.load( "shared-routes-table" , "routes" , ( offset ) => Api.request( "/api/shared-routes?limit=200&offset=" + ( offset || 0 ) ) ,
+        ( shared ) => this.sharedRow( shared ) ),
+    ] );
+  },
+
+  linkUrl( token ) {
+    return window.location.origin + Planner.linkPath( token );
+  },
+
+  async copyLink( token ) {
+    const url = this.linkUrl( token );
+    try {
+      await navigator.clipboard.writeText( url );
+      Dom.toast( I18n.get( "routes.link_copied" ) , "ok" );
+    } catch ( error ) {
+      // No clipboard on plain http: the link itself, to copy by hand.
+      Dom.toast( Format.fill( "routes.link_copy_failed" , { url: url } ) , "ok" );
+    }
+  },
+
+  // Who may view a route: anyone signed in with the link, and/or people by
+  // name. Saving copies the link. Answers the route as saved, or null.
+  async share( route ) {
+    const me = App.currentUser ? App.currentUser.id : 0;
+    let team = [];
+    for ( let offset = 0 ; offset !== null && offset !== undefined ; ) {
+      const page = await Api.request( "/api/team?limit=1000&offset=" + offset );
+      team = team.concat( page.members || [] );
+      offset = page.next;
+    }
+    const people = team.filter( ( member ) => member.id !== me ).map( ( member ) => ( { value: member.id , label: member.display_name } ) );
+    const current = route.share || { link: false , users: [] };
+    const fields = [ {
+      name: "link" , type: "checkbox" , label: I18n.get( "routes.share_link" ) , value: current.link,
+      help: Format.fill( "routes.share_link_help" , { url: this.linkUrl( route.token ) } ),
+    } ];
+    if ( people.length ) fields.push( { name: "users" , type: "checks" , label: I18n.get( "routes.share_people" ) , options: people , value: current.users } );
+    else fields[ 0 ].help += " " + I18n.get( "routes.share_nobody" );
+    let saved = null;
+    const answer = await Dom.form( {
+      title: Format.fill( "routes.share_title" , { name: route.name || "" } ),
+      submit: I18n.get( "routes.share_save" ),
+      fields: fields,
+      save: async ( values ) => {
+        saved = await Api.post( "/api/saved-routes/" + route.id + "/share" , { link: values.link , users: values.users || [] } );
+      },
+    } );
+    if ( answer === null || !saved ) return null;
+    if ( saved.share.link || saved.share.users.length ) await this.copyLink( saved.token );
+    else Dom.toast( I18n.get( "routes.shared_private" ) , "ok" );
+    await this.refresh();
+    return saved;
+  },
+
+  sharedRow( shared ) {
+    const route = shared.route;
+    const tbody = Dom.get( "shared-routes-table" ).querySelector( "tbody" );
+    const summary = route.summary || {};
+    const actions = Dom.rowActions( route.name , [
+      Dom.el( "button" , {
+        class: "btn btn-sm btn-outline-primary",
+        attrs: { type: "button" },
+        children: [ Dom.el( "i" , { class: "bi bi-map" , attrs: { "aria-hidden": "true" } } ) , Dom.el( "span" , { class: "ms-1" , text: I18n.get( "routes.open" ) } ) ],
+        on: { click: () => Planner.open( route , shared ) },
+      } ),
+    ] );
+    tbody.appendChild( Dom.el( "tr" , { children: [
+      Dom.el( "td" , { text: route.name } ),
+      Dom.el( "td" , { text: this.stopsText( route ) } ),
+      Dom.el( "td" , { text: shared.owner_name } ),
+      Dom.el( "td" , { class: "text-nowrap" , text: Format.duration( summary.seconds || 0 ) + " · " + Format.distance( summary.meters || 0 ) } ),
+      Dom.el( "td" , { class: "text-end" , children: [ actions ] } ),
+    ] } ) );
   },
 
   stopsText( route ) {
@@ -60,14 +135,31 @@ const SavedRoutes = {
         on: { click: () => Planner.open( route ) },
       } ),
       Dom.el( "button" , {
+        class: "btn btn-sm btn-outline-secondary",
+        attrs: { type: "button" , "data-write": "" },
+        children: [ Dom.el( "i" , { class: "bi bi-share" , attrs: { "aria-hidden": "true" } } ) , Dom.el( "span" , { class: "ms-1" , text: I18n.get( "routes.share" ) } ) ],
+        on: { click: () => this.share( Object.assign( {} , route , { name: name } ) ) },
+      } ),
+      Dom.el( "button" , {
+        class: "btn btn-sm btn-outline-secondary",
+        attrs: { type: "button" },
+        children: [ Dom.el( "i" , { class: "bi bi-link-45deg" , attrs: { "aria-hidden": "true" } } ) , Dom.el( "span" , { class: "ms-1" , text: I18n.get( "routes.copy_link" ) } ) ],
+        on: { click: () => this.copyLink( route.token ) },
+      } ),
+      Dom.el( "button" , {
         class: "btn btn-sm btn-outline-danger",
         attrs: { type: "button" , "data-write": "" },
         children: [ Dom.el( "i" , { class: "bi bi-trash" , attrs: { "aria-hidden": "true" } } ) , Dom.el( "span" , { class: "ms-1" , text: I18n.get( "routes.delete" ) } ) ],
         on: { click: () => this.remove( route ) },
       } ),
     ] );
+    const share = route.share || { link: false , users: [] };
+    const badges = [
+      share.link ? Dom.badge( I18n.get( "routes.shared_badge_link" ) , "info" ) : null,
+      share.users.length ? Dom.badge( Format.fill( "routes.shared_badge_people" , { n: share.users.length } ) , "info" ) : null,
+    ].filter( Boolean );
     tbody.appendChild( Dom.el( "tr" , { children: [
-      Dom.el( "td" , { children: [ nameCell ] } ),
+      Dom.el( "td" , { children: [ nameCell , ...( badges.length ? [ Dom.el( "div" , { class: "d-flex gap-1 mt-1" , children: badges } ) ] : [] ) ] } ),
       Dom.el( "td" , { text: this.stopsText( route ) } ),
       Dom.el( "td" , { class: "text-nowrap" , text: Format.duration( summary.seconds || 0 ) + " · " + Format.distance( summary.meters || 0 ) } ),
       Dom.el( "td" , { class: "text-nowrap" , text: Format.share( summary.main_seconds || 0 , summary.seconds || 0 ) } ),
