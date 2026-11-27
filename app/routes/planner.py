@@ -16,7 +16,7 @@ from app.models import saved_routes
 from app.models.users import get_owner_id
 from app.routes.helpers import Refused, get_config, get_store
 from app.models import provider_keys
-from app.routing import classes, costs, geocode, loop, match, router, sources
+from app.routing import classes, costs, geocode, loop, match, router, sources, steps
 from app.routing.graph import Holder
 from app.routing.providers import ENGINES, OURS
 from app.routing.search import NoRoute
@@ -104,6 +104,21 @@ class Run(Reply):
     coords: list[list[float]]
 
 
+class Step(Reply):
+    api_name: ClassVar[str] = "Step"
+    api_doc: ClassVar[str] = ("A turn-by-turn step: what to do at a point on the line, worked out from the line and the roads "
+                              "it follows, then how far and how long to the next step.")
+    type: Annotated[str, Meta(description="depart, turn, continue (straight on onto another road), waypoint (a stop) or arrive.")]
+    modifier: Annotated[str, Meta(description="For turn and continue: straight, slight_left, left, sharp_left, slight_right, "
+                                              "right, sharp_right or uturn; empty otherwise.")]
+    road: Annotated[str, Meta(description="The road driven after this step; empty when it has no name.")]
+    lat: float
+    lon: float
+    along_m: Annotated[float, Meta(description="Metres from the start of the line.")]
+    meters: Annotated[float, Meta(description="To the next step.")]
+    seconds: Annotated[float, Meta(description="To the next step.")]
+
+
 class PlannedRoute(Reply):
     api_name: ClassVar[str] = "PlannedRoute"
     kind: Annotated[str, Meta(description="backroads, or fastest for the plain fastest route.")]
@@ -122,6 +137,7 @@ class PlannedRoute(Reply):
     delay_seconds: Annotated[float, Meta(description="Of seconds: turning, and waiting at traffic signals and stop signs.")]
     runs: list[Run]
     via: list[Via]
+    steps: Annotated[list[Step], Meta(description="Turn-by-turn steps along the line, depart first and arrive last.")] = msgspec.field(default_factory=list)
     rank: Annotated[int, Meta(description="Its place among its source's own answers: 0 the source's best, then its alternatives.")] = 0
 
 
@@ -281,6 +297,11 @@ def plan_route(request: Request, body: PlanRoute) -> PlanRouteReply:
         raise Refused(400, f"point {off.index + 1} is not near a road on the map ({off})", field="waypoints", index=off.index) from None
     except NoRoute as error:
         raise Refused(400, str(error)) from None
+    nudges = {id(at) for _, at in shape_snaps}
+    # The stops between start and end, for the steps: not on a loop's ring
+    # (its points are only there to steer it) or a locked route's middle.
+    stops = [] if body.loop is not None or body.keep is not None else \
+        [(s.lat, s.lon) for s in result.snapped[1:-1] if id(s) not in nudges]
     routes = [
         PlannedRoute(
             kind=choice.kind,
@@ -300,12 +321,13 @@ def plan_route(request: Request, body: PlanRoute) -> PlanRouteReply:
             delay_seconds=round(choice.summary.delay_seconds, 1),
             runs=[Run(main=run.main, coords=run.coords) for run in choice.summary.runs],
             via=[Via(name=v.name, main=v.main, meters=round(v.meters, 1), seconds=round(v.seconds, 1)) for v in choice.summary.via],
+            steps=[Step(**vars(step)) for step in steps.build(steps.flatten([run.coords for run in choice.summary.runs]),
+                                                                choice.summary.via, choice.summary.seconds, stops)],
         )
         for choice in result.routes
     ]
     problems = [Problem(source=p.source, source_name=source_name(p.source), message=p.message) for p in result.problems]
     snapped = [Point(lat=round(s.lat, 6), lon=round(s.lon, 6)) for s in result.snapped]
-    nudges = {id(at) for _, at in shape_snaps}
     is_shape = [id(s) in nudges for s in result.snapped]
     ring_points = [Point(lat=round(s.lat, 6), lon=round(s.lon, 6)) for s in ring]
     return PlanRouteReply(routes=routes, problems=problems, snapped=snapped, shape=is_shape, ring=ring_points, road_rules=options.rules,

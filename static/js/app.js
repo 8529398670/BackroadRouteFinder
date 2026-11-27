@@ -193,6 +193,7 @@ const App = {
     About.init( me );
     loading.push( Planner.init( me ) );
     loading.push( SavedRoutes.init( me ) );
+    Navigate.init();
     loading.push( ProviderKeys.init( me ) );
     AccountData.init();
 

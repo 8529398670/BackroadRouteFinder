@@ -30,6 +30,7 @@ nav:
   # Foot of the sidebar, for admins.
   version: "Version {version}"
   plan: "Plan a route"
+  navigate: "Navigate"
   routes: "Saved routes"
   my_settings: "Settings"
   account: "Account"
@@ -102,6 +103,13 @@ plan:
   map_point: "Point on map ({lat}, {lon})"
   add_stop: "Add stop"
   reverse: "Reverse"
+  # The device's GPS position (gps.js): the map's crosshair, its dot, and
+  # the button in Where that makes it the start.
+  my_location: "My location"
+  from_here: "Start from my location"
+  start_here: "Start from here"
+  # Drive the route shown, turn by turn (the Navigate screen).
+  navigate: "Navigate"
   clear: "Clear"
   options_heading: "How"
   backroads: "Backroads"
@@ -256,6 +264,7 @@ routes:
   col_saved: "Saved"
   col_actions: "Actions"
   open: "Open"
+  navigate: "Navigate"
   delete: "Delete"
   name_label: "route name"
   stops_more: "{from} → {to} (+{n} stops)"
@@ -343,6 +352,58 @@ shortcuts:
   close_dialog: "Close a dialog"
 
 # Coming back to a tab that was left open (static/js/fresh.js).
+# The device's position (static/js/gps.js).
+gps:
+  you: "You are here"
+  denied: "Location is blocked for this site. Allow it in the browser's site settings to use your position."
+  unavailable: "Your position isn't available right now."
+  timeout: "Still waiting for a GPS fix…"
+  insecure: "The browser only gives your position to a secure (https) page."
+  unsupported: "This browser can't share your position."
+
+# Turn-by-turn navigation of a planned route (static/js/navigate.js). In
+# turn_*, {onto} is navigate.onto with the road, or nothing when the road
+# has no name.
+navigate:
+  heading: "Navigate"
+  map_label: "Map of the route being driven, following your position."
+  empty_heading: "Nothing to navigate yet"
+  empty: "Plan a route and press Navigate, or press Navigate on one of your saved routes."
+  waiting: "Waiting for your position…"
+  weak: "Weak GPS signal (about {m} m)."
+  recenter: "Recenter"
+  steps: "Steps"
+  stop: "End"
+  mute: "Mute voice"
+  unmute: "Turn voice on"
+  auto_reroute: "Reroute automatically"
+  eta: "arrive {time}"
+  then: "Then {what}"
+  in: "In {distance}, {what}"
+  onto: " onto {road}"
+  depart: "Head out"
+  depart_on: "Head out on {road}"
+  continue: "Continue straight"
+  continue_onto: "Continue onto {road}"
+  turn_straight: "Go straight{onto}"
+  turn_slight_left: "Bear left{onto}"
+  turn_left: "Turn left{onto}"
+  turn_sharp_left: "Turn sharp left{onto}"
+  turn_slight_right: "Bear right{onto}"
+  turn_right: "Turn right{onto}"
+  turn_sharp_right: "Turn sharp right{onto}"
+  turn_uturn: "Make a U-turn{onto}"
+  waypoint: "Reach stop {n}"
+  arrive: "Arrive at your destination"
+  arrived: "You have arrived"
+  off_route: "You're off the route."
+  off_route_auto: "You're off the route. Rerouting…"
+  rerouting: "Planning a new route from here…"
+  rerouted: "New route"
+  reroute: "Reroute"
+  reroute_failed: "No route from here."
+  reroute_error: "Couldn't reroute: {message}"
+
 fresh:
   new_version: "A new version is available."
   reload: "Reload"

@@ -1413,6 +1413,13 @@
           "source_name": {
             "type": "string"
           },
+          "steps": {
+            "description": "Turn-by-turn steps along the line, depart first and arrive last.",
+            "items": {
+              "$ref": "#/components/schemas/Step"
+            },
+            "type": "array"
+          },
           "unpaved_meters": {
             "type": "number"
           },
@@ -2395,6 +2402,52 @@
           "message",
           "source",
           "source_name"
+        ],
+        "type": "object"
+      },
+      "Step": {
+        "description": "A turn-by-turn step: what to do at a point on the line, worked out from the line and the roads it follows, then how far and how long to the next step.",
+        "properties": {
+          "along_m": {
+            "description": "Metres from the start of the line.",
+            "type": "number"
+          },
+          "lat": {
+            "type": "number"
+          },
+          "lon": {
+            "type": "number"
+          },
+          "meters": {
+            "description": "To the next step.",
+            "type": "number"
+          },
+          "modifier": {
+            "description": "For turn and continue: straight, slight_left, left, sharp_left, slight_right, right, sharp_right or uturn; empty otherwise.",
+            "type": "string"
+          },
+          "road": {
+            "description": "The road driven after this step; empty when it has no name.",
+            "type": "string"
+          },
+          "seconds": {
+            "description": "To the next step.",
+            "type": "number"
+          },
+          "type": {
+            "description": "depart, turn, continue (straight on onto another road), waypoint (a stop) or arrive.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "along_m",
+          "lat",
+          "lon",
+          "meters",
+          "modifier",
+          "road",
+          "seconds",
+          "type"
         ],
         "type": "object"
       },

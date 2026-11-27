@@ -175,6 +175,28 @@ const RouteMap = {
     layers.forEach( ( layer ) => this.ring.addLayer( layer ) );
   },
 
+  // The "my location" button under the zoom buttons (planner.js locate).
+  // onClick gets the button, to show it pressed while following.
+  addLocate( onClick ) {
+    const Locate = L.Control.extend( {
+      options: { position: "topleft" },
+      onAdd: () => {
+        const box = L.DomUtil.create( "div" , "leaflet-bar" );
+        const button = L.DomUtil.create( "a" , "gps-locate" , box );
+        button.href = "#";
+        button.setAttribute( "role" , "button" );
+        button.setAttribute( "aria-pressed" , "false" );
+        button.title = I18n.get( "plan.my_location" );
+        button.setAttribute( "aria-label" , I18n.get( "plan.my_location" ) );
+        button.innerHTML = "<i class=\"bi bi-crosshair\" aria-hidden=\"true\"></i>";
+        L.DomEvent.disableClickPropagation( box );
+        L.DomEvent.on( button , "click" , ( event ) => { L.DomEvent.preventDefault( event ); onClick( button ); } );
+        return box;
+      },
+    } );
+    new Locate().addTo( this.map );
+  },
+
   clearRoutes() {
     this.lines.clearLayers();
     this.ring.clearLayers();

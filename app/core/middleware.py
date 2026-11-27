@@ -61,7 +61,7 @@ PLAIN_HEADERS = {
     "x-frame-options": "DENY",
     "x-content-type-options": "nosniff",
     "referrer-policy": "same-origin",
-    "permissions-policy": "geolocation=(), microphone=(), camera=(), payment=(), usb=()",
+    "permissions-policy": "geolocation=(self), microphone=(), camera=(), payment=(), usb=()",
     "cross-origin-opener-policy": "same-origin",
     "cross-origin-resource-policy": "same-origin",
     "x-dns-prefetch-control": "off",

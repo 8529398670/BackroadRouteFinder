@@ -99,11 +99,16 @@ const Planner = {
       this.openLinkInPath();
     } );
     window.addEventListener( "resize" , () => RouteMap.resize() );
+    this.initLocate();
 
     Dom.get( "plan-add-stop" ).addEventListener( "click" , () => this.addStop() );
     Dom.get( "plan-reverse" ).addEventListener( "click" , () => this.reverse() );
     Dom.get( "plan-clear" ).addEventListener( "click" , () => this.clear() );
     Dom.get( "plan-lock" ).addEventListener( "click" , () => this.startLock() );
+    Dom.get( "plan-navigate" ).addEventListener( "click" , () => {
+      const trip = this.navigation();
+      if ( trip ) Navigate.start( trip );
+    } );
     Dom.get( "plan-reset-shape" ).addEventListener( "click" , () => this.resetShape() );
     Dom.get( "plan-backroads" ).addEventListener( "change" , ( event ) => this.setOption( "backroads" , event.target.checked ) );
     Dom.get( "plan-loop" ).addEventListener( "change" , ( event ) => this.setLoop( "on" , event.target.checked , null , true ) );
@@ -427,7 +432,7 @@ const Planner = {
   // Opening a saved route (saved_routes.js), or one shared with us (shared:
   // its owner_name and mine, from GET /api/shared-routes): its stops and
   // options, undoable like any other change, and the map moves to show it.
-  open( saved , shared ) {
+  open( saved , shared , navigate ) {
     this.change( "undo.plan_stops" , ( state ) => {
       const points = saved.waypoints.map( ( point ) => ( { lat: point.lat , lon: point.lon , label: point.label } ) );
       const loop = saved.options.loop;
@@ -459,6 +464,8 @@ const Planner = {
       state.link = saved.token ? this.linkOf( saved , shared ) : null;
     } , null , true );
     this.pendingPick = saved.options.pick || null;
+    // Navigate from Saved routes: drive it as soon as its plan is back.
+    this.pendingNavigate = Boolean( navigate );
     this.rememberPlaces( saved.waypoints );
     Nav.go( this.link ? this.linkPath( this.link.token ) : "/plan" );
   },
@@ -992,6 +999,7 @@ const Planner = {
       alternatives: options.alternatives || 1,
     };
     if ( loop ) body.loop = this.loopSpec();
+    this.lastBody = body;
     if ( this.shape.length ) body.shape = this.shape.map( ( point ) => ( { lat: point.lat , lon: point.lon , leg: point.leg } ) );
     // Locked: only the middle plans again, through its own points; the key
     // names the lock rather than repeating its whole line.
@@ -1024,6 +1032,7 @@ const Planner = {
       if ( turn !== this.turn ) return;
       summary.classList.remove( "opacity-50" );
       this.showBusy( null );
+      this.pendingNavigate = false;
       App.showError( error.message );
       return;
     } finally {
@@ -1061,6 +1070,11 @@ const Planner = {
     if ( fit || !this.shownOnce ) RouteMap.fitTo( result.routes , this.points() );
     this.shownOnce = true;
     this.renderResult( result );
+    if ( this.pendingNavigate ) {
+      this.pendingNavigate = false;
+      const trip = this.navigation();
+      if ( trip ) Navigate.start( trip );
+    }
   },
 
   // Keep the pick with the cached plan.
@@ -1152,6 +1166,95 @@ const Planner = {
 
   newLockId() {
     return Date.now().toString( 36 ) + Math.random().toString( 36 ).slice( 2 , 8 );
+  },
+
+  // --- my location and Navigate ------------------------------------------------
+
+  // The map's crosshair: shows where the device is and follows it until
+  // pressed again. The dot (or Start from my location in Where) makes it
+  // the start.
+  initLocate() {
+    this.meDot = Gps.dot( RouteMap.map , ( fix , marker ) => {
+      const button = Dom.el( "button" , {
+        class: "btn btn-sm btn-primary",
+        attrs: { type: "button" },
+        text: I18n.get( "plan.start_here" ),
+        on: { click: () => { RouteMap.map.closePopup(); this.useMyLocation( fix ); } },
+      } );
+      marker.unbindPopup();
+      marker.bindPopup( button ).openPopup();
+    } );
+    let button = null;
+    let centred = false;
+    RouteMap.addLocate( ( pressed ) => {
+      button = pressed;
+      const on = button.getAttribute( "aria-pressed" ) !== "true";
+      button.setAttribute( "aria-pressed" , String( on ) );
+      button.classList.toggle( "active" , on );
+      centred = false;
+      if ( on ) Gps.start( "plan" );
+      else { Gps.stop( "plan" ); this.meDot.clear(); }
+    } );
+    window.addEventListener( "gps" , ( event ) => {
+      if ( !Gps.wanted.has( "plan" ) ) return;
+      this.meDot.update( event.detail );
+      if ( !centred ) {
+        centred = true;
+        RouteMap.map.setView( [ event.detail.lat , event.detail.lon ] , Math.max( RouteMap.map.getZoom() , 14 ) );
+      }
+    } );
+    window.addEventListener( "gps-error" , ( event ) => {
+      if ( button && !Gps.wanted.has( "plan" ) ) {
+        button.setAttribute( "aria-pressed" , "false" );
+        button.classList.remove( "active" );
+      }
+      if ( Nav.current() === "plan" ) App.showError( event.detail.message );
+    } );
+    const here = Dom.get( "plan-from-here" );
+    if ( here ) {
+      here.addEventListener( "click" , async () => {
+        let fix;
+        here.disabled = true;
+        try {
+          fix = await Gps.once();
+        } catch ( error ) {
+          return;
+        } finally {
+          here.disabled = false;
+        }
+        this.useMyLocation( fix );
+      } );
+    }
+  },
+
+  // The device's position as the trip's start (a loop's own start, or its
+  // center when it circles the center), undoable like any other stop.
+  useMyLocation( fix ) {
+    const stop = { lat: fix.lat , lon: fix.lon , label: I18n.get( "plan.my_location" ) };
+    const index = this.isLoop() && this.loopUsesStart() ? 1 : 0;
+    this.setStop( index , stop , true );
+  },
+
+  // What the Navigate screen drives: the chosen route as shown (its line and
+  // steps), the stops it passes, and the options to plan again with when
+  // the driver leaves it. null with no route.
+  navigation() {
+    const route = this.chosen();
+    if ( !route || !this.result ) return null;
+    const body = this.lastBody || {};
+    const shape = this.result.shape || [];
+    const stops = ( this.result.snapped || [] ).filter( ( point , index ) => !shape[ index ] ).map( ( point ) => ( { lat: point.lat , lon: point.lon } ) );
+    let title = "";
+    try { title = this.defaultName(); } catch ( error ) { title = ""; }
+    return {
+      title: ( this.link && this.link.name ) || title,
+      route: { runs: route.runs , steps: route.steps || [] , seconds: route.seconds , meters: route.meters },
+      stops: stops,
+      options: {
+        penalty: body.penalty , road_rules: body.road_rules , road_factors: body.road_factors,
+        sources: ( body.sources || [ "ours" ] ).includes( "ours" ) ? [ "ours" ] : body.sources,
+      },
+    };
   },
 
   // The chosen route as one line of [lat, lon] pairs.

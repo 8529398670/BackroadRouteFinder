@@ -82,6 +82,12 @@ const SavedRoutes = {
         children: [ Dom.el( "i" , { class: "bi bi-map" , attrs: { "aria-hidden": "true" } } ) , Dom.el( "span" , { class: "ms-1" , text: I18n.get( "routes.open" ) } ) ],
         on: { click: () => Planner.open( route , shared ) },
       } ),
+      Dom.el( "button" , {
+        class: "btn btn-sm btn-outline-primary",
+        attrs: { type: "button" },
+        children: [ Dom.el( "i" , { class: "bi bi-sign-turn-right" , attrs: { "aria-hidden": "true" } } ) , Dom.el( "span" , { class: "ms-1" , text: I18n.get( "routes.navigate" ) } ) ],
+        on: { click: () => Planner.open( route , shared , true ) },
+      } ),
     ] );
     tbody.appendChild( Dom.el( "tr" , { children: [
       Dom.el( "td" , { text: route.name } ),
@@ -133,6 +139,12 @@ const SavedRoutes = {
         attrs: { type: "button" },
         children: [ Dom.el( "i" , { class: "bi bi-map" , attrs: { "aria-hidden": "true" } } ) , Dom.el( "span" , { class: "ms-1" , text: I18n.get( "routes.open" ) } ) ],
         on: { click: () => Planner.open( route ) },
+      } ),
+      Dom.el( "button" , {
+        class: "btn btn-sm btn-outline-primary",
+        attrs: { type: "button" },
+        children: [ Dom.el( "i" , { class: "bi bi-sign-turn-right" , attrs: { "aria-hidden": "true" } } ) , Dom.el( "span" , { class: "ms-1" , text: I18n.get( "routes.navigate" ) } ) ],
+        on: { click: () => Planner.open( route , null , true ) },
       } ),
       Dom.el( "button" , {
         class: "btn btn-sm btn-outline-secondary",

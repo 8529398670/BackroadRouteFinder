@@ -64,6 +64,7 @@
         <nav id="sidebar-nav" class="nav nav-pills flex-column w-100 gap-1" data-i18n-attr="aria-label:nav.sidebar_label">
           <!-- The planner first: it is what the app is for. -->
           <a class="nav-link" href="/plan" data-nav="plan"><i class="bi bi-signpost-split" aria-hidden="true"></i><span data-i18n="nav.plan"></span></a>
+          <a class="nav-link" href="/navigate" data-nav="navigate"><i class="bi bi-sign-turn-right" aria-hidden="true"></i><span data-i18n="nav.navigate"></span></a>
           <a class="nav-link" href="/routes" data-nav="routes"><i class="bi bi-bookmark-star" aria-hidden="true"></i><span data-i18n="nav.routes"></span></a>
           <a class="nav-link" href="/settings" data-nav="my-settings"><i class="bi bi-gear" aria-hidden="true"></i><span data-i18n="nav.my_settings"></span></a>
           <!-- Account: its second line names who is signed in (App.labelAccount). -->
@@ -215,6 +216,7 @@
                   </div>
                 </fieldset>
                 <div class="d-flex flex-wrap gap-2">
+                  <button id="plan-from-here" type="button" class="btn btn-sm btn-outline-secondary"><i class="bi bi-crosshair" aria-hidden="true"></i> <span data-i18n="plan.from_here"></span></button>
                   <button id="plan-add-stop" type="button" class="btn btn-sm btn-outline-secondary"><i class="bi bi-plus-lg" aria-hidden="true"></i> <span data-i18n="plan.add_stop"></span></button>
                   <button id="plan-reverse" type="button" class="btn btn-sm btn-outline-secondary"><i class="bi bi-arrow-down-up" aria-hidden="true"></i> <span data-i18n="plan.reverse"></span></button>
                   <button id="plan-clear" type="button" class="btn btn-sm btn-outline-secondary"><i class="bi bi-x-lg" aria-hidden="true"></i> <span data-i18n="plan.clear"></span></button>
@@ -314,6 +316,7 @@
                     <ol id="plan-via" class="list-group list-group-flush list-group-numbered small mt-2"></ol>
                   </details>
                   <div class="d-flex flex-wrap gap-2 mt-3">
+                    <button id="plan-navigate" type="button" class="btn btn-sm btn-success"><i class="bi bi-sign-turn-right" aria-hidden="true"></i> <span data-i18n="plan.navigate"></span></button>
                     <button id="plan-save" type="button" class="btn btn-sm btn-primary" data-write><i class="bi bi-bookmark-plus" aria-hidden="true"></i> <span data-i18n="plan.save"></span></button>
                     <button id="plan-share" type="button" class="btn btn-sm btn-outline-secondary" data-write hidden><i class="bi bi-share" aria-hidden="true"></i> <span data-i18n="routes.share"></span></button>
                     <div class="dropdown">
@@ -333,6 +336,59 @@
                   </div>
                 </div>
               </section>
+            </div>
+          </div>
+        </section>
+
+        <!-- Turn-by-turn navigation of a planned route, from the device's GPS
+             (navigate.js, gps.js). -->
+        <section class="view view-full" data-view="navigate" data-path="/navigate" id="navigate-panel">
+          <h2 class="visually-hidden" data-i18n="navigate.heading"></h2>
+          <section id="nav-empty" class="card">
+            <div class="card-body">
+              <h3 class="card-title h5" data-i18n="navigate.empty_heading"></h3>
+              <p data-i18n="navigate.empty"></p>
+              <div class="d-flex flex-wrap gap-2">
+                <a href="/plan" class="btn btn-primary"><i class="bi bi-signpost-split" aria-hidden="true"></i> <span data-i18n="nav.plan"></span></a>
+                <a href="/routes" class="btn btn-outline-secondary"><i class="bi bi-bookmark-star" aria-hidden="true"></i> <span data-i18n="nav.routes"></span></a>
+              </div>
+            </div>
+          </section>
+          <div id="nav-live" hidden>
+            <div id="nav-gps-status" class="alert alert-info py-2 mb-2 small" role="status" hidden></div>
+            <div id="nav-off-route" class="alert alert-warning py-2 mb-2 d-flex flex-wrap align-items-center gap-2" role="alert" hidden>
+              <span id="nav-off-text" class="me-auto"></span>
+              <button id="nav-reroute" type="button" class="btn btn-sm btn-warning"><i class="bi bi-arrow-repeat" aria-hidden="true"></i> <span data-i18n="navigate.reroute"></span></button>
+            </div>
+            <section class="card mb-2 nav-next" aria-live="polite">
+              <div class="card-body d-flex align-items-center gap-3 py-2">
+                <i id="nav-next-icon" class="bi bi-arrow-up nav-turn-icon" aria-hidden="true"></i>
+                <div class="flex-grow-1 min-w-0">
+                  <div id="nav-next-distance" class="nav-next-distance"></div>
+                  <div id="nav-next-text" class="nav-next-text"></div>
+                  <div id="nav-then" class="small text-body-secondary" hidden></div>
+                </div>
+              </div>
+            </section>
+            <section class="card plan-map-card position-relative">
+              <div id="nav-map" class="nav-map" data-i18n-attr="aria-label:navigate.map_label" role="application"></div>
+              <button id="nav-recenter" type="button" class="btn btn-light border shadow-sm nav-recenter" hidden><i class="bi bi-crosshair" aria-hidden="true"></i> <span data-i18n="navigate.recenter"></span></button>
+            </section>
+            <div class="row g-2 align-items-center mt-1">
+              <div class="col-12 col-md">
+                <div id="nav-title" class="small text-body-secondary text-truncate"></div>
+                <span id="nav-remaining" class="fw-semibold"></span>
+                <span id="nav-eta" class="text-body-secondary ms-2"></span>
+              </div>
+              <div class="col-12 col-md-auto d-flex flex-wrap align-items-center gap-2">
+                <div class="form-check form-switch mb-0 me-1">
+                  <input class="form-check-input" type="checkbox" role="switch" id="nav-auto" />
+                  <label class="form-check-label small" for="nav-auto" data-i18n="navigate.auto_reroute"></label>
+                </div>
+                <button type="button" class="btn btn-outline-secondary" data-bs-toggle="offcanvas" data-bs-target="#nav-steps-panel" aria-controls="nav-steps-panel"><i class="bi bi-list-ol" aria-hidden="true"></i> <span data-i18n="navigate.steps"></span></button>
+                <button id="nav-mute" type="button" class="btn btn-outline-secondary" aria-pressed="false"><i class="bi bi-volume-up-fill" aria-hidden="true"></i></button>
+                <button id="nav-stop" type="button" class="btn btn-danger"><i class="bi bi-stop-circle" aria-hidden="true"></i> <span data-i18n="navigate.stop"></span></button>
+              </div>
             </div>
           </div>
         </section>
@@ -1256,6 +1312,18 @@
     </div>
   </div>
 
+  <!-- The Navigate screen's step list (navigate.js). Out here so a hidden
+       screen never hides it. -->
+  <div class="offcanvas offcanvas-end" tabindex="-1" id="nav-steps-panel" aria-labelledby="nav-steps-title">
+    <div class="offcanvas-header border-bottom">
+      <h2 class="offcanvas-title h5" id="nav-steps-title" data-i18n="navigate.steps"></h2>
+      <button type="button" class="btn-close" data-bs-dismiss="offcanvas" data-i18n-attr="aria-label:nav.close"></button>
+    </div>
+    <div class="offcanvas-body p-0">
+      <ol id="nav-steps" class="list-group list-group-flush"></ol>
+    </div>
+  </div>
+
   <!--
     Plain scripts in dependency order. No bundler, no modules that need a
     build step: each file adds one global and the browser runs them as-is.
@@ -1287,9 +1355,11 @@
   <script src="/js/live.js"></script>
   <script src="/vendor/leaflet.js"></script>
   <script src="/js/format.js"></script>
+  <script src="/js/gps.js"></script>
   <script src="/js/map.js"></script>
   <script src="/js/export.js"></script>
   <script src="/js/planner.js"></script>
+  <script src="/js/navigate.js"></script>
   <script src="/js/providers.js"></script>
   <script src="/js/mapdata.js"></script>
   <script src="/js/saved_routes.js"></script>

@@ -3491,6 +3491,7 @@ The shapes the routes above refer to by name.
 | `seconds` | number | yes |  |  |
 | `source` | string | yes |  | Who planned it: ours, or another engine's id. |
 | `source_name` | string | yes |  |  |
+| `steps` | array of [`Step`](#step) | no |  | Turn-by-turn steps along the line, depart first and arrive last. |
 | `unpaved_meters` | number | yes |  |  |
 | `via` | array of [`Via`](#via) | yes |  |  |
 
@@ -3756,6 +3757,19 @@ One of these:
 | `message` | string | yes |  |  |
 | `source` | string | yes |  |  |
 | `source_name` | string | yes |  |  |
+
+### Step
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `along_m` | number | yes |  | Metres from the start of the line. |
+| `lat` | number | yes |  |  |
+| `lon` | number | yes |  |  |
+| `meters` | number | yes |  | To the next step. |
+| `modifier` | string | yes |  | For turn and continue: straight, slight_left, left, sharp_left, slight_right, right, sharp_right or uturn; empty otherwise. |
+| `road` | string | yes |  | The road driven after this step; empty when it has no name. |
+| `seconds` | number | yes |  | To the next step. |
+| `type` | string | yes |  | depart, turn, continue (straight on onto another road), waypoint (a stop) or arrive. |
 
 ### Theme
 
