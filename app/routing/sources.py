@@ -23,7 +23,7 @@ from app.routing.graph import Graph
 from app.routing.providers import ENGINES, OURS, ProviderError, base
 from app.routing.search import NoRoute
 from app.routing.snap import Snap
-from app.routing.summarize import Summary
+from app.routing.summarize import Summary, join
 
 MAX_ROUTES = 12
 _pool = concurrent.futures.ThreadPoolExecutor(max_workers=8, thread_name_prefix="provider")
@@ -88,6 +88,27 @@ def score(summary: Summary, penalty: float = 0.0) -> float:
     """Seconds, plus what the avoided roads add (each road type's avoid
     strength, Summary.extra_seconds)."""
     return summary.seconds + summary.extra_seconds
+
+
+def with_shape(snapped: list[Snap], shape: list[tuple[int, Snap]]) -> list[Snap]:
+    """The points driven through, with each shape point (a nudge: leg, point)
+    after waypoint leg. Shape points on one leg keep the order given."""
+    out: list[Snap] = []
+    for index, point in enumerate(snapped):
+        out.append(point)
+        out.extend(at for leg, at in shape if leg == index)
+    return out
+
+
+def splice(plan: Plan, before: Summary, after: Summary, off_map_meters: float) -> None:
+    """A plan of a kept route's open middle, made whole: every route (not the
+    comparison) gets the frozen before and after parts added round it."""
+    for choice in plan.routes:
+        if choice.compare:
+            continue
+        choice.summary = join(before, choice.summary, after)
+        choice.score = score(choice.summary)
+        choice.off_map_meters += off_map_meters
 
 
 def _same(a: Summary, b: Summary) -> bool:

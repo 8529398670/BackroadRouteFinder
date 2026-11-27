@@ -5,6 +5,12 @@
 //
 // Pins are Bootstrap-styled divs rather than Leaflet's image markers, so no
 // image files are needed and they follow the theme's colors.
+//
+// The chosen route can be pulled into shape: hovering it shows a small
+// handle on the line (a tap shows it on a phone), and dragging the handle
+// tells the planner where the line was grabbed and where it was dropped
+// (handlers.nudge). The nudges it makes are small dots of their own
+// (drawShape), and a locked route's two ends get a padlock pin (drawLocks).
 const RouteMap = {
   map: null,
   pins: null,
@@ -24,6 +30,9 @@ const RouteMap = {
     } ).addTo( this.map );
     this.ring = L.layerGroup().addTo( this.map );
     this.lines = L.layerGroup().addTo( this.map );
+    this.edit = L.layerGroup().addTo( this.map );
+    this.shape = L.layerGroup().addTo( this.map );
+    this.locks = L.layerGroup().addTo( this.map );
     this.pins = L.layerGroup().addTo( this.map );
     this.map.on( "click" , ( event ) => handlers.click( event.latlng.lat , event.latlng.lng ) );
     this.handlers = handlers;
@@ -170,5 +179,110 @@ const RouteMap = {
     this.lines.clearLayers();
     this.ring.clearLayers();
     if ( this.glow ) this.glow.clearLayers();
+    this.drawEdit( null );
+    this.drawShape( [] );
+    this.drawLocks( [] );
+  },
+
+  // The part of the chosen route that can be grabbed, as [lat, lon] pairs
+  // (null: none). A wide invisible line over it finds the nearest point.
+  drawEdit( coords ) {
+    this.edit.clearLayers();
+    this.editHit = null;
+    this.hideGhost( true );
+    if ( !coords || coords.length < 2 ) return;
+    const hit = L.polyline( coords , { color: "#000000" , weight: 18 , opacity: 0 , interactive: true , bubblingMouseEvents: false } );
+    hit.on( "mousemove" , ( event ) => this.showGhost( event.latlng ) );
+    hit.on( "mouseout" , () => this.hideGhost( false ) );
+    hit.on( "click" , ( event ) => {
+      const at = this.onLine( event.latlng );
+      if ( !this.handlers.linePick( at.lat , at.lng ) ) this.showGhost( event.latlng );
+    } );
+    this.edit.addLayer( hit );
+    this.editHit = hit;
+  },
+
+  // The point on the grabbable line nearest to latlng.
+  onLine( latlng ) {
+    if ( !this.editHit ) return latlng;
+    return this.map.layerPointToLatLng( this.editHit.closestLayerPoint( this.map.latLngToLayerPoint( latlng ) ) );
+  },
+
+  showGhost( latlng ) {
+    if ( !this.editHit ) return;
+    window.clearTimeout( this.ghostTimer );
+    if ( !this.ghost ) {
+      const ghost = L.marker( latlng , {
+        draggable: true,
+        keyboard: false,
+        title: I18n.get( "plan.nudge_handle" ),
+        icon: L.divIcon( { className: "plan-pin plan-pin-ghost" , iconSize: [ 16 , 16 ] , iconAnchor: [ 8 , 8 ] } ),
+      } );
+      ghost.on( "mouseover" , () => window.clearTimeout( this.ghostTimer ) );
+      ghost.on( "mouseout" , () => this.hideGhost( false ) );
+      ghost.on( "dragstart" , () => { this.ghostFrom = ghost.getLatLng(); this.ghostDragging = true; } );
+      ghost.on( "dragend" , () => {
+        const from = this.ghostFrom;
+        const to = ghost.getLatLng();
+        this.ghostDragging = false;
+        this.hideGhost( true );
+        this.handlers.nudge( from.lat , from.lng , to.lat , to.lng );
+      } );
+      ghost.on( "click" , () => {
+        const at = ghost.getLatLng();
+        this.handlers.linePick( at.lat , at.lng );
+      } );
+      this.ghost = ghost;
+    }
+    if ( this.ghostDragging ) return;
+    this.ghost.setLatLng( this.onLine( latlng ) );
+    if ( !this.map.hasLayer( this.ghost ) ) this.ghost.addTo( this.map );
+  },
+
+  // now: at once (the line changed); otherwise a moment after the mouse
+  // leaves, so it can move from the line onto the handle.
+  hideGhost( now ) {
+    window.clearTimeout( this.ghostTimer );
+    if ( !this.ghost || this.ghostDragging ) return;
+    const hide = () => { if ( this.ghost && this.map.hasLayer( this.ghost ) ) this.map.removeLayer( this.ghost ); };
+    if ( now ) hide();
+    else this.ghostTimer = window.setTimeout( hide , 700 );
+  },
+
+  // The nudges: small dots to drag (handlers.moveShape) or click away
+  // (handlers.removeShape).
+  drawShape( points ) {
+    this.shape.clearLayers();
+    points.forEach( ( point , index ) => {
+      const dot = L.marker( [ point.lat , point.lon ] , {
+        draggable: true,
+        keyboard: true,
+        title: I18n.get( "plan.nudge_dot" ),
+        icon: L.divIcon( { className: "plan-pin plan-pin-shape" , iconSize: [ 14 , 14 ] , iconAnchor: [ 7 , 7 ] } ),
+      } );
+      dot.on( "dragend" , () => {
+        const at = dot.getLatLng();
+        this.handlers.moveShape( index , at.lat , at.lng );
+      } );
+      dot.on( "click" , () => this.handlers.removeShape( index ) );
+      this.shape.addLayer( dot );
+    } );
+  },
+
+  // A locked route's ends (and the first one while the second is picked).
+  drawLocks( points ) {
+    this.locks.clearLayers();
+    points.forEach( ( point ) => {
+      this.locks.addLayer( L.marker( [ point[ 0 ] , point[ 1 ] ] , {
+        interactive: false,
+        keyboard: false,
+        icon: L.divIcon( {
+          className: "plan-pin plan-pin-lock",
+          html: "<i class=\"bi bi-lock-fill\" aria-hidden=\"true\"></i>",
+          iconSize: [ 24 , 24 ],
+          iconAnchor: [ 12 , 12 ],
+        } ),
+      } ) );
+    } );
   },
 };

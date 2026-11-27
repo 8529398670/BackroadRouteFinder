@@ -16,12 +16,17 @@ from app.models import saved_routes
 from app.models.users import get_owner_id
 from app.routes.helpers import Refused, get_config, get_store
 from app.models import provider_keys
-from app.routing import classes, costs, geocode, loop, router, sources
+from app.routing import classes, costs, geocode, loop, match, router, sources
 from app.routing.graph import Holder
 from app.routing.providers import ENGINES, OURS
 from app.routing.search import NoRoute
 
 MAX_WAYPOINTS = 10
+# Nudges: shape points a route is pulled through, and every point a plan
+# drives through at most (the most some engines take in one request).
+MAX_SHAPE = 12
+MAX_POINTS = 25
+MAX_KEEP_POINTS = 20000
 SOURCE_IDS = (OURS, *ENGINES)
 
 Source = Annotated[str, Meta(pattern="^(" + "|".join(SOURCE_IDS) + ")$", description="ours, or another engine: " + ", ".join(ENGINES) + ".",
@@ -135,9 +140,31 @@ def _ready_graph(request: Request):
 
 # --- plan --------------------------------------------------------------------
 
+class ShapePoint(Reply):
+    api_name: ClassVar[str] = "ShapePoint"
+    api_doc: ClassVar[str] = "A nudge: a point the route is pulled through, on one leg, without being a stop."
+    lat: Annotated[float, Meta(ge=-90, le=90)]
+    lon: Annotated[float, Meta(ge=-180, le=180)]
+    leg: Annotated[int, Meta(ge=0, description="The leg it is on: 0 from the first point driven through to the next, and so on "
+                                               "(with a loop, between the points it drives through, as snapped lists them).")]
+
+
+class Keep(Reply):
+    api_name: ClassVar[str] = "Keep"
+    api_doc: ClassVar[str] = ("A locked route: its line, of which everything before coords[start] and after coords[end] stays as it "
+                              "is. Only the middle is planned again, from waypoints' first point to its last.")
+    coords: Annotated[list[Annotated[list[float], Meta(min_length=2, max_length=2)]], Meta(
+        min_length=2, max_length=MAX_KEEP_POINTS, description="The route's whole line as [lat, lon] pairs, in driving order.")]
+    seconds: Annotated[float, Meta(ge=0, description="The whole route's time when it was locked; the frozen parts take their share.")]
+    start: Annotated[int, Meta(ge=0, description="Index in coords where the open middle begins.")]
+    end: Annotated[int, Meta(ge=0, description="Index in coords where the open middle ends.")]
+    trip: Annotated[list[Point], Meta(max_length=MAX_POINTS, description="The trip's own points, start to end, for the fastest route to compare with.")] = msgspec.field(default_factory=list)
+
+
 class PlanRoute(RequestType):
-    waypoints: Annotated[list[Point], Meta(max_length=MAX_WAYPOINTS, description="Start, any stops, destination, in order (2 or more). "
-                                           "With a loop: none, or the start alone for start=stop.", extra={"error": f"give 2-{MAX_WAYPOINTS} points"})] = msgspec.field(default_factory=list)
+    waypoints: Annotated[list[Point], Meta(max_length=MAX_POINTS, description=f"Start, any stops, destination, in order (2-{MAX_WAYPOINTS}). "
+                                           "With a loop: none, or the start alone for start=stop. With keep: the open middle's points, "
+                                           f"from its first to its last (up to {MAX_POINTS}).", extra={"error": f"give 2-{MAX_WAYPOINTS} points"})] = msgspec.field(default_factory=list)
     penalty: Penalty = 8.0
     road_rules: RoadRules = msgspec.field(default_factory=dict)
     road_factors: RoadFactors | None = None
@@ -149,6 +176,9 @@ class PlanRoute(RequestType):
                                           extra={"error": "pick at least one source"})] = msgspec.field(default_factory=lambda: [OURS])
     combine: Combine = "best"
     alternatives: Annotated[Alternatives | None, Meta(description="How many routes to offer, best first (1-10). Left out: 1 with combine=best, the most with combine=all.")] = None
+    shape: Annotated[list[ShapePoint], Meta(max_length=MAX_SHAPE, description=f"Nudges: points every route is pulled through (up to {MAX_SHAPE}).",
+                                            extra={"error": f"at most {MAX_SHAPE} nudges"})] = msgspec.field(default_factory=list)
+    keep: Annotated[Keep | None, Meta(description="Lock a route's ends and plan only its middle again (not with a loop).")] = None
 
 
 class Problem(Reply):
@@ -162,7 +192,8 @@ class Problem(Reply):
 class PlanRouteReply(Reply):
     routes: list[PlannedRoute]
     problems: list[Problem]
-    snapped: Annotated[list[Point], Meta(description="Where each waypoint met the road (with a loop: every point it drives through).")]
+    snapped: Annotated[list[Point], Meta(description="Where each waypoint met the road (with a loop: every point it drives through), nudges included.")]
+    shape: Annotated[list[bool], Meta(description="For each point in snapped: whether it is a nudge (shape) rather than a waypoint.")]
     ring: Annotated[list[Point], Meta(description="With a loop: the ring's points, in driving order.")]
     road_rules: Annotated[dict[str, str], Meta(description="The road rules the plan used, every type filled in.")]
     road_factors: Annotated[dict[str, float], Meta(description="The avoid strengths the plan used; types left out counted the penalty.")]
@@ -222,8 +253,11 @@ def plan_route(request: Request, body: PlanRoute) -> PlanRouteReply:
     max_snap = cfg.file.routing.max_snap_m
     count = body.alternatives or (1 if body.combine == "best" else sources.MAX_ROUTES)
     ring: list = []
+    shape_snaps = _snap_shape(graph, body.shape, max_snap, options)
     try:
-        if body.loop is not None:
+        if body.keep is not None:
+            result = _plan_kept(request, graph, body, options, picked, count, max_snap, shape_snaps)
+        elif body.loop is not None:
             spec = body.loop
             if spec.start == "stop" and len(body.waypoints) != 1:
                 raise Refused(400, "a loop from your own start takes that start as its one waypoint", field="waypoints")
@@ -233,14 +267,16 @@ def plan_route(request: Request, body: PlanRoute) -> PlanRouteReply:
             circle = loop.plan(graph, (spec.center_lat, spec.center_lon), spec.radius, spec.unit, spec.start, spec.direction,
                                options, max_snap, start_point=start, count=spec.points or routing.loop_points)
             ring = circle.ring
-            result = sources.plan(graph, [(s.lat, s.lon) for s in circle.stops], options, picked, count,
-                                  body.compare_fastest, max_snap, access_of(request), snapped=circle.stops,
+            stops = _shaped(circle.stops, shape_snaps)
+            result = sources.plan(graph, [(s.lat, s.lon) for s in stops], options, picked, count,
+                                  body.compare_fastest, max_snap, access_of(request), snapped=stops,
                                   reuse_factor=spec.reuse if spec.reuse is not None else float(routing.loop_reuse))
         else:
-            if len(body.waypoints) < 2:
+            if not 2 <= len(body.waypoints) <= MAX_WAYPOINTS:
                 raise Refused(400, f"give 2-{MAX_WAYPOINTS} points", field="waypoints")
-            result = sources.plan(graph, [(p.lat, p.lon) for p in body.waypoints], options, picked, count,
-                                  body.compare_fastest, max_snap, access_of(request))
+            snapped = _shaped(router.snap_all(graph, [(p.lat, p.lon) for p in body.waypoints], max_snap, options), shape_snaps)
+            result = sources.plan(graph, [(s.lat, s.lon) for s in snapped], options, picked, count,
+                                  body.compare_fastest, max_snap, access_of(request), snapped=snapped)
     except router.PointOffNetwork as off:
         raise Refused(400, f"point {off.index + 1} is not near a road on the map ({off})", field="waypoints", index=off.index) from None
     except NoRoute as error:
@@ -269,9 +305,62 @@ def plan_route(request: Request, body: PlanRoute) -> PlanRouteReply:
     ]
     problems = [Problem(source=p.source, source_name=source_name(p.source), message=p.message) for p in result.problems]
     snapped = [Point(lat=round(s.lat, 6), lon=round(s.lon, 6)) for s in result.snapped]
+    nudges = {id(at) for _, at in shape_snaps}
+    is_shape = [id(s) in nudges for s in result.snapped]
     ring_points = [Point(lat=round(s.lat, 6), lon=round(s.lon, 6)) for s in ring]
-    return PlanRouteReply(routes=routes, problems=problems, snapped=snapped, ring=ring_points, road_rules=options.rules,
+    return PlanRouteReply(routes=routes, problems=problems, snapped=snapped, shape=is_shape, ring=ring_points, road_rules=options.rules,
                           road_factors=options.factors, milliseconds=result.milliseconds)
+
+
+def _snap_shape(graph, shape: list[ShapePoint], max_snap: float, options: costs.Options) -> list[tuple[int, object]]:
+    """Each nudge on its road, with its leg."""
+    if not shape:
+        return []
+    try:
+        snaps = router.snap_all(graph, [(p.lat, p.lon) for p in shape], max_snap, options)
+    except router.PointOffNetwork as off:
+        raise Refused(400, f"nudge {off.index + 1} is not near a road on the map ({off})", field="shape", index=off.index) from None
+    return [(p.leg, at) for p, at in zip(shape, snaps)]
+
+
+def _shaped(points: list, shape_snaps: list[tuple[int, object]]) -> list:
+    """The points driven through with the nudges put in; refuses a nudge on a
+    leg that is not there, or too many points in all."""
+    for index, (leg, _) in enumerate(shape_snaps):
+        if leg >= len(points) - 1:
+            raise Refused(400, f"nudge {index + 1} is on leg {leg + 1}, and the route has {len(points) - 1}", field="shape", index=index)
+    if len(points) + len(shape_snaps) > MAX_POINTS:
+        raise Refused(400, f"a route drives through at most {MAX_POINTS} points, nudges included", field="shape")
+    return sources.with_shape(points, shape_snaps)
+
+
+def _plan_kept(request: Request, graph, body: PlanRoute, options: costs.Options, picked: list[str], count: int,
+               max_snap: float, shape_snaps: list) -> sources.Plan:
+    """A locked route: the middle planned again through its points and
+    nudges, the ends as they were, joined into each route."""
+    keep = body.keep
+    assert keep is not None
+    if body.loop is not None:
+        raise Refused(400, "a locked route takes its middle's points as waypoints, not a loop", field="loop")
+    if not 0 <= keep.start < keep.end < len(keep.coords):
+        raise Refused(400, "keep: start must come before end, both inside coords", field="keep")
+    if len(body.waypoints) < 2:
+        raise Refused(400, "a locked route's middle needs its first and last point", field="waypoints")
+    snapped = _shaped(router.snap_all(graph, [(p.lat, p.lon) for p in body.waypoints], max_snap, options), shape_snaps)
+    middle = sources.plan(graph, [(s.lat, s.lon) for s in snapped], options, picked, count, False, max_snap,
+                          access_of(request), snapped=snapped)
+    coords = [(float(c[0]), float(c[1])) for c in keep.coords]
+    before, after, off_map = match.measure_parts(graph, coords, keep.seconds, costs.rating(graph, options), keep.start, keep.end)
+    sources.splice(middle, before, after, off_map)
+    if body.compare_fastest and options.penalty > 1 and len(keep.trip) >= 2:
+        try:
+            fastest = router.plan(graph, [(p.lat, p.lon) for p in keep.trip], options, True, max_snap, chosen=False)
+        except (router.PointOffNetwork, NoRoute):
+            fastest = None
+        if fastest is not None and fastest.routes:
+            planned = fastest.routes[0]
+            middle.routes.append(sources.Choice(OURS, "fastest", planned.summary, planned.summary.seconds, compare=True))
+    return middle
 
 
 # --- status ------------------------------------------------------------------

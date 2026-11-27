@@ -2657,13 +2657,15 @@ The route through the waypoints that keeps time on main roads down: each minute 
 | `combine` | string | no | default `best` | Older than alternatives: best is 1 route, all is up to 12. Ignored when alternatives is given. |
 | `compare_fastest` | boolean | no | default `true` | Also plan the plain fastest route, for comparison. |
 | `csrf_token` | string | no |  | From GET /api/me. Browser sessions only. |
+| `keep` | [`Keep`](#keep) or null | no |  | Lock a route's ends and plan only its middle again (not with a loop). |
 | `loop` | [`Loop`](#loop) or null | no |  | Plan a loop round a center instead of a trip through the waypoints. |
 | `penalty` | number | no | 1 to 100; default `8` | How many times over a minute on a main road counts. 1 is the plain fastest route. |
 | `road_factors` | map of number or null | no |  | Avoid strengths of their own, by road type: how many times over a minute on that type counts when its rule is avoid (unpaved: 2 makes gravel count double however high the penalty). Types left out count the penalty. Left out altogether: the defaults in GET /api/routing/status. |
 | `road_rules` | map of string | no |  | What to do with each road type: use it, avoid it (each minute on it counts penalty times over), or never (only when there is no other way). Categories: interstate, us_highway, state_route, county_road, local, service, track; and any road that is unpaved or restricted (private, permit or farm access). Types left out take the defaults in GET /api/routing/status. |
 | `secondary_is_main` | boolean or null | no |  | Deprecated, use road_rules: false is state_route use. |
+| `shape` | array of [`ShapePoint`](#shapepoint) | no |  | Nudges: points every route is pulled through (up to 12). |
 | `sources` | array of string | no |  | Who to ask: our own router and/or other engines. |
-| `waypoints` | array of [`Point`](#point) | no |  | Start, any stops, destination, in order (2 or more). With a loop: none, or the start alone for start=stop. |
+| `waypoints` | array of [`Point`](#point) | no |  | Start, any stops, destination, in order (2-10). With a loop: none, or the start alone for start=stop. With keep: the open middle's points, from its first to its last (up to 25). |
 
 **Reply 200**: Success
 
@@ -2675,7 +2677,8 @@ The route through the waypoints that keeps time on main roads down: each minute 
 | `road_factors` | map of number | yes |  | The avoid strengths the plan used; types left out counted the penalty. |
 | `road_rules` | map of string | yes |  | The road rules the plan used, every type filled in. |
 | `routes` | array of [`PlannedRoute`](#plannedroute) | yes |  |  |
-| `snapped` | array of [`Point`](#point) | yes |  | Where each waypoint met the road (with a loop: every point it drives through). |
+| `shape` | array of boolean | yes |  | For each point in snapped: whether it is a nudge (shape) rather than a waypoint. |
+| `snapped` | array of [`Point`](#point) | yes |  | Where each waypoint met the road (with a loop: every point it drives through), nudges included. |
 
 ### GET /api/routing/status
 
@@ -3121,6 +3124,16 @@ The shapes the routes above refer to by name.
 | `running` | boolean | yes |  |  |
 | `runs` | integer | yes |  |  |
 
+### Keep
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `coords` | array of array of number | yes |  | The route's whole line as [lat, lon] pairs, in driving order. |
+| `end` | integer | yes | at least 0 | Index in coords where the open middle ends. |
+| `seconds` | number | yes | at least 0 | The whole route's time when it was locked; the frozen parts take their share. |
+| `start` | integer | yes | at least 0 | Index in coords where the open middle begins. |
+| `trip` | array of [`Point`](#point) | no |  | The trip's own points, start to end, for the fastest route to compare with. |
+
 ### LogDay
 
 | Field | Type | Required | Limits | Description |
@@ -3405,12 +3418,14 @@ The shapes the routes above refer to by name.
 | `alternatives` | integer or null | no | 1 to 10 | How many routes to offer, best first: the best and up to this many less one alternatives on different roads. |
 | `backroads` | boolean | no | default `true` |  |
 | `combine` | string | no | default `best` | Older than alternatives: best is 1 route, all is up to 12. Ignored when alternatives is given. |
+| `lock` | [`SavedLock`](#savedlock) or null | no |  | Its locked ends, if it was locked. |
 | `loop` | [`Loop`](#loop) or null | no |  | A loop round a center, planned in place of the waypoints. |
 | `penalty` | number | no | 1 to 100; default `8` | How many times over a minute on a main road counts. 1 is the plain fastest route. |
 | `pick` | [`RoutePick`](#routepick) or null | no |  | Which of the routes offered was chosen, so opening it again shows the same one. |
 | `road_factors` | map of number or null | no |  | Its avoid strengths; null for a route saved before they could be set (the server's). |
 | `road_rules` | map of string | no |  | What to do with each road type: use it, avoid it (each minute on it counts penalty times over), or never (only when there is no other way). Categories: interstate, us_highway, state_route, county_road, local, service, track; and any road that is unpaved or restricted (private, permit or farm access). Types left out take the defaults in GET /api/routing/status. |
 | `secondary_is_main` | boolean or null | no |  | Deprecated, use road_rules: false is state_route use. |
+| `shape` | array of [`ShapePoint`](#shapepoint) | no |  | Its nudges (POST /api/route shape). |
 | `sources` | array of string | no |  |  |
 
 ### RoutePick
@@ -3435,6 +3450,13 @@ The shapes the routes above refer to by name.
 |---|---|---|---|---|
 | `coords` | array of array of number | yes |  |  |
 | `main` | boolean | yes |  |  |
+
+### SavedLock
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `keep` | [`Keep`](#keep) | yes |  |  |
+| `middle` | array of [`Point`](#point) | yes |  |  |
 
 ### SavedRoute
 
@@ -3503,6 +3525,14 @@ The shapes the routes above refer to by name.
 | `stale` | boolean | yes |  |  |
 | `version` | string | yes |  | Send it back when saving: a changed file is refused with a 409. |
 | `writable` | boolean | yes |  |  |
+
+### ShapePoint
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `lat` | number | yes | -90 to 90 |  |
+| `leg` | integer | yes | at least 0 | The leg it is on: 0 from the first point driven through to the next, and so on (with a loop, between the points it drives through, as snapped lists them). |
+| `lon` | number | yes | -180 to 180 |  |
 
 ### SharedEngine
 

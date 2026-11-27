@@ -150,3 +150,45 @@ def _fold(via: list[Via]) -> list[Via]:
         else:
             kept.append(item)
     return kept or via[:1]
+
+
+def scaled(summary: Summary, factor: float) -> Summary:
+    """The same roads with every time factor times over."""
+    return Summary(
+        seconds=summary.seconds * factor, meters=summary.meters, main_seconds=summary.main_seconds * factor,
+        main_meters=summary.main_meters, unpaved_meters=summary.unpaved_meters, extra_seconds=summary.extra_seconds * factor,
+        delay_seconds=summary.delay_seconds * factor, runs=summary.runs,
+        via=[Via(name=v.name, main=v.main, meters=v.meters, seconds=v.seconds * factor) for v in summary.via],
+    )
+
+
+def join(*parts: Summary) -> Summary:
+    """Routes driven one after the other as one: the totals added, the lines
+    joined (a run carries on where the next part starts the same colour) and
+    the roads followed in order."""
+    out = Summary()
+    via: list[Via] = []
+    for part in parts:
+        out.seconds += part.seconds
+        out.meters += part.meters
+        out.main_seconds += part.main_seconds
+        out.main_meters += part.main_meters
+        out.unpaved_meters += part.unpaved_meters
+        out.extra_seconds += part.extra_seconds
+        out.delay_seconds += part.delay_seconds
+        for run in part.runs:
+            if not run.coords:
+                continue
+            if out.runs and out.runs[-1].main == run.main:
+                last = out.runs[-1].coords
+                last.extend(run.coords[1:] if last and last[-1] == run.coords[0] else run.coords)
+            else:
+                out.runs.append(Run(main=run.main, coords=list(run.coords)))
+        for item in part.via:
+            if via and via[-1].name == item.name:
+                via[-1] = Via(name=item.name, main=via[-1].main or item.main, meters=via[-1].meters + item.meters,
+                              seconds=via[-1].seconds + item.seconds)
+            else:
+                via.append(Via(name=item.name, main=item.main, meters=item.meters, seconds=item.seconds))
+    out.via = _fold(via)
+    return out

@@ -13,9 +13,23 @@
 // (options.loop.on). The loop has its own points -- the center, and the
 // person's own start when it starts there -- so switching between the two
 // keeps both. points() is whichever list is in use.
+//
+// The chosen route can be nudged: dragging its line adds a shape point (a
+// small dot, not a stop) that every route then passes through, on the leg it
+// was grabbed on. Lock part freezes the route before and after two points on
+// it: from then on only the middle plans again (POST /api/route keep), so
+// nudges there leave the rest exactly as it was. Reset takes both away.
+// Changing the stops themselves (adding, removing, reordering, the loop's
+// settings, or any stop while locked) clears them, as one undoable step.
 const Planner = {
   stops: [ null , null ],
   loopPoints: [ null , null ],
+  // Nudges, in driving order: { lat , lon , leg } (leg as the API counts it).
+  shape: [],
+  // A locked route: { id , coords , seconds , start , end , middle , trip }.
+  // Never changed once made, so undo steps can share it.
+  lock: null,
+  MAX_SHAPE: 12,
   options: {
     backroads: true , penalty: 8 , road_rules: {} , road_factors: {} , compare_fastest: true , sources: [ "ours" ] , combine: "best" , alternatives: 5,
     loop: { on: false , radius: 20 , unit: "mi" , start: "center" , direction: "cw" , points: 6 , reuse: 3 },
@@ -38,6 +52,7 @@ const Planner = {
   pendingPick: null,
   ALTERNATIVES: [ 1 , 2 , 3 , 4 , 5 , 6 , 7 , 8 , 9 , 10 ],
   picking: null,
+  lockFrom: null,
   turn: 0,
   status: null,
   planTimer: null,
@@ -47,6 +62,12 @@ const Planner = {
     RouteMap.init( "plan-map" , {
       click: ( lat , lon ) => this.onMapClick( lat , lon ),
       drag: ( index , lat , lon ) => this.setStop( index , this.pointStop( lat , lon ) ),
+      nudge: ( fromLat , fromLon , lat , lon ) => this.nudge( fromLat , fromLon , lat , lon ),
+      linePick: ( lat , lon ) => this.linePick( lat , lon ),
+      moveShape: ( index , lat , lon ) => this.change( "undo.plan_nudge" , ( state ) => {
+        state.shape[ index ] = Object.assign( {} , state.shape[ index ] , { lat: lat , lon: lon } );
+      } ),
+      removeShape: ( index ) => this.change( "undo.plan_nudge" , ( state ) => { state.shape.splice( index , 1 ); } ),
     } );
     window.addEventListener( "nav" , ( event ) => {
       if ( event.detail.screen === "plan" ) window.setTimeout( () => RouteMap.resize() , 0 );
@@ -56,6 +77,8 @@ const Planner = {
     Dom.get( "plan-add-stop" ).addEventListener( "click" , () => this.addStop() );
     Dom.get( "plan-reverse" ).addEventListener( "click" , () => this.reverse() );
     Dom.get( "plan-clear" ).addEventListener( "click" , () => this.clear() );
+    Dom.get( "plan-lock" ).addEventListener( "click" , () => this.startLock() );
+    Dom.get( "plan-reset-shape" ).addEventListener( "click" , () => this.resetShape() );
     Dom.get( "plan-backroads" ).addEventListener( "change" , ( event ) => this.setOption( "backroads" , event.target.checked ) );
     Dom.get( "plan-loop" ).addEventListener( "change" , ( event ) => this.setLoop( "on" , event.target.checked , null , true ) );
     Dom.get( "plan-loop-radius" ).addEventListener( "change" , ( event ) => {
@@ -164,13 +187,19 @@ const Planner = {
   },
 
   snapshot() {
-    return { stops: this.copyPoints( this.stops ) , loopPoints: this.copyPoints( this.loopPoints ) , options: this.copyOptions( this.options ) };
+    return {
+      stops: this.copyPoints( this.stops ) , loopPoints: this.copyPoints( this.loopPoints ) , options: this.copyOptions( this.options ),
+      shape: this.copyPoints( this.shape ) , lock: this.lock,
+    };
   },
 
   apply( state , fit ) {
     this.stops = this.copyPoints( state.stops );
     this.loopPoints = this.copyPoints( state.loopPoints );
     this.options = this.copyOptions( state.options );
+    this.shape = this.copyPoints( state.shape || [] );
+    this.lock = state.lock || null;
+    this.picking = null;
     this.renderStops();
     this.renderOptions();
     this.schedulePlan( fit );
@@ -209,9 +238,20 @@ const Planner = {
     return this.loopUsesStart() ? this.loopPoints : this.loopPoints.slice( 0 , 1 );
   },
 
+  // Nudges and the lock belong to the stops as they are: a change to the
+  // stops themselves takes them away (mutate's state).
+  unshape( state ) {
+    state.shape = [];
+    state.lock = null;
+  },
+
   setStop( index , stop , fit ) {
     const loop = this.isLoop();
-    this.change( "undo.plan_stops" , ( state ) => { ( loop ? state.loopPoints : state.stops )[ index ] = stop; } , null , fit );
+    const locked = this.lock !== null;
+    this.change( "undo.plan_stops" , ( state ) => {
+      ( loop ? state.loopPoints : state.stops )[ index ] = stop;
+      if ( locked ) this.unshape( state );
+    } , null , fit );
   },
 
   setOption( name , value , merge ) {
@@ -236,10 +276,12 @@ const Planner = {
   setLoop( name , value , merge , fit ) {
     if ( this.options.loop[ name ] === value ) return;
     this.picking = null;
-    this.change( "undo.plan_options" , ( state ) => { state.options.loop[ name ] = value; } , merge || null , fit );
+    this.change( "undo.plan_options" , ( state ) => { state.options.loop[ name ] = value; this.unshape( state ); } , merge || null , fit );
   },
 
   onMapClick( lat , lon ) {
+    // Picking a lock point takes a click on the route itself (linePick).
+    if ( this.isLockPicking() ) return;
     const points = this.points();
     let index = this.picking;
     if ( index === null || index >= points.length ) {
@@ -260,18 +302,18 @@ const Planner = {
 
   addStop() {
     if ( this.isLoop() ) return;
-    this.change( "undo.plan_stops" , ( state ) => { state.stops.splice( state.stops.length - 1 , 0 , null ); } );
+    this.change( "undo.plan_stops" , ( state ) => { state.stops.splice( state.stops.length - 1 , 0 , null ); this.unshape( state ); } );
     this.picking = this.stops.length - 2;
     this.showHint();
   },
 
   removeStop( index ) {
-    this.change( "undo.plan_stops" , ( state ) => { state.stops.splice( index , 1 ); } );
+    this.change( "undo.plan_stops" , ( state ) => { state.stops.splice( index , 1 ); this.unshape( state ); } );
   },
 
   reverse() {
     if ( this.isLoop() ) return;
-    this.change( "undo.plan_stops" , ( state ) => { state.stops.reverse(); } );
+    this.change( "undo.plan_stops" , ( state ) => { state.stops.reverse(); this.unshape( state ); } );
   },
 
   clear() {
@@ -280,6 +322,7 @@ const Planner = {
     this.change( "undo.plan_stops" , ( state ) => {
       if ( loop ) state.loopPoints = [ null , null ];
       else state.stops = [ null , null ];
+      this.unshape( state );
     } );
   },
 
@@ -311,6 +354,9 @@ const Planner = {
       if ( saved.options.sources ) state.options.sources = saved.options.sources.slice();
       if ( saved.options.combine ) state.options.combine = saved.options.combine;
       if ( saved.options.alternatives ) state.options.alternatives = saved.options.alternatives;
+      state.shape = ( saved.options.shape || [] ).map( ( point ) => ( { lat: point.lat , lon: point.lon , leg: point.leg } ) );
+      const lock = saved.options.lock;
+      state.lock = lock ? Object.assign( { id: this.newLockId() , middle: lock.middle } , lock.keep ) : null;
     } , null , true );
     this.pendingPick = saved.options.pick || null;
     Nav.go( "/plan" );
@@ -447,7 +493,10 @@ const Planner = {
   showHint() {
     let text;
     const points = this.loopPoints;
-    if ( this.picking !== null ) text = Format.fill( "plan.hint_pick" , { stop: this.stopName( this.picking ) } );
+    if ( this.picking === "lock-from" ) text = I18n.get( "plan.hint_lock_from" );
+    else if ( this.picking === "lock-to" ) text = I18n.get( "plan.hint_lock_to" );
+    else if ( this.picking !== null ) text = Format.fill( "plan.hint_pick" , { stop: this.stopName( this.picking ) } );
+    else if ( this.lock ) text = I18n.get( "plan.hint_locked" );
     else if ( this.isLoop() ) {
       if ( points[ 0 ] === null ) text = I18n.get( "plan.hint_loop_center" );
       else if ( this.loopUsesStart() && points[ 1 ] === null ) text = I18n.get( "plan.hint_loop_start" );
@@ -456,7 +505,7 @@ const Planner = {
     else if ( this.stops.some( ( stop ) => stop === null ) ) text = I18n.get( "plan.hint_end" );
     else text = I18n.get( "plan.hint_done" );
     Dom.text( Dom.get( "plan-hint" ) , text );
-    Dom.get( "plan-map" ).classList.toggle( "plan-map-picking" , this.picking !== null );
+    Dom.get( "plan-map" ).classList.toggle( "plan-map-picking" , this.picking !== null && !this.isLockPicking() );
   },
 
   // --- the options card --------------------------------------------------------
@@ -688,7 +737,19 @@ const Planner = {
       alternatives: options.alternatives || 1,
     };
     if ( loop ) body.loop = this.loopSpec();
-    const key = JSON.stringify( body );
+    if ( this.shape.length ) body.shape = this.shape.map( ( point ) => ( { lat: point.lat , lon: point.lon , leg: point.leg } ) );
+    // Locked: only the middle plans again, through its own points; the key
+    // names the lock rather than repeating its whole line.
+    let key;
+    if ( this.lock ) {
+      const lock = this.lock;
+      body.waypoints = lock.middle.map( ( point ) => ( { lat: point.lat , lon: point.lon } ) );
+      delete body.loop;
+      key = JSON.stringify( Object.assign( {} , body , { keep: "lock-" + lock.id } ) );
+      body.keep = { coords: lock.coords , seconds: lock.seconds , start: lock.start , end: lock.end , trip: lock.trip };
+    } else {
+      key = JSON.stringify( body );
+    }
     const cached = this.cache.get( key );
     if ( cached ) {
       // Seen a moment ago: show it as it was, with the route picked then.
@@ -794,10 +855,213 @@ const Planner = {
       const index = choices.indexOf( route );
       if ( index >= 0 ) this.select( index );
     } );
-    if ( this.isLoop() && this.result.ring && this.result.ring.length ) {
+    if ( this.isLoop() && !this.lock && this.result.ring && this.result.ring.length ) {
       const loop = this.options.loop;
       RouteMap.drawRing( this.loopPoints[ 0 ] , this.result.ring , loop.unit === "mi" ? loop.radius * 1609.344 : null );
     }
+    this.drawShaping();
+  },
+
+  // The grabbable part of the line, the nudges and the padlocks.
+  drawShaping() {
+    const line = this.routeLine();
+    if ( line.length < 2 ) {
+      RouteMap.drawEdit( null );
+      RouteMap.drawShape( [] );
+      RouteMap.drawLocks( [] );
+      return;
+    }
+    const [ lo , hi ] = this.isLockPicking() ? [ 0 , line.length - 1 ] : this.editRange( line );
+    RouteMap.drawEdit( line.slice( lo , hi + 1 ) );
+    // A nudge sits where it met the road, once a plan has put it there.
+    const met = this.result ? ( this.result.snapped || [] ).filter( ( point , index ) => ( this.result.shape || [] )[ index ] ) : [];
+    RouteMap.drawShape( met.length === this.shape.length ? met : this.shape );
+    const locks = [];
+    if ( this.lock ) locks.push( this.lock.coords[ this.lock.start ] , this.lock.coords[ this.lock.end ] );
+    if ( this.picking === "lock-to" && this.lockFrom !== null ) locks.push( line[ this.lockFrom ] );
+    RouteMap.drawLocks( locks );
+  },
+
+  // --- nudging and locking ---------------------------------------------------
+
+  isLockPicking() {
+    return this.picking === "lock-from" || this.picking === "lock-to";
+  },
+
+  newLockId() {
+    return Date.now().toString( 36 ) + Math.random().toString( 36 ).slice( 2 , 8 );
+  },
+
+  // The chosen route as one line of [lat, lon] pairs.
+  routeLine() {
+    const route = this.chosen();
+    const out = [];
+    if ( !route ) return out;
+    route.runs.forEach( ( run ) => run.coords.forEach( ( point , index ) => {
+      const last = out[ out.length - 1 ];
+      if ( index === 0 && last && last[ 0 ] === point[ 0 ] && last[ 1 ] === point[ 1 ] ) return;
+      out.push( point );
+    } ) );
+    return out;
+  },
+
+  // Rough metres between two points (plenty to compare nearness).
+  metres( lat1 , lon1 , lat2 , lon2 ) {
+    const x = ( lon2 - lon1 ) * Math.cos( ( ( lat1 + lat2 ) / 2 ) * Math.PI / 180 );
+    return Math.hypot( x , lat2 - lat1 ) * 111195;
+  },
+
+  // The line's point nearest (lat, lon) between lo and hi. near: the first
+  // one closer than that many metres wins, so a loop that passes the same
+  // place twice finds the first pass.
+  nearest( line , lat , lon , lo , hi , near ) {
+    let best = lo;
+    let bestM = Infinity;
+    for ( let index = lo ; index <= hi && index < line.length ; index++ ) {
+      const m = this.metres( lat , lon , line[ index ][ 0 ] , line[ index ][ 1 ] );
+      if ( near && m < near ) return index;
+      if ( m < bestM ) { bestM = m; best = index; }
+    }
+    return best;
+  },
+
+  // Where the plan's points (result.snapped: waypoints and nudges) fall on
+  // the line, in order: { vertex , shape , lat , lon }.
+  marks( line , lo ) {
+    const out = [];
+    let from = lo;
+    ( ( this.result && this.result.snapped ) || [] ).forEach( ( point , index ) => {
+      const vertex = this.nearest( line , point.lat , point.lon , from , line.length - 1 , 25 );
+      out.push( { vertex: vertex , shape: Boolean( ( this.result.shape || [] )[ index ] ) , lat: point.lat , lon: point.lon } );
+      from = vertex;
+    } );
+    return out;
+  },
+
+  // The part of the line that plans again: all of it, or between the locks.
+  editRange( line ) {
+    if ( !this.lock || line.length < 2 ) return [ 0 , line.length - 1 ];
+    const from = this.lock.coords[ this.lock.start ];
+    const to = this.lock.coords[ this.lock.end ];
+    const lo = this.nearest( line , from[ 0 ] , from[ 1 ] , 0 , line.length - 1 , 1 );
+    let hi = line.length - 1;
+    for ( let index = line.length - 1 ; index > lo ; index-- ) {
+      if ( this.metres( to[ 0 ] , to[ 1 ] , line[ index ][ 0 ] , line[ index ][ 1 ] ) < 1 ) { hi = index; break; }
+    }
+    return [ lo , hi ];
+  },
+
+  // The line was grabbed at (fromLat, fromLon) and dropped at (lat, lon): a
+  // new nudge, on the leg it was grabbed on, in order among that leg's.
+  nudge( fromLat , fromLon , lat , lon ) {
+    const line = this.routeLine();
+    if ( line.length < 2 || !this.result ) return;
+    if ( this.shape.length >= this.MAX_SHAPE ) {
+      App.showError( I18n.get( "plan.nudge_too_many" ) );
+      return;
+    }
+    const [ lo , hi ] = this.editRange( line );
+    const grab = this.nearest( line , fromLat , fromLon , lo , hi );
+    const marks = this.marks( line , lo );
+    const stops = marks.filter( ( mark ) => !mark.shape ).length;
+    let seen = 0;
+    marks.forEach( ( mark ) => { if ( !mark.shape && mark.vertex <= grab ) seen++; } );
+    const leg = Math.max( 0 , Math.min( seen - 1 , stops - 2 ) );
+    const at = marks.filter( ( mark ) => mark.shape ).map( ( mark ) => mark.vertex );
+    let place = this.shape.findIndex( ( point , index ) => point.leg > leg || ( point.leg === leg && at.length === this.shape.length && at[ index ] > grab ) );
+    if ( place < 0 ) place = this.shape.length;
+    this.change( "undo.plan_nudge" , ( state ) => { state.shape.splice( place , 0 , { lat: lat , lon: lon , leg: leg } ); } );
+  },
+
+  startLock() {
+    if ( !this.chosen() ) return;
+    this.picking = this.isLockPicking() ? null : "lock-from";
+    this.lockFrom = null;
+    this.closeMenus();
+    this.showHint();
+    this.drawShaping();
+    this.renderShapeTools();
+  },
+
+  // A click on the route while picking the lock's two points. false: not
+  // picking, so the map treats it as a grab.
+  linePick( lat , lon ) {
+    if ( !this.isLockPicking() ) return false;
+    const line = this.routeLine();
+    const vertex = this.nearest( line , lat , lon , 0 , line.length - 1 );
+    if ( this.picking === "lock-from" ) {
+      this.lockFrom = vertex;
+      this.picking = "lock-to";
+      this.showHint();
+      this.drawShaping();
+      return true;
+    }
+    this.makeLock( line , this.lockFrom , vertex );
+    return true;
+  },
+
+  makeLock( line , first , second ) {
+    const start = Math.min( first , second );
+    const end = Math.max( first , second );
+    if ( end - start < 2 ) {
+      App.showError( I18n.get( "plan.lock_too_short" ) );
+      return;
+    }
+    const marks = this.marks( line , 0 );
+    // The points the middle still has to pass: the plan's own (not nudges),
+    // and a stop an earlier lock had frozen that is now inside the middle.
+    const inside = marks.filter( ( mark ) => !mark.shape && mark.vertex > start && mark.vertex < end );
+    if ( this.lock ) {
+      this.lock.trip.forEach( ( point ) => {
+        const vertex = this.nearest( line , point.lat , point.lon , 0 , line.length - 1 );
+        const close = this.metres( point.lat , point.lon , line[ vertex ][ 0 ] , line[ vertex ][ 1 ] ) < 50;
+        if ( close && vertex > start && vertex < end && !inside.some( ( mark ) => Math.abs( mark.vertex - vertex ) < 2 ) ) {
+          inside.push( { vertex: vertex , shape: false , lat: point.lat , lon: point.lon } );
+        }
+      } );
+      inside.sort( ( a , b ) => a.vertex - b.vertex );
+    }
+    const point = ( index ) => ( { lat: line[ index ][ 0 ] , lon: line[ index ][ 1 ] } );
+    const middle = [ point( start ) , ...inside.map( ( mark ) => ( { lat: mark.lat , lon: mark.lon } ) ) , point( end ) ];
+    const stopAt = [ start , ...inside.map( ( mark ) => mark.vertex ) , end ];
+    // Nudges inside the middle stay, on their legs of it.
+    const shapeAt = marks.filter( ( mark ) => mark.shape ).map( ( mark ) => mark.vertex );
+    const shape = [];
+    if ( shapeAt.length === this.shape.length ) {
+      this.shape.forEach( ( nudge , index ) => {
+        const vertex = shapeAt[ index ];
+        if ( vertex <= start || vertex >= end ) return;
+        const leg = stopAt.filter( ( at ) => at <= vertex ).length - 1;
+        shape.push( { lat: nudge.lat , lon: nudge.lon , leg: Math.max( 0 , Math.min( leg , middle.length - 2 ) ) } );
+      } );
+    }
+    const trip = this.lock ? this.lock.trip
+      : this.isLoop() ? marks.filter( ( mark ) => !mark.shape ).map( ( mark ) => ( { lat: mark.lat , lon: mark.lon } ) )
+      : this.stops.filter( Boolean ).map( ( stop ) => ( { lat: stop.lat , lon: stop.lon } ) );
+    const lock = {
+      id: this.newLockId() , coords: line , seconds: this.chosen().seconds , start: start , end: end , middle: middle , trip: trip,
+    };
+    this.picking = null;
+    this.lockFrom = null;
+    this.change( "undo.plan_lock" , ( state ) => { state.lock = lock; state.shape = shape; } );
+  },
+
+  resetShape() {
+    if ( !this.shape.length && !this.lock ) return;
+    this.change( "undo.plan_reset" , ( state ) => this.unshape( state ) );
+  },
+
+  renderShapeTools() {
+    const lockButton = Dom.get( "plan-lock" );
+    const picking = this.isLockPicking();
+    lockButton.classList.toggle( "active" , picking );
+    lockButton.setAttribute( "aria-pressed" , picking ? "true" : "false" );
+    Dom.text( lockButton.querySelector( "span" ) , I18n.get( picking ? "plan.lock_cancel" : "plan.lock_part" ) );
+    Dom.show( Dom.get( "plan-reset-shape" ) , this.shape.length > 0 || this.lock !== null );
+    const parts = [];
+    if ( this.shape.length ) parts.push( this.shape.length === 1 ? I18n.get( "plan.nudge_one" ) : Format.fill( "plan.nudge_count" , { n: this.shape.length } ) );
+    if ( this.lock ) parts.push( I18n.get( "plan.nudge_locked" ) );
+    Dom.text( Dom.get( "plan-shape-status" ) , parts.join( " · " ) );
   },
 
   select( index ) {
@@ -953,6 +1217,7 @@ const Planner = {
       ].filter( Boolean ),
     } ) );
     Dom.swap( Dom.get( "plan-via" ) , ...via );
+    this.renderShapeTools();
     Dom.show( Dom.get( "plan-result" ) , true );
   },
 
@@ -988,6 +1253,11 @@ const Planner = {
             alternatives: this.options.alternatives || 1,
             pick: { source: route.source , rank: route.rank || 0 },
             loop: loop,
+            shape: this.shape.map( ( point ) => ( { lat: point.lat , lon: point.lon , leg: point.leg } ) ),
+            lock: this.lock ? {
+              keep: { coords: this.lock.coords , seconds: this.lock.seconds , start: this.lock.start , end: this.lock.end , trip: this.lock.trip },
+              middle: this.lock.middle,
+            } : null,
           },
           summary: { seconds: route.seconds , meters: route.meters , main_seconds: route.main_seconds , main_meters: route.main_meters },
         } );

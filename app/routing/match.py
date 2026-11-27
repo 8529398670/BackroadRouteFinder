@@ -23,7 +23,7 @@ from app.routing import grid
 from app.routing.costs import Rating
 from app.routing.graph import Graph
 from app.routing.snap import pieces_of
-from app.routing.summarize import DECIMALS, Run, Summary, Via, _fold
+from app.routing.summarize import DECIMALS, Run, Summary, Via, _fold, scaled
 
 STEP_M = 20.0
 CANDIDATES = 10
@@ -137,13 +137,14 @@ def _smooth(flags: np.ndarray) -> np.ndarray:
     return out
 
 
-def measure(graph: Graph, coords: list[tuple[float, float]], seconds: float, rating: Rating) -> tuple[Summary, float]:
+def measure(graph: Graph, coords: list[tuple[float, float]], seconds: float | None, rating: Rating) -> tuple[Summary, float]:
     """The line as a Summary (like one of our own routes), and how many
     metres of it are not on our map. rating: what the request makes of each
-    segment (costs.rating)."""
+    segment (costs.rating). seconds: the engine's own time for the line;
+    None times it at our own speeds."""
     line = np.asarray(coords, dtype=np.float64)
     if len(line) < 2:
-        return Summary(seconds=seconds), 0.0
+        return Summary(seconds=seconds or 0.0), 0.0
     lat0 = float(np.mean(line[:, 0]))
     points, xy, vertex = _densify(graph, line, lat0)
     segments, _ = _nearest_segments(graph, points, xy, lat0)
@@ -159,6 +160,8 @@ def measure(graph: Graph, coords: list[tuple[float, float]], seconds: float, rat
     our_seconds = step / speed
     total_ours = float(our_seconds.sum()) or 1.0
     main_steps = main[:-1]
+    if seconds is None:
+        seconds = float(our_seconds.sum())
     scale = seconds / total_ours
 
     out = Summary(seconds=seconds, meters=float(step.sum()))
@@ -195,3 +198,16 @@ def measure(graph: Graph, coords: list[tuple[float, float]], seconds: float, rat
             via.append(Via(name=name, main=is_main, meters=metres, seconds=secs))
     out.via = _fold(via)
     return out, off_map
+
+
+def measure_parts(graph: Graph, coords: list[tuple[float, float]], seconds: float, rating: Rating,
+                  start: int, end: int) -> tuple[Summary, Summary, float]:
+    """A kept (locked) route's two frozen ends: the line up to coords[start]
+    and the line from coords[end], each measured on our map. Their times are
+    our own speeds scaled so the whole line takes seconds (the route as it was
+    planned, turns and stops included). Also the metres of both not on our map."""
+    whole, _ = measure(graph, coords, None, rating)
+    scale = seconds / whole.seconds if whole.seconds > 0 else 1.0
+    before, off_before = measure(graph, coords[:start + 1], None, rating)
+    after, off_after = measure(graph, coords[end:], None, rating)
+    return scaled(before, scale), scaled(after, scale), off_before + off_after
