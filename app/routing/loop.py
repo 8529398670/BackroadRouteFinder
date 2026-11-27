@@ -14,6 +14,11 @@ where it starts and ends is the person's choice:
 - stop: from a start stop of their own to the ring point nearest it, round,
   and back to the stop.
 
+The person can edit the ring: each point is known by its sector (k, the
+compass sector it was made for, 0 due north and on clockwise), and an edit
+drops a sector's point or moves it somewhere else (onto the route already
+driven, say, to fold away a spur out to a dead end).
+
 Each leg is planned with the request's own road rules, and counts the roads
 earlier legs drove REUSE_FACTOR times over, so the loop comes back by other
 roads rather than doubling back along the way out.
@@ -53,6 +58,7 @@ DIRECTIONS = ("cw", "ccw")
 class Loop:
     stops: list[Snap]      # every point the route drives through, in order
     ring: list[Snap]       # the ring points, in driving order
+    sectors: list[int]     # each ring point's sector, in the same order
 
 
 def _offset(lat: float, lon: float, metres: float, bearing: float) -> tuple[float, float]:
@@ -79,14 +85,14 @@ def _distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     return 2 * EARTH_RADIUS_M * math.asin(math.sqrt(min(a, 1.0)))
 
 
-def _ring_miles(graph: Graph, center: Snap, miles: float, count: int, shunned) -> list[Snap]:
+def _ring_miles(graph: Graph, center: Snap, miles: float, count: int, shunned) -> list[tuple[int, Snap]]:
     radius = miles * METRES_PER_MILE
     reach = max(MIN_SNAP_M, radius * SNAP_SHARE)
     out = []
     for k in range(count):
         lat, lon = _offset(center.lat, center.lon, radius, 360.0 * k / count)
         try:
-            out.append(snap(graph, lat, lon, reach, shunned))
+            out.append((k, snap(graph, lat, lon, reach, shunned)))
         except OffNetwork:
             continue
     return out
@@ -98,7 +104,7 @@ RING_SPEED = 36.0
 
 
 def _ring_minutes(graph: Graph, center: Snap, minutes: float, count: int, options: costs.Options,
-                  shunned) -> list[Snap]:
+                  shunned) -> list[tuple[int, Snap]]:
     """The fastest drive from the center, on intersections: for each sector,
     the intersection reached in the time closest to the radius. Only the
     roads within reach are read (grid.py)."""
@@ -153,19 +159,19 @@ def _ring_minutes(graph: Graph, center: Snap, minutes: float, count: int, option
         if times[reached[best]] < target * 0.4:
             continue  # nothing reaches out that far this way: a gap in the ring
         try:
-            out.append(snap(graph, float(lat[best]), float(lon[best]), MIN_SNAP_M, shunned))
+            out.append((k, snap(graph, float(lat[best]), float(lon[best]), MIN_SNAP_M, shunned)))
         except OffNetwork:
             continue
     return out
 
 
-def _dedupe(points: list[Snap]) -> list[Snap]:
+def _dedupe(points: list[tuple[int, Snap]]) -> list[tuple[int, Snap]]:
     """Neighbours that landed on the same road segment, or next to each
     other, are one point."""
-    def same(a: Snap, b: Snap) -> bool:
-        return a.segment == b.segment or _distance(a.lat, a.lon, b.lat, b.lon) < MIN_GAP_M
+    def same(a: tuple[int, Snap], b: tuple[int, Snap]) -> bool:
+        return a[1].segment == b[1].segment or _distance(a[1].lat, a[1].lon, b[1].lat, b[1].lon) < MIN_GAP_M
 
-    out: list[Snap] = []
+    out: list[tuple[int, Snap]] = []
     for point in points:
         if out and same(out[-1], point):
             continue
@@ -175,8 +181,25 @@ def _dedupe(points: list[Snap]) -> list[Snap]:
     return out
 
 
+def _edited(graph: Graph, ring: list[tuple[int, Snap]], edits: dict[int, tuple[float, float] | None], max_snap_m: float,
+            shunned) -> list[tuple[int, Snap]]:
+    """The ring with the person's edits: a sector's point dropped (None) or
+    moved to (lat, lon), back in sector order."""
+    out = {k: point for k, point in ring}
+    for k, to in edits.items():
+        if to is None:
+            out.pop(k, None)
+            continue
+        try:
+            out[k] = snap(graph, to[0], to[1], max_snap_m, shunned)
+        except OffNetwork as error:
+            raise NoRoute(f"a moved ring point is not near a road on the map ({error})") from None
+    return sorted(out.items())
+
+
 def plan(graph: Graph, center: tuple[float, float], radius: float, unit: str, start: str, direction: str,
-         options: costs.Options, max_snap_m: float, start_point: tuple[float, float] | None = None, count: int = 6) -> Loop:
+         options: costs.Options, max_snap_m: float, start_point: tuple[float, float] | None = None, count: int = 6,
+         edits: dict[int, tuple[float, float] | None] | None = None) -> Loop:
     shunned = lambda segments: costs.excluded_segments(graph, options, segments)  # noqa: E731
     try:
         middle = snap(graph, center[0], center[1], max_snap_m, shunned)
@@ -186,21 +209,26 @@ def plan(graph: Graph, center: tuple[float, float], radius: float, unit: str, st
         ring = _ring_minutes(graph, middle, radius, count, options, shunned)
     else:
         ring = _ring_miles(graph, middle, radius, count, shunned)
+    if edits:
+        ring = _edited(graph, ring, edits, max_snap_m, shunned)
     ring = _dedupe(ring)
     if len(ring) < MIN_RING:
+        if edits:
+            raise NoRoute(f"a loop needs at least {MIN_RING} ring points: put one back")
         raise NoRoute("not enough roads around the center at that distance for a loop: try another radius")
     if direction == "ccw":
         ring.reverse()
 
-    def rotate(first: int) -> list[Snap]:
+    def rotate(first: int) -> list[tuple[int, Snap]]:
         return ring[first:] + ring[:first]
 
     def nearest(lat: float, lon: float) -> int:
-        return min(range(len(ring)), key=lambda i: _distance(lat, lon, ring[i].lat, ring[i].lon))
+        return min(range(len(ring)), key=lambda i: _distance(lat, lon, ring[i][1].lat, ring[i][1].lon))
 
     if start == "center":
         ring = rotate(nearest(middle.lat, middle.lon))
-        stops = [middle, *ring, ring[0], middle]
+        points = [point for _, point in ring]
+        stops = [middle, *points, points[0], middle]
     elif start == "stop":
         if start_point is None:
             raise NoRoute("a loop from your own start needs a start stop")
@@ -209,7 +237,9 @@ def plan(graph: Graph, center: tuple[float, float], radius: float, unit: str, st
         except OffNetwork as error:
             raise NoRoute(f"the start is not near a road on the map ({error})") from None
         ring = rotate(nearest(own.lat, own.lon))
-        stops = [own, *ring, ring[0], own]
+        points = [point for _, point in ring]
+        stops = [own, *points, points[0], own]
     else:
-        stops = [*ring, ring[0]]
-    return Loop(stops=stops, ring=ring)
+        points = [point for _, point in ring]
+        stops = [*points, points[0]]
+    return Loop(stops=stops, ring=points, sectors=[k for k, _ in ring])

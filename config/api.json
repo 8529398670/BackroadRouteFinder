@@ -766,6 +766,21 @@
             ],
             "type": "string"
           },
+          "edits": {
+            "description": "Ring points dropped or moved, by sector.",
+            "oneOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/RingEdit"
+                },
+                "maxItems": 8,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "points": {
             "description": "How many points the ring has (4-8); left out, routing.loop_points.",
             "maximum": 8,
@@ -1689,6 +1704,43 @@
           "api_keys",
           "login_links",
           "sessions"
+        ],
+        "type": "object"
+      },
+      "RingEdit": {
+        "description": "A change to one of a loop's ring points: dropped, or moved to lat/lon.",
+        "properties": {
+          "drop": {
+            "description": "Leave this ring point out.",
+            "type": "boolean"
+          },
+          "lat": {
+            "description": "Where the point goes instead (with lon), when not dropped.",
+            "maximum": 90,
+            "minimum": -90,
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "lon": {
+            "description": "Its longitude.",
+            "maximum": 180,
+            "minimum": -180,
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "sector": {
+            "description": "The ring point's sector, as ring_sectors gives it (0 due north, on clockwise).",
+            "maximum": 7,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "sector"
         ],
         "type": "object"
       },
@@ -11895,6 +11947,13 @@
                       },
                       "type": "array"
                     },
+                    "ring_sectors": {
+                      "description": "With a loop: each ring point's sector, for LoopSpec.edits.",
+                      "items": {
+                        "type": "integer"
+                      },
+                      "type": "array"
+                    },
                     "road_factors": {
                       "additionalProperties": {
                         "type": "number"
@@ -11934,6 +11993,7 @@
                     "milliseconds",
                     "problems",
                     "ring",
+                    "ring_sectors",
                     "road_factors",
                     "road_rules",
                     "routes",

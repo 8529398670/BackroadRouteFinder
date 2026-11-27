@@ -2743,6 +2743,7 @@ The route through the waypoints that keeps time on main roads down: each minute 
 | `milliseconds` | integer | yes |  |  |
 | `problems` | array of [`SourceProblem`](#sourceproblem) | yes |  |  |
 | `ring` | array of [`Point`](#point) | yes |  | With a loop: the ring's points, in driving order. |
+| `ring_sectors` | array of integer | yes |  | With a loop: each ring point's sector, for LoopSpec.edits. |
 | `road_factors` | map of number | yes |  | The avoid strengths the plan used; types left out counted the penalty. |
 | `road_rules` | map of string | yes |  | The road rules the plan used, every type filled in. |
 | `routes` | array of [`PlannedRoute`](#plannedroute) | yes |  |  |
@@ -3326,6 +3327,7 @@ The shapes the routes above refer to by name.
 | `center_lat` | number | yes | -90 to 90 |  |
 | `center_lon` | number | yes | -180 to 180 |  |
 | `direction` | string | no | one of `cw`, `ccw`; default `cw` | Clockwise or anticlockwise round the ring. |
+| `edits` | array of [`RingEdit`](#ringedit) or null | no |  | Ring points dropped or moved, by sector. |
 | `points` | integer or null | no | 4 to 8 | How many points the ring has (4-8); left out, routing.loop_points. |
 | `radius` | number | yes | 0.5 to 200 |  |
 | `reuse` | number or null | no | 1 to 10 | How many times over a road already driven counts on the rest of the loop (1-10; 1 lets it double back); left out, routing.loop_reuse. |
@@ -3561,6 +3563,15 @@ The shapes the routes above refer to by name.
 | `api_keys` | integer | yes |  |  |
 | `login_links` | integer | yes |  |  |
 | `sessions` | integer | yes |  |  |
+
+### RingEdit
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `drop` | boolean | no |  | Leave this ring point out. |
+| `lat` | number or null | no | -90 to 90 | Where the point goes instead (with lon), when not dropped. |
+| `lon` | number or null | no | -180 to 180 | Its longitude. |
+| `sector` | integer | yes | 0 to 7 | The ring point's sector, as ring_sectors gives it (0 due north, on clockwise). |
 
 ### RoadType
 

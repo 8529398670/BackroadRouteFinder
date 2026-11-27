@@ -42,7 +42,8 @@ const Planner = {
   MAX_SHAPE: 12,
   options: {
     backroads: true , penalty: 8 , road_rules: {} , road_factors: {} , compare_fastest: true , sources: [ "ours" ] , combine: "best" , alternatives: 5,
-    loop: { on: false , radius: 20 , unit: "mi" , start: "center" , direction: "cw" , points: 6 , reuse: 3 },
+    // edits: ring points dropped or moved, by sector (LoopSpec.edits).
+    loop: { on: false , radius: 20 , unit: "mi" , start: "center" , direction: "cw" , points: 6 , reuse: 3 , edits: [] },
   },
 
   // The avoid strengths a road type can be given, and how much a loop may
@@ -90,6 +91,8 @@ const Planner = {
       } ),
       removeShape: ( index ) => this.change( "undo.plan_nudge" , ( state ) => { state.shape.splice( index , 1 ); } ),
       moveLock: ( which , lat , lon ) => this.moveLock( which , lat , lon ),
+      removeRing: ( sector ) => this.editRing( { sector: sector , drop: true } ),
+      moveRing: ( sector , lat , lon ) => this.editRing( { sector: sector , lat: lat , lon: lon } ),
     } );
     Dom.get( "plan-undo" ).addEventListener( "click" , () => Undo.undo() );
     Dom.get( "plan-redo" ).addEventListener( "click" , () => Undo.redo() );
@@ -228,7 +231,7 @@ const Planner = {
     return Object.assign( {} , options , {
       road_rules: Object.assign( {} , options.road_rules || {} ),
       road_factors: Object.assign( {} , options.road_factors || {} ),
-      loop: Object.assign( {} , options.loop || {} ),
+      loop: Object.assign( {} , options.loop || {} , { edits: ( ( options.loop || {} ).edits || [] ).map( ( edit ) => Object.assign( {} , edit ) ) } ),
       sources: ( options.sources || [] ).slice(),
     } );
   },
@@ -298,8 +301,10 @@ const Planner = {
 
   // Nudges and the lock belong to the stops as they are: a change to the
   // stops themselves takes them away (mutate's state).
+  // A loop's ring edits go too: they belong to the ring as it was.
   unshape( state ) {
     state.shape = [];
+    if ( state.options.loop ) state.options.loop.edits = [];
     state.lock = null;
     state.lockPending = null;
     state.weave = null;
@@ -311,6 +316,8 @@ const Planner = {
     this.change( "undo.plan_stops" , ( state ) => {
       ( loop ? state.loopPoints : state.stops )[ index ] = stop;
       if ( locked ) this.unshape( state );
+      // A new center makes a new ring.
+      if ( loop && index === 0 ) state.options.loop.edits = [];
     } , null , fit );
   },
 
@@ -330,6 +337,18 @@ const Planner = {
     this.change( "undo.plan_options" , ( state ) => {
       if ( value === null ) delete state.options.road_factors[ key ];
       else state.options.road_factors[ key ] = value;
+    } );
+  },
+
+  // A ring point dropped or moved (RouteMap.drawRing). The nudges go: their
+  // legs were counted between the ring points as they were.
+  editRing( edit ) {
+    if ( !this.isLoop() ) return;
+    this.change( "undo.plan_ring" , ( state ) => {
+      const edits = state.options.loop.edits.filter( ( old ) => old.sector !== edit.sector );
+      edits.push( edit );
+      this.unshape( state );
+      state.options.loop.edits = edits.sort( ( a , b ) => a.sector - b.sector );
     } );
   },
 
@@ -465,6 +484,7 @@ const Planner = {
         } );
         if ( loop.points ) state.options.loop.points = loop.points;
         if ( loop.reuse ) state.options.loop.reuse = loop.reuse;
+        state.options.loop.edits = ( loop.edits || [] ).map( ( edit ) => Object.assign( {} , edit ) );
       } else {
         state.stops = points;
         state.options.loop.on = false;
@@ -1014,6 +1034,7 @@ const Planner = {
     return {
       center_lat: center.lat , center_lon: center.lon , radius: loop.radius , unit: loop.unit , start: loop.start , direction: loop.direction,
       points: loop.points , reuse: loop.reuse,
+      edits: ( loop.edits || [] ).length ? loop.edits.map( ( edit ) => Object.assign( {} , edit ) ) : null,
     };
   },
 
@@ -1195,7 +1216,7 @@ const Planner = {
     } );
     if ( this.isLoop() && !this.lock && this.result.ring && this.result.ring.length ) {
       const loop = this.options.loop;
-      RouteMap.drawRing( this.loopPoints[ 0 ] , this.result.ring , loop.unit === "mi" ? loop.radius * 1609.344 : null );
+      RouteMap.drawRing( this.loopPoints[ 0 ] , this.result.ring , loop.unit === "mi" ? loop.radius * 1609.344 : null , this.result.ring_sectors );
     }
     this.drawShaping();
   },
@@ -1685,13 +1706,18 @@ const Planner = {
 
   resetShape() {
     this.picking = null;
-    if ( !this.shape.length && !this.lock && !this.lockPending && !this.weave ) {
+    if ( !this.shape.length && !this.lock && !this.lockPending && !this.weave && !this.ringEdits() ) {
       this.showHint();
       this.drawShaping();
       this.renderShapeTools();
       return;
     }
     this.change( "undo.plan_reset" , ( state ) => this.unshape( state ) );
+  },
+
+  // How many ring points the loop has had dropped or moved.
+  ringEdits() {
+    return this.isLoop() ? ( this.options.loop.edits || [] ).length : 0;
   },
 
   renderShapeTools() {
@@ -1701,12 +1727,13 @@ const Planner = {
     lockButton.setAttribute( "aria-pressed" , picking ? "true" : "false" );
     Dom.text( lockButton.querySelector( "span" ) , I18n.get( picking ? "plan.lock_cancel" : "plan.lock_point" ) );
     lockButton.disabled = !this.chosen();
-    Dom.show( Dom.get( "plan-reset-shape" ) , this.shape.length > 0 || this.lock !== null || this.lockPending !== null || this.weave !== null );
+    Dom.show( Dom.get( "plan-reset-shape" ) , this.shape.length > 0 || this.lock !== null || this.lockPending !== null || this.weave !== null || this.ringEdits() > 0 );
     Dom.all( "input[name=plan-edit-mode]" ).forEach( ( radio ) => { radio.disabled = !this.chosen() || this.isLoop(); } );
     const parts = [];
     if ( this.shape.length ) parts.push( this.shape.length === 1 ? I18n.get( "plan.nudge_one" ) : Format.fill( "plan.nudge_count" , { n: this.shape.length } ) );
     if ( this.lock ) parts.push( I18n.get( "plan.nudge_locked" ) );
     if ( this.weave ) parts.push( I18n.get( "plan.woven" ) );
+    if ( this.ringEdits() ) parts.push( this.ringEdits() === 1 ? I18n.get( "plan.ring_edit_one" ) : Format.fill( "plan.ring_edit_count" , { n: this.ringEdits() } ) );
     const status = Dom.get( "plan-shape-status" );
     Dom.text( status , parts.join( " · " ) );
     Dom.show( status , parts.length > 0 );

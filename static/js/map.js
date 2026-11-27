@@ -11,6 +11,7 @@
 // tells the planner where the line was grabbed and where it was dropped
 // (handlers.nudge). The nudges it makes are small dots of their own
 // (drawShape), and a locked route's two ends get a padlock pin (drawLocks).
+// A loop's ring points can be clicked away or dragged (drawRing).
 const RouteMap = {
   map: null,
   pins: null,
@@ -163,15 +164,56 @@ const RouteMap = {
   // A loop's target: a dashed circle of radius metres round the center (a
   // radius in miles), or a dashed ring through the ring points (in minutes,
   // where the ring follows the roads), with a dot at each ring point.
-  drawRing( center , ring , metres ) {
+  // sectors: each point's sector, when the points can be edited: a click
+  // takes the point away (handlers.removeRing), a drag moves it
+  // (handlers.moveRing), and dropped on the route it lands on the line, so a
+  // spur out to it folds away.
+  drawRing( center , ring , metres , sectors ) {
     const color = getComputedStyle( document.documentElement ).getPropertyValue( "--plan-ring" ).trim() || "#6f42c1";
     const style = { color: color , weight: 2 , opacity: 0.7 , dashArray: "4 6" , fill: false , interactive: false };
     const layers = [];
     if ( metres && center ) layers.push( L.circle( [ center.lat , center.lon ] , Object.assign( { radius: metres } , style ) ) );
     else if ( ring.length > 2 ) layers.push( L.polygon( ring.map( ( point ) => [ point.lat , point.lon ] ) , style ) );
-    ring.forEach( ( point ) => layers.push( L.circleMarker( [ point.lat , point.lon ] , {
-      radius: 4 , color: color , weight: 2 , fillColor: "#ffffff" , fillOpacity: 1 , interactive: false,
-    } ) ) );
+    const editable = Array.isArray( sectors ) && sectors.length === ring.length;
+    ring.forEach( ( point , index ) => {
+      if ( !editable ) {
+        layers.push( L.circleMarker( [ point.lat , point.lon ] , {
+          radius: 4 , color: color , weight: 2 , fillColor: "#ffffff" , fillOpacity: 1 , interactive: false,
+        } ) );
+        return;
+      }
+      const sector = sectors[ index ];
+      const dot = L.marker( [ point.lat , point.lon ] , {
+        draggable: true,
+        keyboard: true,
+        title: I18n.get( "plan.ring_dot" ),
+        zIndexOffset: 900,
+        icon: L.divIcon( {
+          className: "plan-pin plan-pin-ringpt",
+          html: "<i class=\"bi bi-x-lg\" aria-hidden=\"true\"></i>",
+          iconSize: [ 16 , 16 ],
+          iconAnchor: [ 8 , 8 ],
+        } ),
+      } );
+      dot.on( "mouseover" , () => { this.overDot = true; this.hideGhost( true ); } );
+      dot.on( "mouseout" , () => { this.overDot = false; } );
+      let from = null;
+      dot.on( "dragstart" , () => { from = this.map.latLngToContainerPoint( dot.getLatLng() ); } );
+      dot.on( "dragend" , () => {
+        let at = dot.getLatLng();
+        const px = this.map.latLngToContainerPoint( at );
+        if ( from && from.distanceTo( px ) < 8 ) {
+          this.handlers.removeRing( sector );
+          return;
+        }
+        // Near the route: onto it, so the route already driven takes it in.
+        const onRoute = this.onLine( at );
+        if ( this.editHit && this.map.latLngToContainerPoint( onRoute ).distanceTo( px ) < 20 ) at = onRoute;
+        this.handlers.moveRing( sector , at.lat , at.lng );
+      } );
+      dot.on( "click" , () => this.handlers.removeRing( sector ) );
+      layers.push( dot );
+    } );
     this.ring.clearLayers();
     layers.forEach( ( layer ) => this.ring.addLayer( layer ) );
   },

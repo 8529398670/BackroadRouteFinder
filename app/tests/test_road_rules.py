@@ -221,6 +221,25 @@ class LoopTest(GridCase):
         self.assertGreater(np.ptp(bearings), 180)  # points on more than one side
         self.check_route(circle)
 
+    def test_ring_edits(self) -> None:
+        plain = loop.plan(self.graph, node(MIDDLE, MIDDLE), 0.8, "mi", "ring", "cw", self.options, 300, count=8)
+        self.assertEqual(len(plain.sectors), len(plain.ring))
+        dropped = plain.sectors[1]
+        fewer = loop.plan(self.graph, node(MIDDLE, MIDDLE), 0.8, "mi", "ring", "cw", self.options, 300, count=8, edits={dropped: None})
+        self.assertNotIn(dropped, fewer.sectors)
+        self.assertEqual(len(fewer.ring), len(plain.ring) - 1)
+        self.check_route(fewer)
+        # Moved onto the center: that sector's point is there now.
+        moved = loop.plan(self.graph, node(MIDDLE, MIDDLE), 0.8, "mi", "ring", "cw", self.options, 300, count=8,
+                          edits={dropped: node(MIDDLE, MIDDLE)})
+        at = moved.ring[moved.sectors.index(dropped)]
+        self.assertAlmostEqual(at.lat, node(MIDDLE, MIDDLE)[0], places=3)
+        self.check_route(moved)
+        # Too few left: refused with a way out.
+        with self.assertRaises(search.NoRoute):
+            loop.plan(self.graph, node(MIDDLE, MIDDLE), 0.8, "mi", "ring", "cw", self.options, 300, count=8,
+                      edits={k: None for k in plain.sectors[:-2]})
+
     def test_too_small_for_a_loop(self) -> None:
         with self.assertRaises(search.NoRoute):
             loop.plan(self.graph, node(MIDDLE, MIDDLE), 0.01, "mi", "ring", "cw", self.options, 300)

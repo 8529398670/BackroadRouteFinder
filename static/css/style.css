@@ -818,6 +818,11 @@ body { padding-left: env(safe-area-inset-left); padding-right: env(safe-area-ins
 /* Hovered: a red x says a click removes it. */
 .plan-pin-shape:hover { background: var(--plan-main); border-color: #fff; box-shadow: 0 0 0 3px var(--plan-main), 0 1px 4px rgba(0, 0, 0, 0.45); cursor: pointer; }
 .plan-pin-shape:hover i { display: block; }
+/* A loop's ring point: the ring's color; hovered, the same red x as a nudge. */
+.plan-pin-ringpt { background: #fff; border: 3px solid var(--plan-ring); cursor: grab; font-size: 0.6rem; }
+.plan-pin-ringpt i { display: none; }
+.plan-pin-ringpt:hover { background: var(--plan-main); border-color: #fff; box-shadow: 0 0 0 3px var(--plan-main), 0 1px 4px rgba(0, 0, 0, 0.45); cursor: pointer; }
+.plan-pin-ringpt:hover i { display: block; }
 .plan-pin-lock { background: var(--bs-secondary); font-size: 0.75rem; font-weight: 400; cursor: grab; }
 .plan-pin-fork { background: var(--bs-primary); font-size: 0.75rem; font-weight: 400; cursor: pointer; }
 .plan-fork-menu .btn small { opacity: 0.8; }

@@ -58,6 +58,15 @@ LegacySecondary = Annotated[bool | None, Meta(description="Deprecated, use road_
 LegacyUnpaved = Annotated[bool | None, Meta(description="Deprecated, use road_rules: true is unpaved and track use.")]
 
 
+class RingEdit(Reply):
+    api_name: ClassVar[str] = "RingEdit"
+    api_doc: ClassVar[str] = "A change to one of a loop's ring points: dropped, or moved to lat/lon."
+    sector: Annotated[int, Meta(ge=0, le=7, description="The ring point's sector, as ring_sectors gives it (0 due north, on clockwise).")]
+    drop: Annotated[bool, Meta(description="Leave this ring point out.")] = False
+    lat: Annotated[Annotated[float, Meta(ge=-90, le=90)] | None, Meta(description="Where the point goes instead (with lon), when not dropped.")] = None
+    lon: Annotated[Annotated[float, Meta(ge=-180, le=180)] | None, Meta(description="Its longitude.")] = None
+
+
 class LoopSpec(Reply):
     api_name: ClassVar[str] = "Loop"
     api_doc: ClassVar[str] = "A round trip circling a center at about radius miles, or radius minutes of fastest driving from it."
@@ -71,6 +80,7 @@ class LoopSpec(Reply):
     points: Annotated[Annotated[int, Meta(ge=4, le=8)] | None, Meta(description="How many points the ring has (4-8); left out, routing.loop_points.")] = None
     reuse: Annotated[Annotated[float, Meta(ge=1, le=10)] | None, Meta(description="How many times over a road already driven counts on the "
                                                                     "rest of the loop (1-10; 1 lets it double back); left out, routing.loop_reuse.")] = None
+    edits: Annotated[Annotated[list[RingEdit], Meta(max_length=8)] | None, Meta(description="Ring points dropped or moved, by sector.")] = None
 
 
 def rules_of(request: Request, road_rules: dict | None, secondary_is_main: bool | None = None, allow_unpaved: bool | None = None) -> dict[str, str]:
@@ -226,6 +236,7 @@ class PlanRouteReply(Reply):
     snapped: Annotated[list[Point], Meta(description="Where each waypoint met the road (with a loop: every point it drives through), nudges included.")]
     shape: Annotated[list[bool], Meta(description="For each point in snapped: whether it is a nudge (shape) rather than a waypoint.")]
     ring: Annotated[list[Point], Meta(description="With a loop: the ring's points, in driving order.")]
+    ring_sectors: Annotated[list[int], Meta(description="With a loop: each ring point's sector, for LoopSpec.edits.")]
     road_rules: Annotated[dict[str, str], Meta(description="The road rules the plan used, every type filled in.")]
     road_factors: Annotated[dict[str, float], Meta(description="The avoid strengths the plan used; types left out counted the penalty.")]
     milliseconds: int
@@ -284,6 +295,7 @@ def plan_route(request: Request, body: PlanRoute) -> PlanRouteReply:
     max_snap = cfg.file.routing.max_snap_m
     count = body.alternatives or (1 if body.combine == "best" else sources.MAX_ROUTES)
     ring: list = []
+    ring_sectors: list[int] = []
     shape_snaps = _snap_shape(graph, body.shape, max_snap, options)
     try:
         if body.follow is not None:
@@ -298,8 +310,10 @@ def plan_route(request: Request, body: PlanRoute) -> PlanRouteReply:
                 raise Refused(400, "a loop from its center or ring takes no waypoints", field="waypoints")
             start = (body.waypoints[0].lat, body.waypoints[0].lon) if body.waypoints else None
             circle = loop.plan(graph, (spec.center_lat, spec.center_lon), spec.radius, spec.unit, spec.start, spec.direction,
-                               options, max_snap, start_point=start, count=spec.points or routing.loop_points)
+                               options, max_snap, start_point=start, count=spec.points or routing.loop_points,
+                               edits=_ring_edits(spec.edits))
             ring = circle.ring
+            ring_sectors = circle.sectors
             stops = _shaped(circle.stops, shape_snaps)
             result = sources.plan(graph, [(s.lat, s.lon) for s in stops], options, picked, count,
                                   body.compare_fastest, max_snap, access_of(request), snapped=stops,
@@ -350,8 +364,21 @@ def plan_route(request: Request, body: PlanRoute) -> PlanRouteReply:
     snapped = [Point(lat=round(s.lat, 6), lon=round(s.lon, 6)) for s in result.snapped]
     is_shape = [id(s) in nudges for s in result.snapped]
     ring_points = [Point(lat=round(s.lat, 6), lon=round(s.lon, 6)) for s in ring]
-    return PlanRouteReply(routes=routes, problems=problems, snapped=snapped, shape=is_shape, ring=ring_points, road_rules=options.rules,
+    return PlanRouteReply(routes=routes, problems=problems, snapped=snapped, shape=is_shape, ring=ring_points, ring_sectors=ring_sectors, road_rules=options.rules,
                           road_factors=options.factors, milliseconds=result.milliseconds)
+
+
+def _ring_edits(edits: list[RingEdit] | None) -> dict[int, tuple[float, float] | None]:
+    """A loop's ring edits as loop.plan takes them: sector to new place, or None to drop."""
+    out: dict[int, tuple[float, float] | None] = {}
+    for edit in edits or []:
+        if edit.drop:
+            out[edit.sector] = None
+        elif edit.lat is not None and edit.lon is not None:
+            out[edit.sector] = (edit.lat, edit.lon)
+        else:
+            raise Refused(400, "a ring edit drops its point or gives lat and lon", field="loop")
+    return out
 
 
 def _snap_shape(graph, shape: list[ShapePoint], max_snap: float, options: costs.Options) -> list[tuple[int, object]]:
