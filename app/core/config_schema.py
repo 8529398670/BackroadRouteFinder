@@ -97,6 +97,8 @@ def schema_comments(path: str) -> tuple[list[str], str]:
 def field_types() -> dict[str, str]:
     types = {}
     for section_name, section_type in config.SECTIONS.items():
+        if section_name in config.SECRET_SECTIONS:
+            continue
         for item in fields(section_type):
             path = f"{section_name}.{item.name}"
             if item.name in config.DEPRECATED.get(section_name, set()):
@@ -116,6 +118,8 @@ def _build_schema(raw: str) -> tuple[SectionSchema, ...]:
 
     sections = []
     for section_key, section in root.value:
+        if section_key.value in config.SECRET_SECTIONS:
+            continue
         section_line = section_key.start_mark.line
         section_comment = _comment_block(text, section_line - 1, -1)
         section_tag = _find_tag(section_comment)
@@ -227,6 +231,8 @@ def flatten(file: config.File) -> dict[str, Any]:
     a setting any more, only something to migrate."""
     values: dict[str, Any] = {}
     for section_name in config.SECTIONS:
+        if section_name in config.SECRET_SECTIONS:
+            continue
         section = getattr(file, section_name)
         for item in fields(section):
             if item.name in config.DEPRECATED.get(section_name, set()):

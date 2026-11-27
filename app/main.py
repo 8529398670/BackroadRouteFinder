@@ -22,6 +22,7 @@ from starlette.middleware.body_limit import RequestBodyLimitMiddleware
 
 from app.core import assets, bootstrap, config, config_live, db, graceful, housekeeping, jobs, language, live_reload, logs, server_lock
 from app.core import sse
+from app.core.config import ConfigError
 from app.core.maintenance import Maintenance
 from app.core.middleware import EXCEPTION_HANDLERS, AppVersion, NoStore, RateLimit, SecurityHeaders
 from app.core.request_id import RequestID
@@ -29,6 +30,7 @@ from app.core.request_log import RequestLog
 from app.core.security import LoadActor, ViewOnly
 from app.core.static_files import StaticServer
 from app.core.skill_origin import skill_origin
+from app.models import provider_keys
 from app.routes import build_routes
 from app.routing import files as map_files
 from app.routing.graph import Holder as GraphHolder
@@ -168,7 +170,16 @@ def serve(version: str) -> None:
     # Tell open pages about a change to the frontend (server.live_reload).
     # See app/core/live_reload.py.
     reload_watcher = live_reload.Watcher(bundle.static_dir) if cfg.live_reloads(version) else None
-    app = build_app(config_live.Holder(cfg), store, lang, static_server, version, reload_watcher)
+    holder = config_live.Holder(cfg)
+    # Shared routing engine keys from before they lived in config.yaml.
+    try:
+        moved = provider_keys.migrate_shared_to_config(store, cfg.secret_key, holder)
+    except ConfigError as error:
+        moved = []
+        print(f"[warn]   shared routing engine keys stay in the database: config.yaml could not be written ({error})")
+    if moved:
+        print(f"[start] moved the shared {', '.join(moved)} key(s) into {cfg.config_file} (provider_keys)")
+    app = build_app(holder, store, lang, static_server, version, reload_watcher)
 
     print(f"[start] {cfg.project_name} {version} listening on {cfg.listen_address} (secure cookies: {cfg.secure_cookies})")
     print(f"[url]    {cfg.url}  (from {cfg.url_source})")

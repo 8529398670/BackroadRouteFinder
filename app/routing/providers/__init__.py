@@ -8,9 +8,9 @@ called, whether it needs an API key, where to get one, and a fetch() that
 turns waypoints into candidate lines. ENGINES lists them in the order the
 screens show them.
 
-Keys are never in config.yaml (which holds no secret): the owner enters them on
-the Settings screen and they are sealed in the database
-(app/models/provider_keys.py). Free engines' addresses are in config.yaml's
+Keys are entered on the Settings screen: each person's own are sealed on
+their account, and the owner's shared ones are written to config.yaml's
+provider_keys section (app/models/provider_keys.py). Free engines' addresses are in config.yaml's
 providers section; an empty address switches that engine off.
 """
 from __future__ import annotations

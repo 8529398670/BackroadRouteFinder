@@ -70,7 +70,7 @@ An error reply is a JSON object whose `error` says what went wrong.
 
 Download all your data
 
-Your saved routes, planner defaults, keyboard shortcuts and themes, as one file to keep or load into another account. API keys are left out.
+Your saved routes, planner defaults, keyboard shortcuts, themes and routing engine API keys (the owner's also has the shared keys), as one file to keep or load into another account. Keep it private.
 
 |  |  |
 |---|---|
@@ -85,7 +85,7 @@ Your saved routes, planner defaults, keyboard shortcuts and themes, as one file 
 
 Load your data from a file
 
-Merge a file from GET /api/account/export into your account. Saved routes already here are skipped and themes are added by id; planner defaults and shortcuts in the file replace yours.
+Merge a file from GET /api/account/export into your account. Saved routes already here are skipped and themes are added by id; planner defaults, shortcuts and API keys in the file replace yours. The owner's file also restores the shared keys and their policy, but only when the owner loads it.
 
 |  |  |
 |---|---|
@@ -103,9 +103,11 @@ Merge a file from GET /api/account/export into your account. Saved routes alread
 
 | Field | Type | Required | Limits | Description |
 |---|---|---|---|---|
+| `api_keys_restored` | integer | no |  |  |
 | `prefs_replaced` | boolean | yes |  |  |
 | `routes_added` | integer | yes |  |  |
 | `routes_skipped` | integer | yes |  |  |
+| `shared_keys_restored` | integer | no |  |  |
 | `shortcuts_replaced` | boolean | yes |  |  |
 | `themes_added` | integer | yes |  |  |
 
@@ -1834,6 +1836,7 @@ Runs POST /api/admin/users/{user_id}/sessions/{session_id}/revoke once per item:
 | POST | [`/api/owner/portal/connect`](#post-apiownerportalconnect) | Connect ProjectPortal | browser session only, the owner |
 | POST | [`/api/owner/portal/disconnect`](#post-apiownerportaldisconnect) | Disconnect ProjectPortal | browser session only, the owner |
 | GET | [`/api/owner/providers`](#get-apiownerproviders) | Shared routing engine keys | browser session only, the owner |
+| POST | [`/api/owner/providers/copy-mine`](#post-apiownerproviderscopy-mine) | Share your own routing engine keys | browser session only, the owner |
 | POST | [`/api/owner/providers/policy`](#post-apiownerproviderspolicy) | Who may use the shared keys | browser session only, the owner |
 | POST | [`/api/owner/providers/{engine}/key`](#post-apiownerprovidersenginekey) | Set a shared routing engine key | browser session only, the owner |
 | POST | [`/api/owner/providers/{engine}/key/delete`](#post-apiownerprovidersenginekeydelete) | Remove a shared routing engine key | browser session only, the owner |
@@ -2305,6 +2308,30 @@ The keys the owner shares with everyone (never the keys themselves), and per eng
 |---|---|---|---|---|
 | `engines` | array of [`SharedEngine`](#sharedengine) | yes |  |  |
 
+### POST /api/owner/providers/copy-mine
+
+Share your own routing engine keys
+
+Copies every key on the owner's own card into the shared keys (config.yaml), replacing a shared key for the same engine. The owner's own keys stay.
+
+|  |  |
+|---|---|
+| Who may call | browser session only, the owner |
+| Errors | 400, 403, 404, 429, 503 |
+
+**Request body**
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `csrf_token` | string | no |  | From GET /api/me. Browser sessions only. |
+
+**Reply 200**: Success
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `copied` | integer | no |  | How many of your own keys were copied into the shared keys. |
+| `engines` | array of [`SharedEngine`](#sharedengine) | yes |  |  |
+
 ### POST /api/owner/providers/policy
 
 Who may use the shared keys
@@ -2333,7 +2360,7 @@ Per engine: shared lets people without their own key use the owner's; own makes 
 
 Set a shared routing engine key
 
-Saves the shared key, sealed in the database. It replaces any shared key the engine had.
+Saves the shared key in config.yaml (provider_keys), so a restart or restore keeps it. It replaces any shared key the engine had.
 
 |  |  |
 |---|---|
@@ -2363,12 +2390,12 @@ Saves the shared key, sealed in the database. It replaces any shared key the eng
 
 Remove a shared routing engine key
 
-Forgets the shared key; people without their own key stop being offered the engine.
+Forgets the shared key (from config.yaml too); people without their own key stop being offered the engine.
 
 |  |  |
 |---|---|
 | Who may call | browser session only, the owner |
-| Errors | 400, 403, 404, 429, 503 |
+| Errors | 400, 403, 404, 409, 429, 503 |
 
 **Parameters**
 
@@ -3000,10 +3027,13 @@ The shapes the routes above refer to by name.
 
 | Field | Type | Required | Limits | Description |
 |---|---|---|---|---|
+| `api_keys` | map of string or null | no |  | Your own routing engine API keys: engine id -> key. |
 | `exported_at` | string | no |  |  |
 | `format` | string | no | default `backroad-route-finder/1` | Always backroad-route-finder/1. |
 | `planner_prefs` | [`PlannerPrefs`](#plannerprefs) or null | no |  | Null: you had not set your own. |
 | `saved_routes` | array of [`ExportedRoute`](#exportedroute) | no |  |  |
+| `shared_api_keys` | map of string or null | no |  | The owner's file only: the shared keys. |
+| `shared_key_policy` | map of string or null | no |  | The owner's file only: engine id -> shared or own. |
 | `shortcuts` | map of string or null | no |  | The keyboard shortcuts you changed. |
 | `theme_id` | string | no |  |  |
 | `themes` | array of object or null | no |  | Your own themes; null while you follow the server's. |

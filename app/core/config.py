@@ -195,6 +195,18 @@ class ProvidersSection:
 
 
 @dataclass
+class ProviderKeysSection:
+    # One per routing engine that needs a key (app/routing/providers; a test
+    # holds the two together -- config does not import the router).
+    ors: str
+    graphhopper: str
+    tomtom: str
+    mapbox: str
+    google: str
+    here: str
+
+
+@dataclass
 class DockerSection:
     image: str
     container: str
@@ -216,6 +228,7 @@ class File:
     logs: LogsSection
     routing: RoutingSection
     providers: ProvidersSection
+    provider_keys: ProviderKeysSection
     docker: DockerSection
 
 
@@ -235,8 +248,15 @@ SECTIONS: dict[str, type] = {
     "logs": LogsSection,
     "routing": RoutingSection,
     "providers": ProvidersSection,
+    "provider_keys": ProviderKeysSection,
     "docker": DockerSection,
 }
+
+# Sections that hold secrets: decoded like any other, but left out of the
+# schema, so the Settings screen never shows or saves them and a change is
+# never logged with its value. Only their own code writes them
+# (config_live.Holder.set_secret_values).
+SECRET_SECTIONS = frozenset({"provider_keys"})
 
 
 # ---------------------------------------------------------------------------
@@ -824,6 +844,10 @@ def validate(file: File) -> list[str]:
         check(value == "" or re.fullmatch(r"https?://[^\s?#]+", value) is not None,
               f"providers.{name} must be empty or an http(s):// address with no query")
     check(3 <= providers.timeout_s <= 120, "providers.timeout_s must be 3-120")
+    for item in fields(ProviderKeysSection):
+        value = getattr(file.provider_keys, item.name)
+        check(value == "" or re.fullmatch(r"[\x21-\x7e]{8,400}", value) is not None,
+              f"provider_keys.{item.name} must be empty or a key of 8-400 characters with no spaces")
 
     auth = file.auth
     check(auth.session_ttl_seconds > 0, "auth.session_ttl_seconds must be positive")

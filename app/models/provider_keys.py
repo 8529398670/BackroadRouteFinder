@@ -9,13 +9,24 @@ everyone use the owner's key when they have none of their own, "own" makes
 everyone (but the owner) bring their own. Someone's own key always wins over
 the shared one, so their plans spend their own quota.
 
-They are secrets, so they are not in config.yaml (which holds none, and may be
-committed or shared). They are kept in one meta record, each sealed with
-secret.key's "providers" subkey on top of the record's own encryption, and
-re-sealed when the key rotates (app/models/sealed.py). No route ever sends one
-back: the screens see only whether a key is set and its last four characters.
+Where they are kept:
+- the shared keys are in config.yaml's provider_keys section, so a restart,
+  a fresh install from a copied config.yaml or a restored backup has them
+  with nothing to set up again (config.yaml is never committed; the Settings
+  screen never shows that section). A shared key saved before that moved, or
+  saved while config.yaml could not be written, sits in one meta record,
+  sealed; config.yaml's value wins where both have one, and
+  migrate_shared_to_config moves the record's keys over at startup;
+- each person's own keys stay on their user record, sealed with secret.key's
+  "providers" subkey on top of the record's own encryption and re-sealed when
+  the key rotates (app/models/sealed.py).
+No route ever sends a key back, except a person's own account export (and
+the owner's, which carries the shared keys too): the screens see only whether
+a key is set and its last four characters.
 """
 from __future__ import annotations
+
+from typing import Any
 
 from app.core import encryption
 from app.core.db import BUCKET_META, BUCKET_USERS, Record, Store
@@ -53,9 +64,38 @@ def _open_all(record: Record, secret_key: str) -> dict[str, str]:
     return out
 
 
-def get_all(store: Store, secret_key: str) -> dict[str, str]:
-    """The shared keys: engine id -> key, for every engine that has one."""
-    return _open_all(store.get(BUCKET_META, META_KEY) or {}, secret_key)
+def config_keys(file: Any) -> dict[str, str]:
+    """The shared keys config.yaml holds (a config.File's provider_keys):
+    engine id -> key, for every engine that has one."""
+    section = getattr(file, "provider_keys", None)
+    if section is None:
+        return {}
+    return {engine_id: getattr(section, engine_id, "") for engine_id in ENGINES if getattr(section, engine_id, "")}
+
+
+def get_all(store: Store, secret_key: str, file: Any = None) -> dict[str, str]:
+    """The shared keys: engine id -> key, for every engine that has one.
+    config.yaml's (file.provider_keys) win over any left in the database."""
+    keys = _open_all(store.get(BUCKET_META, META_KEY) or {}, secret_key)
+    keys.update(config_keys(file))
+    return keys
+
+
+def migrate_shared_to_config(store: Store, secret_key: str, holder: Any) -> list[str]:
+    """Move shared keys still in the database into config.yaml, once, at
+    startup. Returns the engines moved; an engine config.yaml already has a
+    key for keeps config.yaml's and just loses the old record. Nothing moves
+    when config.yaml cannot be written; the record keeps working."""
+    stored = _open_all(store.get(BUCKET_META, META_KEY) or {}, secret_key)
+    if not stored:
+        return []
+    present = config_keys(holder.get().file)
+    moving = {f"provider_keys.{engine_id}": key for engine_id, key in stored.items() if engine_id not in present}
+    if moving:
+        holder.set_secret_values(moving)
+    for engine_id in stored:
+        delete_key(store, engine_id)
+    return sorted(engine_id for engine_id in stored if engine_id not in present)
 
 
 def get_user_keys(store: Store, secret_key: str, user_id: int) -> dict[str, str]:

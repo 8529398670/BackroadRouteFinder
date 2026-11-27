@@ -4,9 +4,11 @@
 # reads environment variables. Every key is optional; a key you leave out
 # takes the value shown in this file.
 #
-# It holds no secret. The secret key is in secret.key, beside this file: 64
-# hex characters, mode 0600, never committed (.gitignore), never baked into an
-# image (.dockerignore). Back the two up together with the app directory.
+# The secret key is not here: it is in secret.key, beside this file: 64 hex
+# characters, mode 0600, never committed (.gitignore), never baked into an
+# image (.dockerignore). Back the two up together with the app directory. The
+# one secret this file can hold is the owner's shared routing engine API keys
+# (provider_keys, below), so keep it private too.
 #
 # It can be changed while the server runs -- by hand, or from the owner's
 # Settings screen, which edits only the values it changes and leaves every
@@ -287,9 +289,9 @@ routing:
 
 # Other routing engines, asked beside our own router when a plan picks them
 # (the planner's Sources card). Each one's route is laid on our map, so all are
-# measured the same way and the best can be chosen. API keys are secrets and
-# are not here: everyone enters their own on the Settings screen, the owner
-# can share keys with everyone there, and all are kept sealed in the database.
+# measured the same way and the best can be chosen. Everyone enters their own
+# API keys on the Settings screen (kept sealed on their account); the keys the
+# owner shares with everyone are in provider_keys, below.
 providers:
   # Valhalla, no key. The FOSSGIS public server is free for light use; point
   # this at your own Valhalla to use it more. Empty switches it off. [live]
@@ -310,6 +312,20 @@ providers:
   # How long to wait for another engine's answer, in seconds. One that is
   # slower is left out of that plan and said so. 3-120. [live]
   timeout_s: 20
+
+# [live] The owner's shared API keys for the other routing engines: the ones
+# set on the Settings screen's shared-keys card, written here when they are
+# saved so a fresh install or a restore picks them up. A key typed here by
+# hand works too. Empty means none. Each person's own keys are not here: they
+# stay on their account. This file holds secrets now -- keep it private (it
+# is never committed) and the Settings screen never shows these values.
+provider_keys:
+  ors: ""
+  graphhopper: ""
+  tomtom: ""
+  mapbox: ""
+  google: ""
+  here: ""
 
 # [scripts] Read by docker/run.sh, which applies a change the next time it
 # runs. Edit these on the host: inside the container they are read-only.

@@ -24,7 +24,7 @@ import hashlib
 import os
 import tempfile
 import threading
-from dataclasses import replace
+from dataclasses import fields, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -343,6 +343,31 @@ class Holder:
             self._stat = _stat(self.path)
             return result
 
+    def set_secret_values(self, values: dict[str, str]) -> None:
+        """Write keys of a secret section (config.SECRET_SECTIONS, such as
+        provider_keys.graphhopper) into config.yaml and apply the result.
+        Unlike save() there is no version to match: the caller is the server
+        itself, changing only these values in whatever the file holds now,
+        and nothing about them reaches the Settings screen or the log."""
+        for path in values:
+            section, _, name = path.partition(".")
+            if section not in config.SECRET_SECTIONS or name not in {f.name for f in fields(config.SECTIONS[section])}:
+                raise UnknownSettingError(path)
+        with self._lock:
+            if self._stale:
+                raise StaleError()
+            if not self._writable():
+                raise ReadOnlyError()
+            raw = read_raw(self.path)
+            from app.core.yaml_edit import edit_yaml
+
+            edited = edit_yaml(raw, sorted(values.items()), [], _secret_comments())
+            result = self._apply(edited, lambda: write_config_file(self.path, edited, self.in_place, self.backup_path))
+            self._seen_hash = result["version"]
+            self._pending = ""
+            self._stat = _stat(self.path)
+
+
     def poll(self) -> None:
         """Check config.yaml for a change made outside save() and apply it. A
         change is applied once two polls in a row have seen the same content,
@@ -550,3 +575,18 @@ def _write_atomic(path: Path, data: bytes, mode: int) -> None:
             pass
         raise
     sync_dir(path.parent)
+
+
+def _secret_comments() -> Callable[[str], tuple[list[str], str]]:
+    """For keys added to an older config.yaml that lacks them: one line of
+    explanation above the first one added."""
+    said = False
+
+    def comments(path: str) -> tuple[list[str], str]:
+        nonlocal said
+        if said:
+            return [], ""
+        said = True
+        return ["# The owner's shared routing engine keys, saved from the Settings screen. Secrets: keep this file private."], ""
+
+    return comments

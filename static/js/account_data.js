@@ -33,8 +33,12 @@ const AccountData = {
     }
     try {
       const reply = await Api.post( "/api/account/import" , { data: data } );
-      Dom.toast( Format.fill( "data.imported" , { added: reply.routes_added , skipped: reply.routes_skipped , themes: reply.themes_added } ) , "ok" );
+      Dom.toast( Format.fill( "data.imported" , { added: reply.routes_added , skipped: reply.routes_skipped , themes: reply.themes_added , keys: reply.api_keys_restored + reply.shared_keys_restored } ) , "ok" );
       SavedRoutes.refresh();
+      if ( reply.api_keys_restored + reply.shared_keys_restored > 0 && typeof ProviderKeys !== "undefined" && ProviderKeys.me ) {
+        ProviderKeys.load();
+        if ( ProviderKeys.me.is_owner ) ProviderKeys.loadShared();
+      }
     } catch ( error ) {
       Dom.toast( error.message , "error" );
     }

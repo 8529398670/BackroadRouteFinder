@@ -855,11 +855,11 @@ my_settings:
 # The "Your data" card on the Settings screen (static/js/account_data.js).
 data:
   heading: "Your data"
-  description: "Download your saved routes, planner defaults, keyboard shortcuts and themes as one file, or load such a file here (into this or another account). API keys are not in the file. Loading adds routes you do not have yet; defaults and shortcuts in the file replace yours."
+  description: "Download your saved routes, planner defaults, keyboard shortcuts and themes as one file, or load such a file here (into this or another account). Your routing engine API keys are in the file too (and, for the owner, the shared keys), so keep it private. Loading adds routes you do not have yet; defaults and shortcuts in the file replace yours."
   export: "Download my data"
   import: "Load from a file"
   not_json: "That file is not a data file from this app."
-  imported: "Loaded: {added} routes added, {skipped} already here, {themes} themes added."
+  imported: "Loaded: {added} routes added, {skipped} already here, {themes} themes added, {keys} API keys restored."
 
 settings:
   heading: "Server settings"
@@ -878,6 +878,11 @@ settings:
   shared_all_label: "For every engine:"
   shared_all_shared: "Let everyone use the shared keys"
   shared_all_own: "Require everyone's own key"
+  shared_copy_mine: "Copy my personal keys here"
+  shared_copy_mine_hint: "Puts every key on your own card above into the shared keys (replacing any shared key for the same engine). Your personal keys stay."
+  shared_copy_mine_confirm: "Copy your personal keys into the shared keys for everyone? A shared key already set for the same engine is replaced."
+  shared_copied: "Copied {count} of your keys into the shared keys."
+  shared_copied_none: "You have no personal keys to copy."
   shared_key: "Shared key"
   shared_policy: "Who can use it"
   shared_policy_shared: "Everyone may use the shared key"

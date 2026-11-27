@@ -158,6 +158,20 @@
       },
       "AccountData": {
         "properties": {
+          "api_keys": {
+            "description": "Your own routing engine API keys: engine id -> key.",
+            "oneOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "exported_at": {
             "type": "string"
           },
@@ -183,6 +197,34 @@
             },
             "maxItems": 500,
             "type": "array"
+          },
+          "shared_api_keys": {
+            "description": "The owner's file only: the shared keys.",
+            "oneOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "shared_key_policy": {
+            "description": "The owner's file only: engine id -> shared or own.",
+            "oneOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "shortcuts": {
             "description": "The keyboard shortcuts you changed.",
@@ -2469,7 +2511,7 @@
   "paths": {
     "/api/account/export": {
       "get": {
-        "description": "Your saved routes, planner defaults, keyboard shortcuts and themes, as one file to keep or load into another account. API keys are left out.",
+        "description": "Your saved routes, planner defaults, keyboard shortcuts, themes and routing engine API keys (the owner's also has the shared keys), as one file to keep or load into another account. Keep it private.",
         "operationId": "get_api_account_export",
         "responses": {
           "200": {
@@ -2508,7 +2550,7 @@
     },
     "/api/account/import": {
       "post": {
-        "description": "Merge a file from GET /api/account/export into your account. Saved routes already here are skipped and themes are added by id; planner defaults and shortcuts in the file replace yours.",
+        "description": "Merge a file from GET /api/account/export into your account. Saved routes already here are skipped and themes are added by id; planner defaults, shortcuts and API keys in the file replace yours. The owner's file also restores the shared keys and their policy, but only when the owner loads it.",
         "operationId": "post_api_account_import",
         "requestBody": {
           "content": {
@@ -2540,6 +2582,9 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "api_keys_restored": {
+                      "type": "integer"
+                    },
                     "prefs_replaced": {
                       "type": "boolean"
                     },
@@ -2547,6 +2592,9 @@
                       "type": "integer"
                     },
                     "routes_skipped": {
+                      "type": "integer"
+                    },
+                    "shared_keys_restored": {
                       "type": "integer"
                     },
                     "shortcuts_replaced": {
@@ -9982,6 +10030,82 @@
       },
       "x-feature": "settings"
     },
+    "/api/owner/providers/copy-mine": {
+      "post": {
+        "description": "Copies every key on the owner's own card into the shared keys (config.yaml), replacing a shared key for the same engine. The owner's own keys stay.",
+        "operationId": "post_api_owner_providers_copy_mine",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "csrf_token": {
+                    "description": "From GET /api/me. Browser sessions only.",
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "copied": {
+                      "description": "How many of your own keys were copied into the shared keys.",
+                      "type": "integer"
+                    },
+                    "engines": {
+                      "items": {
+                        "$ref": "#/components/schemas/SharedEngine"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "engines"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "$ref": "#/components/responses/E503"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "Share your own routing engine keys",
+        "tags": [
+          "Owner"
+        ],
+        "x-required-role": "owner"
+      },
+      "x-feature": "settings"
+    },
     "/api/owner/providers/policy": {
       "post": {
         "description": "Per engine: shared lets people without their own key use the owner's; own makes everyone but the owner bring their own key.",
@@ -10071,7 +10195,7 @@
     },
     "/api/owner/providers/{engine}/key": {
       "post": {
-        "description": "Saves the shared key, sealed in the database. It replaces any shared key the engine had.",
+        "description": "Saves the shared key in config.yaml (provider_keys), so a restart or restore keeps it. It replaces any shared key the engine had.",
         "operationId": "post_api_owner_providers_engine_key",
         "parameters": [
           {
@@ -10165,7 +10289,7 @@
     },
     "/api/owner/providers/{engine}/key/delete": {
       "post": {
-        "description": "Forgets the shared key; people without their own key stop being offered the engine.",
+        "description": "Forgets the shared key (from config.yaml too); people without their own key stop being offered the engine.",
         "operationId": "post_api_owner_providers_engine_key_delete",
         "parameters": [
           {
@@ -10226,6 +10350,9 @@
           },
           "404": {
             "$ref": "#/components/responses/E404"
+          },
+          "409": {
+            "$ref": "#/components/responses/E409"
           },
           "429": {
             "$ref": "#/components/responses/E429"

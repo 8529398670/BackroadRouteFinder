@@ -76,6 +76,26 @@ class AnswersTest(unittest.TestCase):
         self.check(found, 630, 12200)
         self.assertIn("custom_model", asked.call_args.kwargs["body"])
 
+    def test_graphhopper_free_plan_falls_back_to_speed_mode(self) -> None:
+        path = {"points": {"coordinates": [[-120.2, 38.5], [-120.95, 40.7]]}, "time": 1000, "distance": 2}
+        refused = base.ProviderError("HTTP 400: Free packages cannot use flexible mode")
+        key = "free" * 5
+        try:
+            with mock.patch.object(graphhopper, "request_json", side_effect=[refused, {"paths": [path]}]) as asked:
+                found = graphhopper.fetch(POINTS, True, key, "https://example.test", 5)
+            self.assertEqual(len(found), 1)
+            retry = asked.call_args.kwargs["body"]
+            self.assertNotIn("custom_model", retry)
+            self.assertNotIn("ch.disable", retry)
+            self.assertEqual(retry["algorithm"], "alternative_route")
+            # Remembered: the next plan goes straight to speed mode.
+            with mock.patch.object(graphhopper, "request_json", return_value={"paths": [path]}) as asked:
+                graphhopper.fetch(POINTS, True, key, "https://example.test", 5)
+            self.assertEqual(asked.call_count, 1)
+            self.assertNotIn("custom_model", asked.call_args.kwargs["body"])
+        finally:
+            graphhopper._SPEED_ONLY.clear()
+
     def test_tomtom(self) -> None:
         route = {"legs": [{"points": [{"latitude": 38.5, "longitude": -120.2}, {"latitude": 40.7, "longitude": -120.95}]}],
                  "summary": {"travelTimeInSeconds": 640, "lengthInMeters": 12300}}
@@ -100,6 +120,12 @@ class AnswersTest(unittest.TestCase):
         found, asked = self.fetch(google, {"routes": [{"duration": "670s", "distanceMeters": 12600, "polyline": {"encodedPolyline": LINE5}}]})
         self.check(found, 670, 12600)
         self.assertTrue(asked.call_args.kwargs["body"]["routeModifiers"]["avoidHighways"])
+
+    def test_google_bare_403_points_at_billing(self) -> None:
+        refused = base.ProviderError("HTTP 403: The caller does not have permission")
+        with mock.patch.object(google, "request_json", side_effect=refused):
+            with self.assertRaisesRegex(base.ProviderError, "billing is enabled"):
+                google.fetch(POINTS, True, "k" * 39, "", 5)
 
     def test_an_error_names_the_engines_message(self) -> None:
         self.assertEqual(base._find_message({"error": {"code": 403, "message": "Access to this API has been disallowed"}}),

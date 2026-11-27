@@ -11,6 +11,13 @@ from app.routing.providers.base import Ask, Candidate, Engine, Points, ProviderE
 
 URL = "https://routes.googleapis.com/directions/v2:computeRoutes"
 
+# Google answers a bare 403 with no reason when the key's Cloud project has
+# no open billing account linked: none, or a closed one (the console still
+# shows it as linked). Or the Routes API is on in another project.
+BILLING_HINT = ("check that billing is enabled on the key's Google Cloud project "
+                "(a linked billing account that was closed counts as none), "
+                "and that the Routes API is enabled in that same project")
+
 
 def _place(lat: float, lon: float) -> dict:
     return {"location": {"latLng": {"latitude": lat, "longitude": lon}}}
@@ -28,7 +35,12 @@ def fetch(points: Points, ask: Ask | bool, key: str, url: str, timeout: float) -
         "routeModifiers": {"avoidHighways": ask.off("freeways"), "avoidTolls": ask.backroads},
     }
     headers = {"X-Goog-Api-Key": key, "X-Goog-FieldMask": "routes.duration,routes.distanceMeters,routes.polyline.encodedPolyline"}
-    answer = request_json(URL, body=body, headers=headers, timeout=timeout)
+    try:
+        answer = request_json(URL, body=body, headers=headers, timeout=timeout)
+    except ProviderError as error:
+        if str(error).startswith("HTTP 403") and "caller does not have permission" in str(error):
+            raise ProviderError(f"{error} -- {BILLING_HINT}") from None
+        raise
     out = []
     for route in answer.get("routes", []):
         seconds = float(str(route.get("duration", "0s")).rstrip("s") or 0)

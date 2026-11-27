@@ -190,7 +190,7 @@ def access_of(request: Request) -> sources.Access:
     store = get_store(request)
     actor = actor_from(request)
     owner = is_owner(request)
-    shared = provider_keys.get_all(store, cfg.secret_key)
+    shared = provider_keys.get_all(store, cfg.secret_key, cfg.file)
     own = provider_keys.get_user_keys(store, cfg.secret_key, actor.user.id) if actor is not None else {}
     policy = provider_keys.get_policy(store)
     keys, _ = provider_keys.effective(shared, own, policy, owner)

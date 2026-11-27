@@ -6,9 +6,11 @@ owner also sets shared keys for everyone, and per engine whether people may
 use the shared key ("shared") or must bring their own ("own"): see
 app/models/provider_keys.py.
 
-Keys are sealed in the database, never written to config.yaml, and never sent
-back: a card sees only whether one is set and its last four characters (the
-shared keys' hint only on the owner's card). Engines' addresses are ordinary
+A person's own keys are sealed on their account. The owner's shared keys are
+written to config.yaml's provider_keys section, so a restart or a restore
+keeps them (see app/models/provider_keys.py). Neither is ever sent back: a
+card sees only whether one is set and its last four characters (the shared
+keys' hint only on the owner's card). Engines' addresses are ordinary
 settings (config.yaml's providers section).
 """
 from __future__ import annotations
@@ -24,7 +26,8 @@ from app.apidocs import Request as RequestType
 from app.core.logs import KIND_ADMIN
 from app.core.security import actor_from
 from app.models import provider_keys
-from app.routes.helpers import Refused, get_config, get_store
+from app.core.config import ConfigError
+from app.routes.helpers import Refused, get_config, get_settings, get_store
 from app.routes.logs import audit
 from app.routes.planner import access_of, engine_urls, is_owner
 from app.routing import sources
@@ -72,7 +75,7 @@ def _engines(request: Request) -> EnginesReply:
     cfg = get_config(request)
     store = get_store(request)
     access = access_of(request)
-    shared = provider_keys.get_all(store, cfg.secret_key)
+    shared = provider_keys.get_all(store, cfg.secret_key, cfg.file)
     own = provider_keys.get_user_keys(store, cfg.secret_key, _user_id(request))
     policy = provider_keys.get_policy(store)
     _, origin = provider_keys.effective(shared, own, policy, is_owner(request))
@@ -191,7 +194,8 @@ class SharedReply(Reply):
 
 def _shared(request: Request) -> SharedReply:
     store = get_store(request)
-    shared = provider_keys.get_all(store, get_config(request).secret_key)
+    cfg = get_config(request)
+    shared = provider_keys.get_all(store, cfg.secret_key, cfg.file)
     policy = provider_keys.get_policy(store)
     return SharedReply(engines=[
         SharedEngine(id=engine_id, name=engine.name, needs_key=engine.needs_key, key_set=bool(shared.get(engine_id)),
@@ -214,24 +218,68 @@ def list_shared(request: Request, body: NoInput) -> SharedReply:
 @route(
     "POST /api/owner/providers/{engine}/key", summary="Set a shared routing engine key",
     tag="Owner", role=OWNER, feature="settings",
-    description="Saves the shared key, sealed in the database. It replaces any shared key the engine had.",
+    description="Saves the shared key in config.yaml (provider_keys), so a restart or restore keeps it. "
+    "It replaces any shared key the engine had.",
 )
 def set_shared_key(request: Request, body: SetKey) -> SharedReply:
-    provider_keys.set_key(get_store(request), get_config(request).secret_key, body.engine, body.key.strip())
-    audit(request, KIND_ADMIN, "shared routing engine key set", {"engine": body.engine})
+    where = save_shared_key(request, body.engine, body.key.strip())
+    audit(request, KIND_ADMIN, "shared routing engine key set", {"engine": body.engine, "saved_in": where})
     return _shared(request)
+
+
+def save_shared_key(request: Request, engine_id: str, key: str) -> str:
+    """Write a shared key to config.yaml, and drop any older copy in the
+    database. When config.yaml cannot be written (a read-only mount, a file
+    replaced on the host) it is sealed in the database instead, which works
+    the same until the next restart moves it. Says where it went."""
+    store = get_store(request)
+    try:
+        get_settings(request).set_secret_values({f"provider_keys.{engine_id}": key})
+    except ConfigError:
+        provider_keys.set_key(store, get_config(request).secret_key, engine_id, key)
+        return "database"
+    provider_keys.delete_key(store, engine_id)
+    return "config.yaml"
 
 
 @route(
     "POST /api/owner/providers/{engine}/key/delete", summary="Remove a shared routing engine key",
-    tag="Owner", role=OWNER, feature="settings", errors=(404,),
-    description="Forgets the shared key; people without their own key stop being offered the engine.",
+    tag="Owner", role=OWNER, feature="settings", errors=(404, 409),
+    description="Forgets the shared key (from config.yaml too); people without their own key stop being offered the engine.",
 )
 def delete_shared_key(request: Request, body: EngineOnly) -> SharedReply:
-    if not provider_keys.delete_key(get_store(request), body.engine):
+    in_file = body.engine in provider_keys.config_keys(get_config(request).file)
+    in_store = provider_keys.delete_key(get_store(request), body.engine)
+    if not in_file and not in_store:
         raise Refused(404, "that engine has no shared key")
+    if in_file:
+        try:
+            get_settings(request).set_secret_values({f"provider_keys.{body.engine}": ""})
+        except ConfigError as error:
+            raise Refused(409, f"could not remove it from config.yaml: {error}") from None
     audit(request, KIND_ADMIN, "shared routing engine key removed", {"engine": body.engine})
     return _shared(request)
+
+
+class CopiedReply(SharedReply):
+    copied: Annotated[int, Meta(description="How many of your own keys were copied into the shared keys.")] = 0
+
+
+@route(
+    "POST /api/owner/providers/copy-mine", summary="Share your own routing engine keys",
+    tag="Owner", role=OWNER, feature="settings",
+    description="Copies every key on the owner's own card into the shared keys (config.yaml), replacing a "
+    "shared key for the same engine. The owner's own keys stay.",
+)
+def copy_mine(request: Request, body: NoInput) -> CopiedReply:
+    cfg = get_config(request)
+    own = provider_keys.get_user_keys(get_store(request), cfg.secret_key, _user_id(request))
+    keyed = {engine_id: key for engine_id, key in own.items() if ENGINES[engine_id].needs_key}
+    for engine_id, key in keyed.items():
+        save_shared_key(request, engine_id, key)
+    if keyed:
+        audit(request, KIND_ADMIN, "own routing engine keys copied to shared", {"engines": sorted(keyed)})
+    return CopiedReply(engines=_shared(request).engines, copied=len(keyed))
 
 
 class SetPolicy(RequestType):
@@ -261,7 +309,7 @@ def set_policy(request: Request, body: SetPolicy) -> SharedReply:
 )
 def test_shared(request: Request, body: EngineOnly) -> TestReply:
     cfg = get_config(request)
-    access = sources.Access(keys=provider_keys.get_all(get_store(request), cfg.secret_key), urls=engine_urls(request),
+    access = sources.Access(keys=provider_keys.get_all(get_store(request), cfg.secret_key, cfg.file), urls=engine_urls(request),
                             timeout=float(cfg.file.providers.timeout_s))
     if ENGINES[body.engine].needs_key and not access.keys.get(body.engine):
         return TestReply(ok=False, message="no shared key set", milliseconds=0, routes=0, seconds=0, meters=0)

@@ -19,6 +19,7 @@ const ProviderKeys = {
       Dom.show( Dom.get( "shared-keys-card" ) , true );
       Dom.get( "shared-all-shared" ).addEventListener( "click" , () => this.setAll( "shared" ) );
       Dom.get( "shared-all-own" ).addEventListener( "click" , () => this.setAll( "own" ) );
+      Dom.get( "shared-copy-mine" ).addEventListener( "click" , () => this.copyMine() );
       await Promise.all( [ this.load() , this.loadShared() ] );
       return;
     }
@@ -245,6 +246,17 @@ const ProviderKeys = {
     try {
       const reply = await Api.post( "/api/owner/providers/policy" , { engines: engines } );
       Dom.toast( I18n.get( "settings.shared_policy_saved" ) , "ok" );
+      await this.afterShared( reply );
+    } catch ( error ) {
+      App.showError( error.message );
+    }
+  },
+
+  async copyMine() {
+    if ( !( await Dom.confirm( I18n.get( "settings.shared_copy_mine_confirm" ) ) ) ) return;
+    try {
+      const reply = await Api.post( "/api/owner/providers/copy-mine" );
+      Dom.toast( reply.copied ? Format.fill( "settings.shared_copied" , { count: reply.copied } ) : I18n.get( "settings.shared_copied_none" ) , "ok" );
       await this.afterShared( reply );
     } catch ( error ) {
       App.showError( error.message );
