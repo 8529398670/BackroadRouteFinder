@@ -213,7 +213,7 @@ const RouteMap = {
   },
 
   showGhost( latlng ) {
-    if ( !this.editHit ) return;
+    if ( !this.editHit || this.overDot ) return;
     window.clearTimeout( this.ghostTimer );
     if ( !this.ghost ) {
       const ghost = L.marker( latlng , {
@@ -257,16 +257,31 @@ const RouteMap = {
   // (handlers.removeShape).
   drawShape( points ) {
     this.shape.clearLayers();
+    this.overDot = false;
     points.forEach( ( point , index ) => {
       const dot = L.marker( [ point.lat , point.lon ] , {
         draggable: true,
         keyboard: true,
         title: I18n.get( "plan.nudge_dot" ),
-        icon: L.divIcon( { className: "plan-pin plan-pin-shape" , iconSize: [ 14 , 14 ] , iconAnchor: [ 7 , 7 ] } ),
+        // Above the grab handle, so a click on a dot always reaches it.
+        zIndexOffset: 1000,
+        icon: L.divIcon( {
+          className: "plan-pin plan-pin-shape",
+          html: "<i class=\"bi bi-x-lg\" aria-hidden=\"true\"></i>",
+          iconSize: [ 16 , 16 ],
+          iconAnchor: [ 8 , 8 ],
+        } ),
       } );
+      // Over a dot, the grab handle steps aside.
+      dot.on( "mouseover" , () => { this.overDot = true; this.hideGhost( true ); } );
+      dot.on( "mouseout" , () => { this.overDot = false; } );
+      let from = null;
+      dot.on( "dragstart" , () => { from = this.map.latLngToContainerPoint( dot.getLatLng() ); } );
       dot.on( "dragend" , () => {
         const at = dot.getLatLng();
-        this.handlers.moveShape( index , at.lat , at.lng );
+        // A click that wobbled a few pixels is still a click: remove it.
+        if ( from && from.distanceTo( this.map.latLngToContainerPoint( at ) ) < 8 ) this.handlers.removeShape( index );
+        else this.handlers.moveShape( index , at.lat , at.lng );
       } );
       dot.on( "click" , () => this.handlers.removeShape( index ) );
       this.shape.addLayer( dot );
