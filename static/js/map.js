@@ -33,6 +33,7 @@ const RouteMap = {
     this.edit = L.layerGroup().addTo( this.map );
     this.shape = L.layerGroup().addTo( this.map );
     this.locks = L.layerGroup().addTo( this.map );
+    this.forkPins = L.layerGroup().addTo( this.map );
     this.pins = L.layerGroup().addTo( this.map );
     this.map.on( "click" , ( event ) => handlers.click( event.latlng.lat , event.latlng.lng ) );
     this.handlers = handlers;
@@ -204,6 +205,7 @@ const RouteMap = {
     this.drawEdit( null );
     this.drawShape( [] );
     this.drawLocks( [] );
+    this.drawForks( [] );
   },
 
   // The part of the chosen route that can be grabbed, as [lat, lon] pairs
@@ -307,6 +309,47 @@ const RouteMap = {
       } );
       dot.on( "click" , () => this.handlers.removeShape( index ) );
       this.shape.addLayer( dot );
+    } );
+  },
+
+  // Forks mode: a signpost wherever another route leaves the chosen one.
+  // Its popup lists those routes; hovering one shows the rest of its way,
+  // and picking it switches onto it (each option's pick).
+  drawForks( pins ) {
+    this.forkPins.clearLayers();
+    pins.forEach( ( pin ) => {
+      const marker = L.marker( [ pin.lat , pin.lon ] , {
+        keyboard: true,
+        title: I18n.get( "plan.fork_pin" ),
+        zIndexOffset: 800,
+        icon: L.divIcon( {
+          className: "plan-pin plan-pin-fork",
+          html: "<i class=\"bi bi-signpost-split-fill\" aria-hidden=\"true\"></i>",
+          iconSize: [ 24 , 24 ],
+          iconAnchor: [ 12 , 12 ],
+        } ),
+      } );
+      const list = Dom.el( "div" , { class: "d-grid gap-1 plan-fork-menu" , children: [
+        Dom.el( "div" , { class: "small fw-semibold mb-1" , text: I18n.get( "plan.fork_heading" ) } ),
+        ...pin.options.map( ( option ) => Dom.el( "button" , {
+          class: "btn btn-sm btn-outline-primary text-start",
+          attrs: { type: "button" },
+          children: [
+            Dom.el( "span" , { class: "d-block fw-semibold" , text: option.label } ),
+            Dom.el( "small" , { class: "d-block" , text: option.detail } ),
+          ],
+          on: {
+            click: () => option.pick(),
+            mouseenter: () => this.highlight( option.preview ),
+            mouseleave: () => this.highlight( null ),
+            focus: () => this.highlight( option.preview ),
+            blur: () => this.highlight( null ),
+          },
+        } ) ),
+      ] } );
+      marker.bindPopup( list , { minWidth: 200 } );
+      marker.on( "popupclose" , () => this.highlight( null ) );
+      this.forkPins.addLayer( marker );
     } );
   },
 

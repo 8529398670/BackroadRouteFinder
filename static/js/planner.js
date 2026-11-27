@@ -35,6 +35,10 @@ const Planner = {
   lock: null,
   // The first lock point, [lat, lon] on the route, until the second is set.
   lockPending: null,
+  // A route woven by switching onto other routes at forks (see switchAt).
+  weave: null,
+  // What dragging the route does: nudge it, or show its forks to switch at.
+  editMode: "nudge",
   MAX_SHAPE: 12,
   options: {
     backroads: true , penalty: 8 , road_rules: {} , road_factors: {} , compare_fastest: true , sources: [ "ours" ] , combine: "best" , alternatives: 5,
@@ -110,6 +114,12 @@ const Planner = {
       if ( trip ) Navigate.start( trip );
     } );
     Dom.get( "plan-reset-shape" ).addEventListener( "click" , () => this.resetShape() );
+    Dom.all( "input[name=plan-edit-mode]" ).forEach( ( radio ) => {
+      radio.addEventListener( "change" , () => { if ( radio.checked ) this.setEditMode( radio.value ); } );
+    } );
+    let mode = "nudge";
+    try { mode = window.localStorage.getItem( "plan-edit-mode" ) || "nudge"; } catch ( _error ) { /* private mode */ }
+    this.setEditMode( mode );
     Dom.get( "plan-backroads" ).addEventListener( "change" , ( event ) => this.setOption( "backroads" , event.target.checked ) );
     Dom.get( "plan-loop" ).addEventListener( "change" , ( event ) => this.setLoop( "on" , event.target.checked , null , true ) );
     Dom.get( "plan-loop-radius" ).addEventListener( "change" , ( event ) => {
@@ -231,6 +241,7 @@ const Planner = {
     return {
       stops: this.copyPoints( this.stops ) , loopPoints: this.copyPoints( this.loopPoints ) , options: this.copyOptions( this.options ),
       shape: this.copyPoints( this.shape ) , lock: this.lock , lockPending: this.lockPending , link: this.link,
+      weave: this.weave,
     };
   },
 
@@ -241,6 +252,7 @@ const Planner = {
     this.shape = this.copyPoints( state.shape || [] );
     this.lock = state.lock || null;
     this.lockPending = state.lockPending || null;
+    this.weave = state.weave || null;
     this.link = state.link || null;
     this.picking = null;
     this.renderLink();
@@ -290,11 +302,12 @@ const Planner = {
     state.shape = [];
     state.lock = null;
     state.lockPending = null;
+    state.weave = null;
   },
 
   setStop( index , stop , fit ) {
     const loop = this.isLoop();
-    const locked = this.lock !== null;
+    const locked = this.lock !== null || this.weave !== null;
     this.change( "undo.plan_stops" , ( state ) => {
       ( loop ? state.loopPoints : state.stops )[ index ] = stop;
       if ( locked ) this.unshape( state );
@@ -369,6 +382,7 @@ const Planner = {
     let waypoints = null;
     this.change( "undo.plan_stops" , ( state ) => {
       state.stops.reverse();
+      state.weave = null;
       const lock = state.lock;
       const legs = lock ? lock.middle.length - 1 : state.stops.filter( Boolean ).length - 1;
       state.shape = state.shape.slice().reverse().map( ( point ) => Object.assign( {} , point , { leg: Math.max( 0 , legs - 1 - point.leg ) } ) );
@@ -461,6 +475,8 @@ const Planner = {
       state.shape = ( saved.options.shape || [] ).map( ( point ) => ( { lat: point.lat , lon: point.lon , leg: point.leg } ) );
       const lock = saved.options.lock;
       state.lock = lock ? Object.assign( { id: this.newLockId() , middle: lock.middle } , lock.keep ) : null;
+      const follow = saved.options.follow;
+      state.weave = follow && !loop ? { id: this.newLockId() , coords: follow.coords , seconds: follow.seconds , trip: follow.trip , pool: [] } : null;
       state.link = saved.token ? this.linkOf( saved , shared ) : null;
     } , null , true );
     this.pendingPick = saved.options.pick || null;
@@ -468,6 +484,43 @@ const Planner = {
     this.pendingNavigate = Boolean( navigate );
     this.rememberPlaces( saved.waypoints );
     Nav.go( this.link ? this.linkPath( this.link.token ) : "/plan" );
+  },
+
+  // A saved route as POST /api/route takes it, the way open() would plan it,
+  // for planning it off screen (Saved routes' export with GPX tracks).
+  bodyFor( saved ) {
+    const options = saved.options || {};
+    const usable = new Set( this.sourceList().filter( ( source ) => source.usable ).map( ( source ) => source.id ) );
+    let sources = ( options.sources || [ "ours" ] ).filter( ( id ) => usable.has( id ) );
+    if ( !sources.length ) sources = [ "ours" ];
+    const backroads = options.backroads !== false;
+    const body = {
+      waypoints: saved.waypoints.map( ( point ) => ( { lat: point.lat , lon: point.lon } ) ),
+      penalty: backroads ? options.penalty : 1,
+      road_rules: options.road_rules || {},
+      road_factors: options.road_factors || this.statusFactors(),
+      compare_fastest: false,
+      sources: sources,
+      alternatives: options.alternatives || 1,
+    };
+    const loop = options.loop;
+    if ( loop ) {
+      body.loop = loop;
+      body.waypoints = loop.start === "stop" && saved.waypoints[ 1 ] ? [ { lat: saved.waypoints[ 1 ].lat , lon: saved.waypoints[ 1 ].lon } ] : [];
+    }
+    if ( options.shape && options.shape.length ) body.shape = options.shape.map( ( point ) => ( { lat: point.lat , lon: point.lon , leg: point.leg } ) );
+    if ( options.lock ) {
+      body.waypoints = options.lock.middle.map( ( point ) => ( { lat: point.lat , lon: point.lon } ) );
+      body.keep = options.lock.keep;
+      delete body.loop;
+    }
+    if ( options.follow ) {
+      body.follow = options.follow;
+      delete body.loop;
+      delete body.shape;
+      delete body.keep;
+    }
+    return body;
   },
 
   // --- a saved route's link (/r/<token>, saved_routes.py) -----------------------
@@ -744,6 +797,10 @@ const Planner = {
     else if ( this.lockPending ) text = I18n.get( "plan.hint_lock_one" );
     else if ( this.picking !== null ) text = Format.fill( "plan.hint_pick" , { stop: this.stopName( this.picking ) } );
     else if ( this.lock ) text = I18n.get( "plan.hint_locked" );
+    else if ( this.isForks() && this.chosen() && !this.isLoop() ) {
+      text = I18n.get( this.weave && !( this.weave.pool || [] ).length ? "plan.hint_forks_saved"
+        : this.choices().length > 1 || this.weave ? "plan.hint_forks" : "plan.hint_forks_one" );
+    }
     else if ( this.isLoop() ) {
       if ( points[ 0 ] === null ) text = I18n.get( "plan.hint_loop_center" );
       else if ( this.loopUsesStart() && points[ 1 ] === null ) text = I18n.get( "plan.hint_loop_start" );
@@ -1004,7 +1061,13 @@ const Planner = {
     // Locked: only the middle plans again, through its own points; the key
     // names the lock rather than repeating its whole line.
     let key;
-    if ( this.lock ) {
+    if ( this.weave ) {
+      const weave = this.weave;
+      delete body.loop;
+      delete body.shape;
+      key = JSON.stringify( Object.assign( {} , body , { follow: "weave-" + weave.id } ) );
+      body.follow = { coords: weave.coords , seconds: weave.seconds , trip: weave.trip };
+    } else if ( this.lock ) {
       const lock = this.lock;
       body.waypoints = lock.middle.map( ( point ) => ( { lat: point.lat , lon: point.lon } ) );
       delete body.loop;
@@ -1126,7 +1189,7 @@ const Planner = {
       return;
     }
     const choices = this.choices();
-    RouteMap.drawRoutes( [ chosen , ...this.result.routes.filter( ( route ) => route !== chosen ) ] , ( route ) => {
+    RouteMap.drawRoutes( [ chosen , ...this.poolRoutes() , ...this.result.routes.filter( ( route ) => route !== chosen ) ] , ( route ) => {
       const index = choices.indexOf( route );
       if ( index >= 0 ) this.select( index );
     } );
@@ -1144,11 +1207,13 @@ const Planner = {
       RouteMap.drawEdit( null );
       RouteMap.drawShape( [] );
       RouteMap.drawLocks( [] );
+      RouteMap.drawForks( [] );
       return;
     }
     const picking = this.isLockPicking();
     const [ lo , hi ] = picking ? [ 0 , line.length - 1 ] : this.editRange( line );
-    RouteMap.drawEdit( line.slice( lo , hi + 1 ) , !picking );
+    RouteMap.drawEdit( line.slice( lo , hi + 1 ) , !picking && !this.isForks() );
+    RouteMap.drawForks( this.forkPins() );
     // A nudge sits where it met the road, once a plan has put it there.
     const met = this.result ? ( this.result.snapped || [] ).filter( ( point , index ) => ( this.result.shape || [] )[ index ] ) : [];
     RouteMap.drawShape( met.length === this.shape.length ? met : this.shape );
@@ -1335,7 +1400,8 @@ const Planner = {
     const at = marks.filter( ( mark ) => mark.shape ).map( ( mark ) => mark.vertex );
     let place = this.shape.findIndex( ( point , index ) => point.leg > leg || ( point.leg === leg && at.length === this.shape.length && at[ index ] > grab ) );
     if ( place < 0 ) place = this.shape.length;
-    this.change( "undo.plan_nudge" , ( state ) => { state.shape.splice( place , 0 , { lat: lat , lon: lon , leg: leg } ); } );
+    if ( this.weave ) Dom.toast( I18n.get( "plan.weave_cleared" ) , "ok" );
+    this.change( "undo.plan_nudge" , ( state ) => { state.weave = null; state.shape.splice( place , 0 , { lat: lat , lon: lon , leg: leg } ); } );
   },
 
   // The toolbar's Lock point: wait for a click on the route (again to cancel).
@@ -1427,13 +1493,199 @@ const Planner = {
       id: this.newLockId() , coords: line , seconds: this.chosen().seconds , start: start , end: end , middle: middle , trip: trip,
     };
     this.picking = null;
-    this.change( "undo.plan_lock" , ( state ) => { state.lock = lock; state.shape = shape; state.lockPending = null; } );
+    this.change( "undo.plan_lock" , ( state ) => { state.lock = lock; state.shape = shape; state.lockPending = null; state.weave = null; } );
     return true;
+  },
+
+  // --- switching at forks ----------------------------------------------------
+  //
+  // The toolbar's Forks mode: wherever another of the routes offered leaves
+  // the chosen one (where they part, or cross), a signpost pin. Picking a
+  // route there drives the chosen one up to the fork, then that one to the
+  // end: a woven route, { id , coords , seconds , trip , pool }. pool is the
+  // routes offered when weaving began (their lines and times), kept so the
+  // switching can go on; the server only measures the woven line (POST
+  // /api/route follow). A nudge, a lock or a change of stops ends the weave.
+
+  FORK_NEAR_M: 12,
+  FORK_STEP_M: 8,
+  // A route must stay this far off the chosen one to count as leaving it.
+  FORK_AWAY_M: 120,
+  FORK_MAX: 40,
+
+  setEditMode( mode ) {
+    this.editMode = mode === "forks" ? "forks" : "nudge";
+    try { window.localStorage.setItem( "plan-edit-mode" , this.editMode ); } catch ( _error ) { /* private mode */ }
+    Dom.all( "input[name=plan-edit-mode]" ).forEach( ( radio ) => { radio.checked = radio.value === this.editMode; } );
+    if ( this.editMode === "forks" && this.isLockPicking() ) this.picking = null;
+    this.showHint();
+    this.drawShaping();
+    this.renderShapeTools();
+  },
+
+  isForks() {
+    return this.editMode === "forks";
+  },
+
+  lineOf( route ) {
+    const out = [];
+    route.runs.forEach( ( run ) => run.coords.forEach( ( point , index ) => {
+      const last = out[ out.length - 1 ];
+      if ( index === 0 && last && last[ 0 ] === point[ 0 ] && last[ 1 ] === point[ 1 ] ) return;
+      out.push( [ Number( point[ 0 ] ) , Number( point[ 1 ] ) ] );
+    } ) );
+    return out;
+  },
+
+  // The routes to switch onto: the weave's own, or the routes offered now.
+  forkPool() {
+    if ( this.weave ) return this.weave.pool || [];
+    return this.choices().map( ( route , index ) => ( {
+      n: index + 1 , line: this.lineOf( route ) , seconds: route.seconds , main_seconds: route.main_seconds , meters: route.meters,
+    } ) );
+  },
+
+  // The line every few metres, each point with the segment it is on.
+  densify( line , step ) {
+    const out = [];
+    for ( let k = 0 ; k < line.length - 1 ; k++ ) {
+      const [ lat1 , lon1 ] = line[ k ];
+      const [ lat2 , lon2 ] = line[ k + 1 ];
+      const pieces = Math.max( 1 , Math.ceil( this.metres( lat1 , lon1 , lat2 , lon2 ) / step ) );
+      for ( let i = 0 ; i < pieces ; i++ ) {
+        const t = i / pieces;
+        out.push( { lat: lat1 + ( lat2 - lat1 ) * t , lon: lon1 + ( lon2 - lon1 ) * t , seg: k } );
+      }
+    }
+    if ( line.length ) {
+      const last = line[ line.length - 1 ];
+      out.push( { lat: last[ 0 ] , lon: last[ 1 ] , seg: Math.max( 0 , line.length - 2 ) , end: true } );
+    }
+    return out;
+  },
+
+  // Metres along a line, at each vertex.
+  along( line ) {
+    const out = [ 0 ];
+    for ( let k = 1 ; k < line.length ; k++ ) out.push( out[ k - 1 ] + this.metres( line[ k - 1 ][ 0 ] , line[ k - 1 ][ 1 ] , line[ k ][ 0 ] , line[ k ][ 1 ] ) );
+    return out;
+  },
+
+  // Where each route in pool leaves line: [{ lat , lon , options: [{ entry , coords , seconds , main_seconds }] }].
+  forks( line , pool , current ) {
+    if ( line.length < 2 || !pool.length ) return [];
+    const CELL = 0.0002;
+    const grid = new Map();
+    const cellKey = ( lat , lon ) => Math.floor( lat / CELL ) + ":" + Math.floor( lon / CELL );
+    this.densify( line , this.FORK_STEP_M ).forEach( ( point ) => {
+      const key = cellKey( point.lat , point.lon );
+      if ( !grid.has( key ) ) grid.set( key , [] );
+      grid.get( key ).push( point );
+    } );
+    const onLine = ( lat , lon ) => {
+      const r = Math.floor( lat / CELL );
+      const c = Math.floor( lon / CELL );
+      let best = null;
+      let bestM = this.FORK_NEAR_M;
+      for ( let dr = -1 ; dr <= 1 ; dr++ ) for ( let dc = -1 ; dc <= 1 ; dc++ ) {
+        ( grid.get( ( r + dr ) + ":" + ( c + dc ) ) || [] ).forEach( ( point ) => {
+          const m = this.metres( lat , lon , point.lat , point.lon );
+          if ( m < bestM ) { bestM = m; best = point; }
+        } );
+      }
+      return best;
+    };
+    const lineAlong = this.along( line );
+    const lineLength = lineAlong[ lineAlong.length - 1 ] || 1;
+    const away = Math.ceil( this.FORK_AWAY_M / this.FORK_STEP_M );
+    const found = [];
+    pool.forEach( ( entry ) => {
+      const other = entry.line;
+      if ( other.length < 2 ) return;
+      const otherAlong = this.along( other );
+      const otherLength = otherAlong[ otherAlong.length - 1 ] || 1;
+      const dense = this.densify( other , this.FORK_STEP_M );
+      const on = dense.map( ( point ) => onLine( point.lat , point.lon ) );
+      for ( let i = 0 ; i < dense.length - 1 ; i++ ) {
+        if ( !on[ i ] || on[ i + 1 ] ) continue;
+        // It has to stay off for a while: not a wobble beside the same road.
+        let off = 0;
+        while ( i + 1 + off < dense.length && !on[ i + 1 + off ] && off < away ) off++;
+        if ( off < away && i + 1 + off < dense.length ) continue;
+        const at = dense[ i ];
+        const mine = on[ i ];
+        const otherLeft = otherLength - ( otherAlong[ at.seg ] + this.metres( other[ at.seg ][ 0 ] , other[ at.seg ][ 1 ] , at.lat , at.lon ) );
+        if ( otherLeft < 150 ) continue;
+        const mineDone = lineAlong[ mine.seg ] + this.metres( line[ mine.seg ][ 0 ] , line[ mine.seg ][ 1 ] , mine.lat , mine.lon );
+        const coords = line.slice( 0 , mine.seg + 1 ).concat( [ [ at.lat , at.lon ] ] , other.slice( at.seg + 1 ) );
+        const share = mineDone / lineLength;
+        const rest = otherLeft / otherLength;
+        found.push( {
+          lat: at.lat , lon: at.lon,
+          option: {
+            entry: entry , coords: coords , from: [ at.lat , at.lon ],
+            rest: [ [ at.lat , at.lon ] ].concat( other.slice( at.seg + 1 ) ),
+            seconds: current.seconds * share + entry.seconds * rest,
+            main_seconds: current.main_seconds * share + entry.main_seconds * rest,
+          },
+        } );
+        i += off;
+      }
+    } );
+    // One pin per place, with every route that leaves there.
+    const pins = [];
+    found.forEach( ( fork ) => {
+      const pin = pins.find( ( other ) => this.metres( other.lat , other.lon , fork.lat , fork.lon ) < 40 );
+      if ( pin ) {
+        if ( !pin.options.some( ( option ) => option.entry === fork.option.entry ) ) pin.options.push( fork.option );
+      } else pins.push( { lat: fork.lat , lon: fork.lon , options: [ fork.option ] } );
+    } );
+    pins.forEach( ( pin ) => pin.options.sort( ( a , b ) => a.entry.n - b.entry.n ) );
+    return pins.slice( 0 , this.FORK_MAX );
+  },
+
+  // The pins for the chosen route, and what each option there would change.
+  forkPins() {
+    const chosen = this.chosen();
+    if ( !chosen || !this.isForks() || this.lock || this.isLoop() ) return [];
+    const line = this.weave ? this.weave.coords : this.routeLine();
+    const pool = this.forkPool().filter( ( entry ) => this.weave || entry.n !== this.selected + 1 );
+    return this.forks( line , pool , chosen ).map( ( pin ) => ( {
+      lat: pin.lat , lon: pin.lon,
+      options: pin.options.map( ( option ) => ( {
+        label: Format.fill( "plan.fork_take" , { n: option.entry.n } ),
+        detail: this.forkDetail( option.seconds - chosen.seconds , option.main_seconds - chosen.main_seconds ),
+        preview: { runs: [ { coords: option.rest } ] },
+        pick: () => this.switchAt( option ),
+      } ) ),
+    } ) );
+  },
+
+  forkDetail( extra , main ) {
+    const time = Math.abs( extra ) < 30 ? I18n.get( "plan.fork_same_time" )
+      : Format.fill( extra > 0 ? "plan.fork_slower" : "plan.fork_faster" , { time: Format.duration( Math.abs( extra ) ) } );
+    if ( Math.abs( main ) < 30 ) return time;
+    return time + " · " + Format.fill( main > 0 ? "plan.fork_more_main" : "plan.fork_less_main" , { time: Format.duration( Math.abs( main ) ) } );
+  },
+
+  switchAt( option ) {
+    const pool = this.forkPool();
+    const trip = this.stops.filter( Boolean ).map( ( stop ) => ( { lat: stop.lat , lon: stop.lon } ) );
+    const weave = { id: this.newLockId() , coords: option.coords , seconds: Math.round( option.seconds ) , trip: trip , pool: pool };
+    RouteMap.map.closePopup();
+    RouteMap.highlight( null );
+    this.change( "undo.plan_weave" , ( state ) => { state.weave = weave; state.shape = []; state.lock = null; state.lockPending = null; } );
+  },
+
+  // The weave's routes drawn faint behind it, like the routes offered.
+  poolRoutes() {
+    if ( !this.weave ) return [];
+    return ( this.weave.pool || [] ).map( ( entry ) => ( { runs: [ { coords: entry.line } ] , compare: false , pool: true } ) );
   },
 
   resetShape() {
     this.picking = null;
-    if ( !this.shape.length && !this.lock && !this.lockPending ) {
+    if ( !this.shape.length && !this.lock && !this.lockPending && !this.weave ) {
       this.showHint();
       this.drawShaping();
       this.renderShapeTools();
@@ -1449,10 +1701,12 @@ const Planner = {
     lockButton.setAttribute( "aria-pressed" , picking ? "true" : "false" );
     Dom.text( lockButton.querySelector( "span" ) , I18n.get( picking ? "plan.lock_cancel" : "plan.lock_point" ) );
     lockButton.disabled = !this.chosen();
-    Dom.show( Dom.get( "plan-reset-shape" ) , this.shape.length > 0 || this.lock !== null || this.lockPending !== null );
+    Dom.show( Dom.get( "plan-reset-shape" ) , this.shape.length > 0 || this.lock !== null || this.lockPending !== null || this.weave !== null );
+    Dom.all( "input[name=plan-edit-mode]" ).forEach( ( radio ) => { radio.disabled = !this.chosen() || this.isLoop(); } );
     const parts = [];
     if ( this.shape.length ) parts.push( this.shape.length === 1 ? I18n.get( "plan.nudge_one" ) : Format.fill( "plan.nudge_count" , { n: this.shape.length } ) );
     if ( this.lock ) parts.push( I18n.get( "plan.nudge_locked" ) );
+    if ( this.weave ) parts.push( I18n.get( "plan.woven" ) );
     const status = Dom.get( "plan-shape-status" );
     Dom.text( status , parts.join( " · " ) );
     Dom.show( status , parts.length > 0 );
@@ -1655,6 +1909,7 @@ const Planner = {
             pick: { source: route.source , rank: route.rank || 0 },
             loop: loop,
             shape: this.shape.map( ( point ) => ( { lat: point.lat , lon: point.lon , leg: point.leg } ) ),
+            follow: this.weave ? { coords: this.weave.coords , seconds: this.weave.seconds , trip: this.weave.trip } : null,
             lock: this.lock ? {
               keep: { coords: this.lock.coords , seconds: this.lock.seconds , start: this.lock.start , end: this.lock.end , trip: this.lock.trip },
               middle: this.lock.middle,

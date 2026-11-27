@@ -2725,6 +2725,7 @@ The route through the waypoints that keeps time on main roads down: each minute 
 | `combine` | string | no | default `best` | Older than alternatives: best is 1 route, all is up to 36. Ignored when alternatives is given. |
 | `compare_fastest` | boolean | no | default `true` | Also plan the plain fastest route, for comparison. |
 | `csrf_token` | string | no |  | From GET /api/me. Browser sessions only. |
+| `follow` | [`Follow`](#follow) or null | no |  | Drive this exact line instead of planning one (no loop, keep or nudges); waypoints are ignored. |
 | `keep` | [`Keep`](#keep) or null | no |  | Lock a route's ends and plan only its middle again (not with a loop). |
 | `loop` | [`Loop`](#loop) or null | no |  | Plan a loop round a center instead of a trip through the waypoints. |
 | `penalty` | number | no | 1 to 100; default `8` | How many times over a minute on a main road counts. 1 is the plain fastest route. |
@@ -3247,6 +3248,14 @@ The shapes the routes above refer to by name.
 | `summary` | [`RouteSummary`](#routesummary) | no |  |  |
 | `waypoints` | array of [`Waypoint`](#waypoint) | yes |  |  |
 
+### Follow
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `coords` | array of array of number | yes |  | The line as [lat, lon] pairs, in driving order. |
+| `seconds` | number or null | no | at least 0 | Its time, from the routes it was made of; null times it at our own speeds. |
+| `trip` | array of [`Point`](#point) | no |  | The trip's own points, start to end: its stops, and the fastest route to compare with. |
+
 ### IPNames
 
 | Field | Type | Required | Limits | Description |
@@ -3576,6 +3585,7 @@ The shapes the routes above refer to by name.
 | `alternatives` | integer or null | no | 1 to 36 | How many routes to offer, best first: the best and up to this many less one alternatives on different roads. |
 | `backroads` | boolean | no | default `true` |  |
 | `combine` | string | no | default `best` | Older than alternatives: best is 1 route, all is up to 36. Ignored when alternatives is given. |
+| `follow` | [`Follow`](#follow) or null | no |  | Its line, when it was made by switching onto other routes at forks. |
 | `lock` | [`SavedLock`](#savedlock) or null | no |  | Its locked ends, if it was locked. |
 | `loop` | [`Loop`](#loop) or null | no |  | A loop round a center, planned in place of the waypoints. |
 | `penalty` | number | no | 1 to 100; default `8` | How many times over a minute on a main road counts. 1 is the plain fastest route. |

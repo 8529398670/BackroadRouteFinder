@@ -81,3 +81,29 @@ class ShapingTest(GridCase):
         whole, _ = match.measure(self.graph, coords, original.seconds, rating)
         self.assertLessEqual(before.seconds + after.seconds, whole.seconds)
         self.assertGreater(join(before, after).meters, 0)
+
+
+class FollowTest(ShapingTest):
+    """A line made by switching onto other routes at forks: driven as given."""
+
+    def body(self, coords, **extra) -> planner.PlanRoute:
+        trip = [planner.Point(lat=coords[0][0], lon=coords[0][1]), planner.Point(lat=coords[-1][0], lon=coords[-1][1])]
+        return planner.PlanRoute(follow=planner.Follow(coords=[list(p) for p in coords], trip=trip), compare_fastest=False, **extra)
+
+    def test_followed_line_is_kept_and_measured(self) -> None:
+        points = [node(0, 0), node(SIZE - 1, SIZE - 1)]
+        original = self.plan(points).routes[0].summary
+        coords = line_of(original)
+        result = planner._plan_followed(self.graph, self.body(coords), self.options, 200)
+        self.assertEqual(len(result.routes), 1)
+        followed = result.routes[0].summary
+        self.assertLess(near(line_of(followed), tuple(coords[len(coords) // 2])), 5)
+        self.assertAlmostEqual(followed.meters, original.meters, delta=max(25.0, original.meters * 0.01))
+        self.assertGreater(followed.seconds, 0)
+        self.assertEqual(len(result.snapped), 2)
+
+    def test_followed_line_refuses_nudges_and_loops(self) -> None:
+        coords = [list(node(0, 0)), list(node(0, 3))]
+        with self.assertRaises(Refused):
+            planner._plan_followed(self.graph, self.body(coords, shape=[planner.ShapePoint(lat=coords[0][0], lon=coords[0][1], leg=0)]),
+                                   self.options, 200)

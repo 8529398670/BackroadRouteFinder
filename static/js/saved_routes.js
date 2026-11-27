@@ -7,6 +7,111 @@ const SavedRoutes = {
     window.addEventListener( "nav" , ( event ) => {
       if ( event.detail.screen === "routes" ) this.refresh();
     } );
+    Dom.get( "routes-export" ).addEventListener( "click" , () => this.exportZip() );
+    const input = Dom.get( "routes-import-file" );
+    Dom.get( "routes-import" ).addEventListener( "click" , () => input.click() );
+    input.addEventListener( "change" , () => {
+      const file = input.files && input.files[ 0 ];
+      input.value = "";
+      if ( file ) this.importFile( file );
+    } );
+    await this.refresh();
+  },
+
+  // --- export and import as a zip ---------------------------------------------
+  //
+  // The zip: manifest.json (an account file holding only the saved routes,
+  // so loading it goes through POST /api/account/import, which skips routes
+  // already here), routes/<name>.json one per route, and with GPX ticked
+  // gpx/<name>.gpx, each route planned again for its line.
+
+  async exportZip() {
+    let withGpx = false;
+    const answer = await Dom.form( {
+      title: I18n.get( "routes.export_title" ),
+      save: ( values ) => { withGpx = Boolean( values.gpx ); },
+      submit: I18n.get( "routes.export" ),
+      fields: [ { name: "gpx" , type: "checkbox" , label: I18n.get( "routes.export_gpx" ) , value: false , help: I18n.get( "routes.export_gpx_help" ) } ],
+    } );
+    if ( answer === null ) return;
+    let data;
+    try {
+      data = await Api.request( "/api/account/export" );
+    } catch ( error ) {
+      Dom.toast( error.message , "error" );
+      return;
+    }
+    const routes = data.saved_routes || [];
+    if ( !routes.length ) {
+      Dom.toast( I18n.get( "routes.export_none" ) , "error" );
+      return;
+    }
+    const used = new Set();
+    const unique = ( name ) => {
+      const base = Export.fileName( name );
+      let pick = base;
+      for ( let n = 2 ; used.has( pick.toLowerCase() ) ; n++ ) pick = base + "-" + n;
+      used.add( pick.toLowerCase() );
+      return pick;
+    };
+    const day = new Date().toISOString().slice( 0 , 10 );
+    const files = [ { path: "manifest.json" , data: JSON.stringify( { format: data.format , exported_at: data.exported_at , saved_routes: routes } , null , 1 ) + "\n" } ];
+    const names = routes.map( ( route ) => unique( route.name ) );
+    routes.forEach( ( route , index ) => files.push( { path: "routes/" + names[ index ] + ".json" , data: JSON.stringify( route , null , 1 ) + "\n" } ) );
+    const failed = [];
+    if ( withGpx ) {
+      for ( let index = 0 ; index < routes.length ; index++ ) {
+        const route = routes[ index ];
+        Dom.toast( Format.fill( "routes.exporting" , { n: index + 1 , total: routes.length } ) , "ok" );
+        try {
+          const result = await Api.post( "/api/route" , Planner.bodyFor( route ) );
+          const choices = result.routes.filter( ( choice ) => !choice.compare );
+          const pick = route.options.pick;
+          const chosen = ( pick && choices.find( ( choice ) => choice.source === pick.source && ( choice.rank || 0 ) === pick.rank ) ) || choices[ 0 ];
+          if ( !chosen ) throw new Error( "no route" );
+          files.push( { path: "gpx/" + names[ index ] + ".gpx" , data: Export.gpx( route.name , route.waypoints , chosen ) } );
+        } catch ( error ) {
+          failed.push( route.name );
+        }
+      }
+    }
+    Dom.download( "backroad-routes-" + day + ".zip" , Zip.build( files ) , "application/zip" );
+    if ( failed.length ) Dom.toast( Format.fill( "routes.export_gpx_failed" , { names: failed.join( ", " ) } ) , "error" );
+    else Dom.toast( Format.fill( "routes.exported" , { n: routes.length } ) , "ok" );
+  },
+
+  // A zip from exportZip (or an account .json file): its routes merged in.
+  async importFile( file ) {
+    let data;
+    try {
+      if ( /\.json$/i.test( file.name ) ) {
+        data = JSON.parse( await file.text() );
+      } else {
+        const entries = await Zip.read( file );
+        const text = ( bytes ) => new TextDecoder().decode( bytes );
+        const manifest = Object.keys( entries ).find( ( path ) => /(^|\/)manifest\.json$/i.test( path ) );
+        if ( manifest ) data = JSON.parse( text( entries[ manifest ] ) );
+        else {
+          const routes = Object.keys( entries ).filter( ( path ) => /(^|\/)routes\/[^/]+\.json$/i.test( path ) ).sort()
+            .map( ( path ) => JSON.parse( text( entries[ path ] ) ) );
+          data = { format: "backroad-route-finder/1" , saved_routes: routes };
+        }
+      }
+    } catch ( _error ) {
+      Dom.toast( I18n.get( "routes.import_bad" ) , "error" );
+      return;
+    }
+    if ( !data || !Array.isArray( data.saved_routes ) ) {
+      Dom.toast( I18n.get( "routes.import_bad" ) , "error" );
+      return;
+    }
+    try {
+      // Only the routes: a whole account file loads from Settings.
+      const reply = await Api.post( "/api/account/import" , { data: { format: data.format , saved_routes: data.saved_routes } } );
+      Dom.toast( Format.fill( "routes.imported" , { added: reply.routes_added , skipped: reply.routes_skipped } ) , "ok" );
+    } catch ( error ) {
+      Dom.toast( error.message , "error" );
+    }
     await this.refresh();
   },
 

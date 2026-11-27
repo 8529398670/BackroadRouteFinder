@@ -12,7 +12,7 @@ from app.apidocs import Request as RequestType
 from app.core.security import actor_from
 from app.models import saved_routes, users
 from app.routes.helpers import DateTime, Page, Paged, Refused, cut_page, get_store
-from app.routes.planner import MAX_POINTS, MAX_SHAPE, MAX_WAYPOINTS, OURS, Alternatives, Keep, Point, ShapePoint, Combine, LegacySecondary, LegacyUnpaved, LoopSpec, Penalty, RoadFactors, RoadRules, Source
+from app.routes.planner import MAX_POINTS, MAX_SHAPE, MAX_WAYPOINTS, OURS, Alternatives, Keep, Point, ShapePoint, Combine, Follow, LegacySecondary, LegacyUnpaved, LoopSpec, Penalty, RoadFactors, RoadRules, Source
 from app.routing import costs
 
 RouteName = Annotated[str, Meta(min_length=1, max_length=saved_routes.NAME_MAX, extra={"error": f"name must be 1-{saved_routes.NAME_MAX} characters"})]
@@ -52,6 +52,7 @@ class RouteOptions(Reply):
     loop: Annotated[LoopSpec | None, Meta(description="A loop round a center, planned in place of the waypoints.")] = None
     shape: Annotated[list[ShapePoint], Meta(max_length=MAX_SHAPE, description="Its nudges (POST /api/route shape).")] = msgspec.field(default_factory=list)
     lock: Annotated[SavedLock | None, Meta(description="Its locked ends, if it was locked.")] = None
+    follow: Annotated[Follow | None, Meta(description="Its line, when it was made by switching onto other routes at forks.")] = None
     secondary_is_main: LegacySecondary = None
     allow_unpaved: LegacyUnpaved = None
 

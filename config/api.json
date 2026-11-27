@@ -478,6 +478,45 @@
         ],
         "type": "object"
       },
+      "Follow": {
+        "description": "A route drawn by hand from other routes (switching onto another route at a fork): the whole line is driven as given and only measured on our map, not planned.",
+        "properties": {
+          "coords": {
+            "description": "The line as [lat, lon] pairs, in driving order.",
+            "items": {
+              "items": {
+                "type": "number"
+              },
+              "maxItems": 2,
+              "minItems": 2,
+              "type": "array"
+            },
+            "maxItems": 20000,
+            "minItems": 2,
+            "type": "array"
+          },
+          "seconds": {
+            "description": "Its time, from the routes it was made of; null times it at our own speeds.",
+            "minimum": 0,
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "trip": {
+            "description": "The trip's own points, start to end: its stops, and the fastest route to compare with.",
+            "items": {
+              "$ref": "#/components/schemas/Point"
+            },
+            "maxItems": 25,
+            "type": "array"
+          }
+        },
+        "required": [
+          "coords"
+        ],
+        "type": "object"
+      },
       "IPNames": {
         "properties": {
           "names": {
@@ -1720,6 +1759,17 @@
             "description": "Older than alternatives: best is 1 route, all is up to 36. Ignored when alternatives is given.",
             "pattern": "^(best|all)$",
             "type": "string"
+          },
+          "follow": {
+            "description": "Its line, when it was made by switching onto other routes at forks.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Follow"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "lock": {
             "description": "Its locked ends, if it was locked.",
@@ -11713,6 +11763,17 @@
                   "csrf_token": {
                     "description": "From GET /api/me. Browser sessions only.",
                     "type": "string"
+                  },
+                  "follow": {
+                    "description": "Drive this exact line instead of planning one (no loop, keep or nudges); waypoints are ignored.",
+                    "oneOf": [
+                      {
+                        "$ref": "#/components/schemas/Follow"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   },
                   "keep": {
                     "description": "Lock a route's ends and plan only its middle again (not with a loop).",

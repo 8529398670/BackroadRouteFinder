@@ -276,6 +276,13 @@
                 <div id="plan-sources" class="d-flex flex-column gap-1 mb-2"></div>
               </div>
             </div>
+            <!-- What dragging the route does: nudge it, or switch onto another route at a fork (planner.js). -->
+            <div class="btn-group" role="group" data-i18n-attr="aria-label:plan.edit_mode_label">
+              <input type="radio" class="btn-check" name="plan-edit-mode" id="plan-mode-nudge" value="nudge" autocomplete="off" checked disabled />
+              <label class="btn btn-outline-secondary" for="plan-mode-nudge" data-i18n-attr="title:plan.mode_nudge_help"><i class="bi bi-arrows-move" aria-hidden="true"></i> <span data-i18n="plan.mode_nudge"></span></label>
+              <input type="radio" class="btn-check" name="plan-edit-mode" id="plan-mode-forks" value="forks" autocomplete="off" disabled />
+              <label class="btn btn-outline-secondary" for="plan-mode-forks" data-i18n-attr="title:plan.mode_forks_help"><i class="bi bi-signpost-split" aria-hidden="true"></i> <span data-i18n="plan.mode_forks"></span></label>
+            </div>
             <!-- Locking part of the route, and taking nudges and locks away (planner.js). -->
             <button id="plan-lock" type="button" class="btn btn-outline-secondary" aria-pressed="false" disabled><i class="bi bi-plus-lg" aria-hidden="true"></i> <span data-i18n="plan.lock_point"></span></button>
             <button id="plan-reset-shape" type="button" class="btn btn-outline-danger" hidden><i class="bi bi-x-circle" aria-hidden="true"></i> <span data-i18n="plan.reset_shape"></span></button>
@@ -398,6 +405,11 @@
           <h2 class="view-title" data-i18n="routes.heading"></h2>
           <section class="card">
             <div class="card-body">
+              <div class="d-flex flex-wrap gap-2 mb-3">
+                <button type="button" id="routes-export" class="btn btn-sm btn-outline-primary"><i class="bi bi-file-earmark-zip" aria-hidden="true"></i> <span data-i18n="routes.export"></span></button>
+                <button type="button" id="routes-import" class="btn btn-sm btn-outline-primary" data-write><i class="bi bi-upload" aria-hidden="true"></i> <span data-i18n="routes.import"></span></button>
+                <input type="file" id="routes-import-file" accept=".zip,application/zip,.json,application/json" hidden />
+              </div>
               <div class="table-responsive">
                 <table id="routes-table" class="table align-middle" data-empty="routes.empty">
                   <thead>
@@ -1362,6 +1374,7 @@
   <script src="/js/navigate.js"></script>
   <script src="/js/providers.js"></script>
   <script src="/js/mapdata.js"></script>
+  <script src="/js/zip.js"></script>
   <script src="/js/saved_routes.js"></script>
   <script src="/js/account_data.js"></script>
   <script src="/js/app.js"></script>

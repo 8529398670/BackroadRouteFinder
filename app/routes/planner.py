@@ -3,6 +3,7 @@ state, and each person's planner defaults. The router itself is app/routing/;
 this module only turns HTTP into calls to it and back."""
 from __future__ import annotations
 
+import time
 from typing import Annotated, ClassVar, Literal
 
 import msgspec
@@ -20,6 +21,7 @@ from app.routing import classes, costs, geocode, loop, match, router, sources, s
 from app.routing.graph import Holder
 from app.routing.providers import ENGINES, OURS
 from app.routing.search import NoRoute
+from app.routing.snap import Snap
 
 MAX_WAYPOINTS = 10
 # Nudges: shape points a route is pulled through, and every point a plan
@@ -177,6 +179,17 @@ class Keep(Reply):
     trip: Annotated[list[Point], Meta(max_length=MAX_POINTS, description="The trip's own points, start to end, for the fastest route to compare with.")] = msgspec.field(default_factory=list)
 
 
+class Follow(Reply):
+    api_name: ClassVar[str] = "Follow"
+    api_doc: ClassVar[str] = ("A route drawn by hand from other routes (switching onto another route at a fork): "
+                              "the whole line is driven as given and only measured on our map, not planned.")
+    coords: Annotated[list[Annotated[list[float], Meta(min_length=2, max_length=2)]], Meta(
+        min_length=2, max_length=MAX_KEEP_POINTS, description="The line as [lat, lon] pairs, in driving order.")]
+    seconds: Annotated[Annotated[float, Meta(ge=0)] | None, Meta(description="Its time, from the routes it was made of; null times it at our own speeds.")] = None
+    trip: Annotated[list[Point], Meta(max_length=MAX_POINTS, description="The trip's own points, start to end: its stops, "
+                                      "and the fastest route to compare with.")] = msgspec.field(default_factory=list)
+
+
 class PlanRoute(RequestType):
     waypoints: Annotated[list[Point], Meta(max_length=MAX_POINTS, description=f"Start, any stops, destination, in order (2-{MAX_WAYPOINTS}). "
                                            "With a loop: none, or the start alone for start=stop. With keep: the open middle's points, "
@@ -195,6 +208,8 @@ class PlanRoute(RequestType):
     shape: Annotated[list[ShapePoint], Meta(max_length=MAX_SHAPE, description=f"Nudges: points every route is pulled through (up to {MAX_SHAPE}).",
                                             extra={"error": f"at most {MAX_SHAPE} nudges"})] = msgspec.field(default_factory=list)
     keep: Annotated[Keep | None, Meta(description="Lock a route's ends and plan only its middle again (not with a loop).")] = None
+    follow: Annotated[Follow | None, Meta(description="Drive this exact line instead of planning one (no loop, keep or nudges); "
+                                          "waypoints are ignored.")] = None
 
 
 class Problem(Reply):
@@ -271,7 +286,9 @@ def plan_route(request: Request, body: PlanRoute) -> PlanRouteReply:
     ring: list = []
     shape_snaps = _snap_shape(graph, body.shape, max_snap, options)
     try:
-        if body.keep is not None:
+        if body.follow is not None:
+            result = _plan_followed(graph, body, options, max_snap)
+        elif body.keep is not None:
             result = _plan_kept(request, graph, body, options, picked, count, max_snap, shape_snaps)
         elif body.loop is not None:
             spec = body.loop
@@ -300,8 +317,11 @@ def plan_route(request: Request, body: PlanRoute) -> PlanRouteReply:
     nudges = {id(at) for _, at in shape_snaps}
     # The stops between start and end, for the steps: not on a loop's ring
     # (its points are only there to steer it) or a locked route's middle.
-    stops = [] if body.loop is not None or body.keep is not None else \
-        [(s.lat, s.lon) for s in result.snapped[1:-1] if id(s) not in nudges]
+    if body.follow is not None:
+        stops = [(p.lat, p.lon) for p in body.follow.trip[1:-1]]
+    else:
+        stops = [] if body.loop is not None or body.keep is not None else \
+            [(s.lat, s.lon) for s in result.snapped[1:-1] if id(s) not in nudges]
     routes = [
         PlannedRoute(
             kind=choice.kind,
@@ -383,6 +403,31 @@ def _plan_kept(request: Request, graph, body: PlanRoute, options: costs.Options,
             planned = fastest.routes[0]
             middle.routes.append(sources.Choice(OURS, "fastest", planned.summary, planned.summary.seconds, compare=True))
     return middle
+
+
+def _plan_followed(graph, body: PlanRoute, options: costs.Options, max_snap: float) -> sources.Plan:
+    """A line made by hand (switching onto other routes at forks): driven as
+    given, measured on our map like another engine's line."""
+    follow = body.follow
+    assert follow is not None
+    if body.loop is not None or body.keep is not None or body.shape:
+        raise Refused(400, "a followed line takes no loop, lock or nudges", field="follow")
+    began = time.monotonic()
+    coords = [(float(c[0]), float(c[1])) for c in follow.coords]
+    summary, off_map = match.measure(graph, coords, follow.seconds, costs.rating(graph, options))
+    out = sources.Plan()
+    out.routes.append(sources.Choice(OURS, "backroads", summary, sources.score(summary), off_map_meters=off_map))
+    out.snapped = [Snap(segment=-1, along=0.0, lat=p.lat, lon=p.lon, distance=0.0) for p in follow.trip]
+    if body.compare_fastest and options.penalty > 1 and len(follow.trip) >= 2:
+        try:
+            fastest = router.plan(graph, [(p.lat, p.lon) for p in follow.trip], options, True, max_snap, chosen=False)
+        except (router.PointOffNetwork, NoRoute):
+            fastest = None
+        if fastest is not None and fastest.routes:
+            planned = fastest.routes[0]
+            out.routes.append(sources.Choice(OURS, "fastest", planned.summary, planned.summary.seconds, compare=True))
+    out.milliseconds = int((time.monotonic() - began) * 1000)
+    return out
 
 
 # --- status ------------------------------------------------------------------

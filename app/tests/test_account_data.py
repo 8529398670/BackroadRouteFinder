@@ -35,6 +35,22 @@ class AccountDataTest(RoutesTestCase):
         self.assertEqual((reply["routes_added"], reply["routes_skipped"]), (0, 1))
         self.assertEqual(len(saved_routes.list_routes(self.store, self.user.id)), 1)
 
+    def test_routes_only_file_keeps_the_rest(self) -> None:
+        """The Saved routes zip's manifest: only routes (one followed by hand), nothing else touched."""
+        saved_routes.set_prefs(self.store, self.user.id, {"backroads": False, "penalty": 3.0})
+        follow = {"coords": [[40.0, -83.0], [40.05, -83.05], [40.1, -83.1]], "seconds": 700,
+                  "trip": [{"lat": 40.0, "lon": -83.0}, {"lat": 40.1, "lon": -83.1}]}
+        data = {"format": "backroad-route-finder/1", "saved_routes": [{
+            "name": "Woven", "waypoints": [{"lat": 40.0, "lon": -83.0, "label": "A"}, {"lat": 40.1, "lon": -83.1, "label": "B"}],
+            "options": {"backroads": True, "penalty": 8.0, "follow": follow},
+            "summary": {"seconds": 700, "meters": 9000, "main_seconds": 0, "main_meters": 0}}]}
+        status, reply = self.post(self.user_cookie, "/api/account/import", {"data": data})
+        self.assertEqual(status, 200, reply)
+        self.assertEqual((reply["routes_added"], reply["prefs_replaced"]), (1, False))
+        self.assertEqual(saved_routes.get_prefs(self.store, self.user.id)["penalty"], 3.0)
+        status, listed = self.call("GET", "/api/saved-routes", cookie=self.user_cookie)
+        self.assertEqual(listed["routes"][0]["options"]["follow"]["coords"], follow["coords"])
+
     def test_wrong_format(self) -> None:
         status, _ = self.post(self.user_cookie, "/api/account/import", {"data": {"format": "something-else"}})
         self.assertEqual(status, 400)

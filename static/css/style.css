@@ -819,6 +819,8 @@ body { padding-left: env(safe-area-inset-left); padding-right: env(safe-area-ins
 .plan-pin-shape:hover { background: var(--plan-main); border-color: #fff; box-shadow: 0 0 0 3px var(--plan-main), 0 1px 4px rgba(0, 0, 0, 0.45); cursor: pointer; }
 .plan-pin-shape:hover i { display: block; }
 .plan-pin-lock { background: var(--bs-secondary); font-size: 0.75rem; font-weight: 400; cursor: grab; }
+.plan-pin-fork { background: var(--bs-primary); font-size: 0.75rem; font-weight: 400; cursor: pointer; }
+.plan-fork-menu .btn small { opacity: 0.8; }
 .plan-stop-badge { min-width: 2.5rem; justify-content: center; font-weight: 700; color: #fff; border-color: transparent; }
 
 /* "Updating route…" over the map's top edge, so a change made from an open
