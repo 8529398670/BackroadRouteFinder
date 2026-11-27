@@ -819,13 +819,15 @@ body { padding-left: env(safe-area-inset-left); padding-right: env(safe-area-ins
 .plan-pin-lock { background: var(--bs-secondary); font-size: 0.75rem; font-weight: 400; cursor: grab; }
 .plan-stop-badge { min-width: 2.5rem; justify-content: center; font-weight: 700; color: #fff; border-color: transparent; }
 
-/* Place search results, under the stop's field. */
 /* "Updating route…" over the map's top edge, so a change made from an open
    dropdown visibly does something. */
 .plan-busy { position: absolute; top: 0.75rem; left: 50%; transform: translateX(-50%); z-index: 500;
   font-size: 0.85rem; font-weight: 500; padding: 0.45rem 0.85rem; display: inline-flex; align-items: center; gap: 0.5rem; }
 .plan-busy[hidden] { display: none; }
-.plan-search-menu { position: absolute; left: 0; right: 0; top: 100%; z-index: 1050; max-height: 16rem; overflow-y: auto; }
+/* Place search results and recent places, under the stop's field. In the
+   flow rather than over it, so the Where panel (which scrolls) grows to show
+   them instead of cutting them off. */
+.plan-search-menu { margin-top: 0.25rem; max-height: 16rem; overflow-y: auto; }
 
 /* The legend's color chips and the main-road share bar. */
 .plan-swatch { display: inline-block; width: 1.25rem; height: 0.3rem; border-radius: 0.15rem; vertical-align: middle; margin-right: 0.35rem; }

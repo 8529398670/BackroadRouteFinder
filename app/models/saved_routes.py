@@ -8,12 +8,14 @@ Deleting is soft: the record is marked and hidden, and its owner can restore
 it for RESTORE_WINDOW (the toast's Undo). After that it is removed for good
 the next time the owner's list is read.
 
-The planner defaults (backroads on or off, the penalty, the two toggles) live
+The planner defaults (backroads on or off, the penalty, the two toggles) and
+the recent places (the stop boxes' quick picks) live
 on the user's own record, the way keyboard shortcuts do, so they follow the
 person to every browser.
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any
@@ -172,3 +174,75 @@ def set_prefs(store: Store, user_id: int, prefs: dict[str, Any]) -> bool:
         record["planner"] = prefs
 
     return store.update_value(BUCKET_USERS, user_id, mutate) is not None
+
+
+# --- recent places, on the user's record --------------------------------------
+#
+# Places picked from search and the stops of saved or opened routes, newest
+# first, so the stop boxes can offer them before (and without) a search. A
+# place near one already kept (or with its name) takes that one's place.
+
+MAX_PLACES = 30
+PLACE_NAME_MAX = 200
+SAME_PLACE_M = 50.0
+
+
+def _apart_m(a: dict[str, Any], b: dict[str, Any]) -> float:
+    x = (b["lon"] - a["lon"]) * math.cos(math.radians((a["lat"] + b["lat"]) / 2))
+    return math.hypot(x, b["lat"] - a["lat"]) * 111195.0
+
+
+def get_places(store: Store, user_id: int) -> list[dict[str, Any]]:
+    record = store.get(BUCKET_USERS, user_id)
+    return [] if record is None else list(record.get("recent_places") or [])
+
+
+def merge_places(kept: list[dict[str, Any]], places: list[dict[str, Any]], now: str) -> list[dict[str, Any]]:
+    """kept with places put in front (the first of places first), each
+    replacing any kept one at the same spot or with the same name."""
+    out = list(kept)
+    for place in reversed(places):
+        name = str(place.get("name", "")).strip()[:PLACE_NAME_MAX]
+        if not name:
+            continue
+        item = {"name": name, "lat": float(place["lat"]), "lon": float(place["lon"]), "used_at": place.get("used_at") or now}
+        out = [old for old in out if old["name"].casefold() != name.casefold() and _apart_m(old, item) >= SAME_PLACE_M]
+        out.insert(0, item)
+    return out[:MAX_PLACES]
+
+
+def add_places(store: Store, user_id: int, places: list[dict[str, Any]]) -> list[dict[str, Any]] | None:
+    """None: no such user."""
+    now = to_iso(utc_now())
+    result: list[dict[str, Any]] = []
+
+    def mutate(record: Record) -> None:
+        nonlocal result
+        result = merge_places(list(record.get("recent_places") or []), places, now)
+        record["recent_places"] = result
+
+    return result if store.update_value(BUCKET_USERS, user_id, mutate) is not None else None
+
+
+def clear_places(store: Store, user_id: int) -> bool:
+    def mutate(record: Record) -> None:
+        record.pop("recent_places", None)
+
+    return store.update_value(BUCKET_USERS, user_id, mutate) is not None
+
+
+def import_places(store: Store, user_id: int, places: list[dict[str, Any]]) -> int:
+    """Places from an account file, behind the ones already kept (which win
+    where both have the same place). How many of the file's were added."""
+    now = to_iso(utc_now())
+    added = 0
+
+    def mutate(record: Record) -> None:
+        nonlocal added
+        current = list(record.get("recent_places") or [])
+        merged = merge_places(merge_places([], places, now), current, now)
+        added = len(merged) - len(merge_places([], current, now))
+        record["recent_places"] = merged
+
+    store.update_value(BUCKET_USERS, user_id, mutate)
+    return max(0, added)

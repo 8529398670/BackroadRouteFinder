@@ -1,7 +1,8 @@
 """Everything one person keeps here, as one JSON file they can download and
 load again: on another server, into another account, or back after a mistake.
 
-What it holds: their saved routes, their planner defaults, their keyboard
+What it holds: their saved routes, their planner defaults, their recent
+places, their keyboard
 shortcuts, their themes and their own routing engine API keys -- and in the
 owner's file, the shared keys and who may use them as well -- so moving to a
 new install needs no keys typed in again. That makes the file a secret: the
@@ -10,7 +11,8 @@ different thing and is unchanged.
 
 Loading merges rather than replaces where that is safe: a saved route that is
 already here (same name, points and options) is skipped, so loading the same
-file twice adds nothing; themes are added by id. Planner defaults and
+file twice adds nothing; themes are added by id, and recent places go behind
+the ones already here. Planner defaults and
 shortcuts are single settings, so the file's replace the current ones when it
 has them.
 """
@@ -32,7 +34,7 @@ from app.models.users import get_user
 from app.routes.helpers import Refused, get_config, get_store
 from app.core.logs import KIND_ADMIN
 from app.routes.logs import audit
-from app.routes.planner import PlannerPrefs, is_owner
+from app.routes.planner import PlannerPrefs, RecentPlace, is_owner
 from app.routes.providers import save_shared_key
 from app.routes.saved_routes import RouteName, RouteOptions, RouteSummary, Waypoint, _options
 from app.routing import costs
@@ -57,6 +59,7 @@ class AccountData(Reply):
     exported_at: str = ""
     saved_routes: Annotated[list[ExportedRoute], Meta(max_length=MAX_FILE_ROUTES)] = msgspec.field(default_factory=list)
     planner_prefs: Annotated[PlannerPrefs | None, Meta(description="Null: you had not set your own.")] = None
+    recent_places: Annotated[Annotated[list[RecentPlace], Meta(max_length=saved_routes.MAX_PLACES)] | None, Meta(description="Your recent places, newest first.")] = None
     shortcuts: Annotated[dict[str, str] | None, Meta(description="The keyboard shortcuts you changed.")] = None
     themes: Annotated[list[dict[str, Any]] | None, Meta(description="Your own themes; null while you follow the server's.")] = None
     theme_id: str = ""
@@ -81,7 +84,7 @@ def _clean_keys(keys: dict[str, str] | None) -> dict[str, str]:
 @route(
     "GET /api/account/export", summary="Download all your data",
     tag="Account",
-    description="Your saved routes, planner defaults, keyboard shortcuts, themes and routing engine API keys "
+    description="Your saved routes, planner defaults, recent places, keyboard shortcuts, themes and routing engine API keys "
     "(the owner's also has the shared keys), as one file to keep or load into another account. Keep it private.",
 )
 def export_account(request: Request, body: NoInput) -> AccountData:
@@ -108,6 +111,7 @@ def export_account(request: Request, body: NoInput) -> AccountData:
         exported_at=to_iso(utc_now()),
         saved_routes=routes,
         planner_prefs=prefs,
+        recent_places=[msgspec.convert(p, RecentPlace) for p in saved_routes.get_places(store, user.id)],
         shortcuts=dict(record.shortcuts) if record else {},
         themes=record.themes if record else None,
         theme_id=record.theme_id if record else "",
@@ -129,6 +133,7 @@ class ImportReply(Reply):
     themes_added: int
     api_keys_restored: int = 0
     shared_keys_restored: int = 0
+    places_added: int = 0
 
 
 def _route_key(name: str, waypoints: list[dict], options: dict) -> str:
@@ -208,6 +213,9 @@ def import_account(request: Request, body: ImportAccount) -> ImportReply:
     if data.planner_prefs is not None:
         saved_routes.set_prefs(store, user_id, msgspec.to_builtins(data.planner_prefs))
         prefs_replaced = True
+    places_added = 0
+    if data.recent_places:
+        places_added = saved_routes.import_places(store, user_id, [msgspec.to_builtins(p) for p in data.recent_places])
     shortcuts_replaced = False
     if data.shortcuts is not None:
         shortcuts.set_shortcuts(store, user_id, wanted_shortcuts)
@@ -226,4 +234,5 @@ def import_account(request: Request, body: ImportAccount) -> ImportReply:
               {"own": sorted(own_keys), "shared": sorted(shared_keys)})
     return ImportReply(routes_added=added, routes_skipped=skipped, prefs_replaced=prefs_replaced,
                        shortcuts_replaced=shortcuts_replaced, themes_added=themes_added,
-                       api_keys_restored=len(own_keys), shared_keys_restored=len(shared_keys))
+                       api_keys_restored=len(own_keys), shared_keys_restored=len(shared_keys),
+                       places_added=places_added)

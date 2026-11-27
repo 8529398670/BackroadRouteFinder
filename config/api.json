@@ -191,6 +191,21 @@
               }
             ]
           },
+          "recent_places": {
+            "description": "Your recent places, newest first.",
+            "oneOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/RecentPlace"
+                },
+                "maxItems": 30,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "saved_routes": {
             "items": {
               "$ref": "#/components/schemas/ExportedRoute"
@@ -1582,6 +1597,35 @@
         ],
         "type": "object"
       },
+      "RecentPlace": {
+        "properties": {
+          "lat": {
+            "maximum": 90,
+            "minimum": -90,
+            "type": "number"
+          },
+          "lon": {
+            "maximum": 180,
+            "minimum": -180,
+            "type": "number"
+          },
+          "name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "used_at": {
+            "description": "When it was last picked or saved (UTC, ISO 8601).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "lat",
+          "lon",
+          "name"
+        ],
+        "type": "object"
+      },
       "Revoked": {
         "properties": {
           "api_keys": {
@@ -2626,7 +2670,7 @@
   "paths": {
     "/api/account/export": {
       "get": {
-        "description": "Your saved routes, planner defaults, keyboard shortcuts, themes and routing engine API keys (the owner's also has the shared keys), as one file to keep or load into another account. Keep it private.",
+        "description": "Your saved routes, planner defaults, recent places, keyboard shortcuts, themes and routing engine API keys (the owner's also has the shared keys), as one file to keep or load into another account. Keep it private.",
         "operationId": "get_api_account_export",
         "responses": {
           "200": {
@@ -2698,6 +2742,9 @@
                 "schema": {
                   "properties": {
                     "api_keys_restored": {
+                      "type": "integer"
+                    },
+                    "places_added": {
                       "type": "integer"
                     },
                     "prefs_replaced": {
@@ -10697,6 +10744,214 @@
         "x-required-role": "owner"
       },
       "x-feature": "settings"
+    },
+    "/api/planner/places": {
+      "get": {
+        "description": "Places you picked from search and the stops of routes you saved or opened, newest first: the stop boxes offer them before a search.",
+        "operationId": "get_api_planner_places",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "places": {
+                      "description": "Newest first, at most 30.",
+                      "items": {
+                        "$ref": "#/components/schemas/RecentPlace"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "places"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "$ref": "#/components/responses/E503"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "Your recent places",
+        "tags": [
+          "Planner"
+        ]
+      },
+      "post": {
+        "description": "Put these places at the front of your recent places, the first one first. One near a place already kept (within 50 m) or with the same name takes its place; the oldest go past 30. used_at is set by the server.",
+        "operationId": "post_api_planner_places",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "csrf_token": {
+                    "description": "From GET /api/me. Browser sessions only.",
+                    "type": "string"
+                  },
+                  "places": {
+                    "items": {
+                      "$ref": "#/components/schemas/RecentPlace"
+                    },
+                    "maxItems": 10,
+                    "minItems": 1,
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "places"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "places": {
+                      "description": "Newest first, at most 30.",
+                      "items": {
+                        "$ref": "#/components/schemas/RecentPlace"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "places"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "$ref": "#/components/responses/E503"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "Remember recent places",
+        "tags": [
+          "Planner"
+        ]
+      }
+    },
+    "/api/planner/places/clear": {
+      "post": {
+        "description": "Clear the list of recent places.",
+        "operationId": "post_api_planner_places_clear",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "csrf_token": {
+                    "description": "From GET /api/me. Browser sessions only.",
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "places": {
+                      "description": "Newest first, at most 30.",
+                      "items": {
+                        "$ref": "#/components/schemas/RecentPlace"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "places"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "$ref": "#/components/responses/E503"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "Forget your recent places",
+        "tags": [
+          "Planner"
+        ]
+      }
     },
     "/api/planner/prefs": {
       "get": {

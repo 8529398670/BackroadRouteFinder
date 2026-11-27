@@ -322,7 +322,7 @@ providers:
 
   # OpenRouteService's address (it needs a key as well). Change it only for
   # a self-hosted one. [live]
-  ors_url: "https://api.openrouteservice.org"
+  ors_url: "https://api.heigit.org/openrouteservice"
 
   # GraphHopper's address. The hosted one needs a key; a self-hosted one
   # needs none. [live]

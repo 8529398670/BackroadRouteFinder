@@ -70,6 +70,14 @@ class AnswersTest(unittest.TestCase):
         self.assertEqual(asked.call_args.kwargs["headers"], {"Authorization": "k" * 20})
         self.assertEqual(asked.call_args.kwargs["body"]["options"]["avoid_features"], ["highways", "tollways"])
 
+    def test_openrouteservice_old_address(self) -> None:
+        # api.openrouteservice.org answers 410 now: it goes to api.heigit.org.
+        feature = {"geometry": {"coordinates": [[-120.2, 38.5], [-120.95, 40.7]]}, "properties": {"summary": {"duration": 1, "distance": 2}}}
+        _, asked = self.fetch(ors, {"features": [feature]}, url="https://api.openrouteservice.org/")
+        self.assertEqual(asked.call_args.args[0], "https://api.heigit.org/openrouteservice/v2/directions/driving-car/geojson")
+        _, asked = self.fetch(ors, {"features": [feature]}, url="https://ors.example.test/ors/")
+        self.assertEqual(asked.call_args.args[0], "https://ors.example.test/ors/v2/directions/driving-car/geojson")
+
     def test_graphhopper(self) -> None:
         path = {"points": {"coordinates": [[-120.2, 38.5], [-120.95, 40.7]]}, "time": 630000, "distance": 12200}
         found, asked = self.fetch(graphhopper, {"paths": [path]})

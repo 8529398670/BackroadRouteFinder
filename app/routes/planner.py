@@ -601,3 +601,61 @@ def set_prefs(request: Request, body: SetPrefs) -> PrefsReply:
     if not saved_routes.set_prefs(get_store(request), actor_from(request).user.id, stored):
         raise Refused.internal("planner prefs: the signed-in account has no record")
     return PrefsReply(prefs=prefs, saved=True)
+
+
+# --- recent places --------------------------------------------------------------
+
+class RecentPlace(Reply):
+    api_name: ClassVar[str] = "RecentPlace"
+    name: Annotated[str, Meta(min_length=1, max_length=saved_routes.PLACE_NAME_MAX, extra={"error": "a place needs a name of up to 200 characters"})]
+    lat: Annotated[float, Meta(ge=-90, le=90, extra={"error": "lat must be -90 to 90"})]
+    lon: Annotated[float, Meta(ge=-180, le=180, extra={"error": "lon must be -180 to 180"})]
+    used_at: Annotated[str, Meta(description="When it was last picked or saved (UTC, ISO 8601).")] = ""
+
+
+class RecentPlacesReply(Reply):
+    places: Annotated[list[RecentPlace], Meta(description=f"Newest first, at most {saved_routes.MAX_PLACES}.")]
+
+
+class AddPlaces(RequestType):
+    places: Annotated[list[RecentPlace], Meta(min_length=1, max_length=MAX_WAYPOINTS, extra={"error": f"send 1-{MAX_WAYPOINTS} places"})]
+
+
+def _places_reply(places: list[dict]) -> RecentPlacesReply:
+    return RecentPlacesReply(places=[msgspec.convert(p, RecentPlace) for p in places])
+
+
+@route(
+    "GET /api/planner/places", summary="Your recent places",
+    tag="Planner",
+    description="Places you picked from search and the stops of routes you saved or opened, newest first: "
+    "the stop boxes offer them before a search.",
+)
+def get_places(request: Request, body: NoInput) -> RecentPlacesReply:
+    return _places_reply(saved_routes.get_places(get_store(request), actor_from(request).user.id))
+
+
+@route(
+    "POST /api/planner/places", summary="Remember recent places",
+    tag="Planner",
+    description="Put these places at the front of your recent places, the first one first. One near a place "
+    f"already kept (within {int(saved_routes.SAME_PLACE_M)} m) or with the same name takes its place; the oldest "
+    f"go past {saved_routes.MAX_PLACES}. used_at is set by the server.",
+)
+def add_places(request: Request, body: AddPlaces) -> RecentPlacesReply:
+    places = [{"name": p.name, "lat": p.lat, "lon": p.lon} for p in body.places]
+    kept = saved_routes.add_places(get_store(request), actor_from(request).user.id, places)
+    if kept is None:
+        raise Refused.internal("recent places: the signed-in account has no record")
+    return _places_reply(kept)
+
+
+@route(
+    "POST /api/planner/places/clear", summary="Forget your recent places",
+    tag="Planner",
+    description="Clear the list of recent places.",
+)
+def clear_places(request: Request, body: NoInput) -> RecentPlacesReply:
+    if not saved_routes.clear_places(get_store(request), actor_from(request).user.id):
+        raise Refused.internal("recent places: the signed-in account has no record")
+    return RecentPlacesReply(places=[])

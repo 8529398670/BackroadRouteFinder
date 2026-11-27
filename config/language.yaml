@@ -94,6 +94,9 @@ plan:
   updated: "Route updated"
   unchanged: "Same route with these settings"
   search_off: "Place search is off. Click the map instead."
+  recent: "Recent places"
+  recent_clear: "Clear recent places"
+  recent_cleared: "Recent places cleared."
   pick_on_map: "Pick {stop} on the map"
   remove_stop: "Remove {stop}"
   map_point: "Point on map ({lat}, {lon})"
@@ -880,7 +883,7 @@ data:
   export: "Download my data"
   import: "Load from a file"
   not_json: "That file is not a data file from this app."
-  imported: "Loaded: {added} routes added, {skipped} already here, {themes} themes added, {keys} API keys restored."
+  imported: "Loaded: {added} routes added, {skipped} already here, {themes} themes added, {places} recent places added, {keys} API keys restored."
 
 settings:
   heading: "Server settings"

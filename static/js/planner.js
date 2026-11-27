@@ -21,7 +21,9 @@
 // after the second: from then on only the middle plans again (POST
 // /api/route keep), so nudges there leave the rest exactly as it was. A
 // padlock can be dragged along the route. Reset takes nudges and locks away.
-// Changing the stops themselves (adding, removing, reordering, the loop's
+// Reverse turns the stops, the nudges and the lock round together, so the
+// way back retraces the way there.
+// Changing the stops themselves (adding, removing, the loop's
 // settings, or any stop while locked) clears them, as one undoable step.
 const Planner = {
   stops: [ null , null ],
@@ -52,8 +54,14 @@ const Planner = {
   cache: new Map(),
   CACHE_SIZE: 20,
   cacheKey: null,
+  // Recent places (GET /api/planner/places), newest first: what the stop
+  // boxes offer before, and above, a search.
+  places: [],
   // A saved route's pick ({source, rank}), chosen once its plan comes back.
   pendingPick: null,
+  // After Reverse: { line , waypoints }, the old route turned round, to pick
+  // the alternative that retraces it once the reversed trip plans.
+  pendingReverse: null,
   ALTERNATIVES: [ 1 , 2 , 3 , 4 , 5 , 6 , 7 , 8 , 9 , 10 ],
   picking: null,
   turn: 0,
@@ -119,11 +127,13 @@ const Planner = {
       item.addEventListener( "click" , () => this.exportAs( item.dataset.export ) );
     } );
 
-    const [ status , prefs ] = await Promise.all( [
+    const [ status , prefs , places ] = await Promise.all( [
       Api.request( "/api/routing/status" ),
       Api.request( "/api/planner/prefs" ),
+      Api.request( "/api/planner/places" ).catch( () => ( { places: [] } ) ),
     ] );
     this.status = status;
+    this.places = places.places;
     this.options = this.copyOptions( this.fromPrefs( prefs.prefs ) );
     this.showStatus();
     RouteMap.showArea( status.bbox );
@@ -326,9 +336,62 @@ const Planner = {
     this.change( "undo.plan_stops" , ( state ) => { state.stops.splice( index , 1 ); this.unshape( state ); } );
   },
 
+  // The exact opposite: the stops, the nudges and the lock all turned round,
+  // and once it plans, the route that best retraces the one picked now.
   reverse() {
     if ( this.isLoop() ) return;
-    this.change( "undo.plan_stops" , ( state ) => { state.stops.reverse(); this.unshape( state ); } );
+    const line = this.routeLine().slice().reverse();
+    let waypoints = null;
+    this.change( "undo.plan_stops" , ( state ) => {
+      state.stops.reverse();
+      const lock = state.lock;
+      const legs = lock ? lock.middle.length - 1 : state.stops.filter( Boolean ).length - 1;
+      state.shape = state.shape.slice().reverse().map( ( point ) => Object.assign( {} , point , { leg: Math.max( 0 , legs - 1 - point.leg ) } ) );
+      if ( lock ) {
+        const last = lock.coords.length - 1;
+        state.lock = Object.assign( {} , lock , {
+          id: this.newLockId(),
+          coords: lock.coords.slice().reverse(),
+          start: last - lock.end,
+          end: last - lock.start,
+          middle: lock.middle.slice().reverse(),
+          trip: lock.trip.slice().reverse(),
+        } );
+      }
+      waypoints = state.lock ? state.lock.middle : state.stops.filter( Boolean );
+    } );
+    if ( line.length >= 2 && waypoints ) {
+      this.pendingReverse = { line: line , waypoints: this.waypointKey( waypoints ) };
+    }
+  },
+
+  waypointKey( points ) {
+    return JSON.stringify( points.map( ( point ) => [ point.lat , point.lon ] ) );
+  },
+
+  // Of the routes to choose between, the one whose line runs closest to line.
+  closestTo( choices , line ) {
+    const sample = ( points , count ) => {
+      const step = Math.max( 1 , Math.floor( points.length / count ) );
+      return points.filter( ( point , index ) => index % step === 0 );
+    };
+    const target = sample( line , 30 );
+    let best = 0;
+    let bestScore = Infinity;
+    choices.forEach( ( route , index ) => {
+      const points = [];
+      route.runs.forEach( ( run ) => points.push( ...run.coords ) );
+      const mine = sample( points , 300 );
+      if ( !mine.length ) return;
+      let total = 0;
+      target.forEach( ( point ) => {
+        let near = Infinity;
+        mine.forEach( ( other ) => { near = Math.min( near , this.metres( point[ 0 ] , point[ 1 ] , other[ 0 ] , other[ 1 ] ) ); } );
+        total += near;
+      } );
+      if ( total < bestScore ) { bestScore = total; best = index; }
+    } );
+    return best;
   },
 
   clear() {
@@ -374,6 +437,7 @@ const Planner = {
       state.lock = lock ? Object.assign( { id: this.newLockId() , middle: lock.middle } , lock.keep ) : null;
     } , null , true );
     this.pendingPick = saved.options.pick || null;
+    this.rememberPlaces( saved.waypoints );
     Nav.go( "/plan" );
   },
 
@@ -420,7 +484,8 @@ const Planner = {
     Dom.show( menu , false );
     // Say it is searching as soon as something is typed, not only once the
     // pause before the search has passed.
-    input.addEventListener( "input" , () => this.showSearching( input , menu ) );
+    input.addEventListener( "input" , () => this.showSearching( index , input , menu ) );
+    input.addEventListener( "focus" , () => { if ( input.value.trim() === "" ) this.showRecent( index , input , menu ); } );
     Dom.typed( input , () => this.search( index , input , menu ) , 400 );
     input.addEventListener( "keydown" , ( event ) => {
       if ( event.key === "Escape" ) Dom.show( menu , false );
@@ -462,10 +527,97 @@ const Planner = {
     } );
   },
 
-  showSearching( input , menu ) {
+  // --- recent places and search ----------------------------------------------
+
+  // Put places (stops, search picks) at the front of the recent list.
+  async rememberPlaces( places ) {
+    const named = places.filter( ( place ) => place && place.label ).slice( 0 , 10 )
+      .map( ( place ) => ( { name: place.label.slice( 0 , 200 ) , lat: place.lat , lon: place.lon } ) );
+    if ( !named.length ) return;
+    try {
+      this.places = ( await Api.post( "/api/planner/places" , { places: named } ) ).places;
+    } catch ( error ) {
+      // Only a convenience: a failure here leaves the list as it was.
+    }
+  },
+
+  async clearPlaces( menu ) {
+    Dom.show( menu , false );
+    try {
+      this.places = ( await Api.post( "/api/planner/places/clear" ) ).places;
+    } catch ( error ) {
+      App.showError( error.message );
+      return;
+    }
+    Dom.toast( I18n.get( "plan.recent_cleared" ) , "ok" );
+  },
+
+  // Recent places whose name holds query (all of them for "").
+  recentMatching( query ) {
+    const want = query.toLowerCase();
+    return this.places.filter( ( place ) => want === "" || place.name.toLowerCase().includes( want ) );
+  },
+
+  // One choice in a stop box's menu; picking it sets the stop and keeps it
+  // as recent.
+  placeRow( index , menu , place , recent ) {
+    const children = [];
+    if ( recent ) children.push( Dom.el( "i" , { class: "bi bi-clock-history text-body-secondary me-2" , attrs: { "aria-hidden": "true" } } ) );
+    children.push( Dom.el( "span" , { text: place.name } ) );
+    return Dom.el( "button" , {
+      class: "list-group-item list-group-item-action small",
+      attrs: { type: "button" , role: "option" },
+      children: children,
+      on: { click: () => {
+        Dom.show( menu , false );
+        const stop = { lat: place.lat , lon: place.lon , label: place.name };
+        this.setStop( index , stop , true );
+        this.rememberPlaces( [ stop ] );
+      } },
+    } );
+  },
+
+  recentRows( index , menu , places ) {
+    return places.map( ( place ) => this.placeRow( index , menu , place , true ) );
+  },
+
+  // An empty box: the recent places, and a way to clear them.
+  showRecent( index , input , menu ) {
+    if ( !this.places.length ) {
+      Dom.show( menu , false );
+      return;
+    }
+    Dom.swap( menu,
+      Dom.el( "div" , { class: "list-group-item small fw-semibold text-body-secondary" , text: I18n.get( "plan.recent" ) } ),
+      ...this.recentRows( index , menu , this.places ),
+      Dom.el( "button" , {
+        class: "list-group-item list-group-item-action small text-danger",
+        attrs: { type: "button" },
+        children: [
+          Dom.el( "i" , { class: "bi bi-trash me-2" , attrs: { "aria-hidden": "true" } } ),
+          Dom.el( "span" , { text: I18n.get( "plan.recent_clear" ) } ),
+        ],
+        on: { click: () => this.clearPlaces( menu ) },
+      } ),
+    );
+    Dom.show( menu , true );
+  },
+
+  // As it is typed: the recent places that match at once, then the search.
+  showSearching( index , input , menu ) {
     const query = input.value.trim();
-    if ( query.length < 2 || ( this.status && !this.status.place_search ) ) return;
-    Dom.swap( menu , Dom.el( "div" , { class: "list-group-item small text-body-secondary d-flex align-items-center gap-2" , children: [
+    if ( query === "" ) {
+      this.showRecent( index , input , menu );
+      return;
+    }
+    const recent = this.recentRows( index , menu , this.recentMatching( query ) );
+    const searching = query.length >= 2 && !( this.status && !this.status.place_search );
+    if ( !searching ) {
+      Dom.swap( menu , ...recent );
+      Dom.show( menu , recent.length > 0 );
+      return;
+    }
+    Dom.swap( menu , ...recent , Dom.el( "div" , { class: "list-group-item small text-body-secondary d-flex align-items-center gap-2" , children: [
       Dom.el( "span" , { class: "spinner-border spinner-border-sm text-primary" , attrs: { "aria-hidden": "true" } } ),
       Dom.el( "span" , { text: Format.fill( "plan.searching" , { query: query } ) } ),
     ] } ) );
@@ -474,12 +626,11 @@ const Planner = {
 
   async search( index , input , menu ) {
     const query = input.value.trim();
-    if ( query.length < 2 ) {
-      Dom.show( menu , false );
-      return;
-    }
+    if ( query.length < 2 ) return;
+    const recent = this.recentMatching( query );
     if ( this.status && !this.status.place_search ) {
-      Dom.swap( menu , Dom.el( "div" , { class: "list-group-item small text-body-secondary" , text: I18n.get( "plan.search_off" ) } ) );
+      Dom.swap( menu , ...this.recentRows( index , menu , recent ) ,
+        Dom.el( "div" , { class: "list-group-item small text-body-secondary" , text: I18n.get( "plan.search_off" ) } ) );
       Dom.show( menu , true );
       return;
     }
@@ -487,20 +638,18 @@ const Planner = {
     try {
       places = ( await Api.request( "/api/geocode?q=" + encodeURIComponent( query ) ) ).places;
     } catch ( error ) {
-      if ( input.value.trim() === query ) Dom.show( menu , false );
+      if ( input.value.trim() !== query ) return;
+      if ( recent.length ) Dom.swap( menu , ...this.recentRows( index , menu , recent ) );
+      else Dom.show( menu , false );
       App.showError( error.message );
       return;
     }
     if ( input.value.trim() !== query ) return;
-    const rows = places.length ? places.map( ( place ) => Dom.el( "button" , {
-      class: "list-group-item list-group-item-action small",
-      attrs: { type: "button" , role: "option" },
-      text: place.name,
-      on: { click: () => {
-        Dom.show( menu , false );
-        this.setStop( index , { lat: place.lat , lon: place.lon , label: place.name } , true );
-      } },
-    } ) ) : [ Dom.el( "div" , { class: "list-group-item small text-body-secondary" , text: I18n.get( "plan.search_none" ) } ) ];
+    // A search answer that is a recent place already listed is left out.
+    const fresh = places.filter( ( place ) => !recent.some( ( mine ) =>
+      mine.name === place.name || this.metres( mine.lat , mine.lon , place.lat , place.lon ) < 50 ) );
+    const rows = [ ...this.recentRows( index , menu , recent ) , ...fresh.map( ( place ) => this.placeRow( index , menu , place , false ) ) ];
+    if ( !rows.length ) rows.push( Dom.el( "div" , { class: "list-group-item small text-body-secondary" , text: I18n.get( "plan.search_none" ) } ) );
     Dom.swap( menu , ...rows );
     Dom.show( menu , true );
   },
@@ -804,10 +953,16 @@ const Planner = {
       if ( found >= 0 ) selected = found;
       this.pendingPick = null;
     }
+    const turned = this.pendingReverse;
+    if ( turned && turned.waypoints === this.waypointKey( body.waypoints ) ) {
+      selected = this.closestTo( result.routes.filter( ( route ) => !route.compare ) , turned.line );
+      this.cache.get( key ).selected = selected;
+    }
     this.show( key , result , selected , fit );
   },
 
   show( key , result , selected , fit ) {
+    this.pendingReverse = null;
     this.cacheKey = key;
     this.result = result;
     this.selected = selected;
@@ -1316,6 +1471,7 @@ const Planner = {
       },
     } );
     if ( answer === null || !made ) return;
+    this.rememberPlaces( stops );
     const id = made.id;
     Undo.record( {
       label: I18n.get( "undo.route_save" ),

@@ -70,7 +70,7 @@ An error reply is a JSON object whose `error` says what went wrong.
 
 Download all your data
 
-Your saved routes, planner defaults, keyboard shortcuts, themes and routing engine API keys (the owner's also has the shared keys), as one file to keep or load into another account. Keep it private.
+Your saved routes, planner defaults, recent places, keyboard shortcuts, themes and routing engine API keys (the owner's also has the shared keys), as one file to keep or load into another account. Keep it private.
 
 |  |  |
 |---|---|
@@ -104,6 +104,7 @@ Merge a file from GET /api/account/export into your account. Saved routes alread
 | Field | Type | Required | Limits | Description |
 |---|---|---|---|---|
 | `api_keys_restored` | integer | no |  |  |
+| `places_added` | integer | no |  |  |
 | `prefs_replaced` | boolean | yes |  |  |
 | `routes_added` | integer | yes |  |  |
 | `routes_skipped` | integer | yes |  |  |
@@ -2553,6 +2554,9 @@ Can the server do real work
 | Method | Path | Summary | Who may call |
 |---|---|---|---|
 | GET | [`/api/geocode`](#get-apigeocode) | Search for a place | browser session or API key, anyone signed in |
+| GET | [`/api/planner/places`](#get-apiplannerplaces) | Your recent places | browser session or API key, anyone signed in |
+| POST | [`/api/planner/places`](#post-apiplannerplaces) | Remember recent places | browser session or API key, anyone signed in |
+| POST | [`/api/planner/places/clear`](#post-apiplannerplacesclear) | Forget your recent places | browser session or API key, anyone signed in |
 | GET | [`/api/planner/prefs`](#get-apiplannerprefs) | Your planner defaults | browser session or API key, anyone signed in |
 | POST | [`/api/planner/prefs`](#post-apiplannerprefs) | Change your planner defaults | browser session or API key, anyone signed in |
 | POST | [`/api/route`](#post-apiroute) | Plan a route | browser session or API key, anyone signed in |
@@ -2580,6 +2584,70 @@ Addresses and places matching q, within the map's area, best first. Asked of rou
 | Field | Type | Required | Limits | Description |
 |---|---|---|---|---|
 | `places` | array of [`Place`](#place) | yes |  |  |
+
+### GET /api/planner/places
+
+Your recent places
+
+Places you picked from search and the stops of routes you saved or opened, newest first: the stop boxes offer them before a search.
+
+|  |  |
+|---|---|
+| Who may call | browser session or API key, anyone signed in |
+| Errors | 401, 429, 503 |
+
+**Reply 200**: Success
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `places` | array of [`RecentPlace`](#recentplace) | yes |  | Newest first, at most 30. |
+
+### POST /api/planner/places
+
+Remember recent places
+
+Put these places at the front of your recent places, the first one first. One near a place already kept (within 50 m) or with the same name takes its place; the oldest go past 30. used_at is set by the server.
+
+|  |  |
+|---|---|
+| Who may call | browser session or API key, anyone signed in |
+| Errors | 400, 401, 403, 429, 503 |
+
+**Request body**
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `csrf_token` | string | no |  | From GET /api/me. Browser sessions only. |
+| `places` | array of [`RecentPlace`](#recentplace) | yes |  |  |
+
+**Reply 200**: Success
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `places` | array of [`RecentPlace`](#recentplace) | yes |  | Newest first, at most 30. |
+
+### POST /api/planner/places/clear
+
+Forget your recent places
+
+Clear the list of recent places.
+
+|  |  |
+|---|---|
+| Who may call | browser session or API key, anyone signed in |
+| Errors | 400, 401, 403, 429, 503 |
+
+**Request body**
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `csrf_token` | string | no |  | From GET /api/me. Browser sessions only. |
+
+**Reply 200**: Success
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `places` | array of [`RecentPlace`](#recentplace) | yes |  | Newest first, at most 30. |
 
 ### GET /api/planner/prefs
 
@@ -3034,6 +3102,7 @@ The shapes the routes above refer to by name.
 | `exported_at` | string | no |  |  |
 | `format` | string | no | default `backroad-route-finder/1` | Always backroad-route-finder/1. |
 | `planner_prefs` | [`PlannerPrefs`](#plannerprefs) or null | no |  | Null: you had not set your own. |
+| `recent_places` | array of [`RecentPlace`](#recentplace) or null | no |  | Your recent places, newest first. |
 | `saved_routes` | array of [`ExportedRoute`](#exportedroute) | no |  |  |
 | `shared_api_keys` | map of string or null | no |  | The owner's file only: the shared keys. |
 | `shared_key_policy` | map of string or null | no |  | The owner's file only: engine id -> shared or own. |
@@ -3386,6 +3455,15 @@ The shapes the routes above refer to by name.
 | `bytes_before` | integer | yes |  |  |
 | `compressed` | integer | yes |  |  |
 | `deleted` | integer | yes |  |  |
+
+### RecentPlace
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `lat` | number | yes | -90 to 90 |  |
+| `lon` | number | yes | -180 to 180 |  |
+| `name` | string | yes | 1 to 200 characters |  |
+| `used_at` | string | no |  | When it was last picked or saved (UTC, ISO 8601). |
 
 ### Revoked
 
