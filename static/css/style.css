@@ -812,7 +812,7 @@ body { padding-left: env(safe-area-inset-left); padding-right: env(safe-area-ins
    leaves (small dots), and a locked route's padlocks. */
 .plan-pin-ghost { background: #fff; border: 3px solid var(--plan-back); cursor: grab; }
 .plan-pin-shape { background: #fff; border: 3px solid var(--plan-via); cursor: grab; }
-.plan-pin-lock { background: var(--bs-secondary); font-size: 0.75rem; font-weight: 400; }
+.plan-pin-lock { background: var(--bs-secondary); font-size: 0.75rem; font-weight: 400; cursor: grab; }
 .plan-stop-badge { min-width: 2.5rem; justify-content: center; font-weight: 700; color: #fff; border-color: transparent; }
 
 /* Place search results, under the stop's field. */

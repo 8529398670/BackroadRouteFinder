@@ -16,9 +16,11 @@
 //
 // The chosen route can be nudged: dragging its line adds a shape point (a
 // small dot, not a stop) that every route then passes through, on the leg it
-// was grabbed on. Lock part freezes the route before and after two points on
-// it: from then on only the middle plans again (POST /api/route keep), so
-// nudges there leave the rest exactly as it was. Reset takes both away.
+// was grabbed on. Lock point (in the toolbar) puts a padlock on the route
+// where it is clicked; the second one freezes the route before the first and
+// after the second: from then on only the middle plans again (POST
+// /api/route keep), so nudges there leave the rest exactly as it was. A
+// padlock can be dragged along the route. Reset takes nudges and locks away.
 // Changing the stops themselves (adding, removing, reordering, the loop's
 // settings, or any stop while locked) clears them, as one undoable step.
 const Planner = {
@@ -29,6 +31,8 @@ const Planner = {
   // A locked route: { id , coords , seconds , start , end , middle , trip }.
   // Never changed once made, so undo steps can share it.
   lock: null,
+  // The first lock point, [lat, lon] on the route, until the second is set.
+  lockPending: null,
   MAX_SHAPE: 12,
   options: {
     backroads: true , penalty: 8 , road_rules: {} , road_factors: {} , compare_fastest: true , sources: [ "ours" ] , combine: "best" , alternatives: 5,
@@ -52,7 +56,6 @@ const Planner = {
   pendingPick: null,
   ALTERNATIVES: [ 1 , 2 , 3 , 4 , 5 , 6 , 7 , 8 , 9 , 10 ],
   picking: null,
-  lockFrom: null,
   turn: 0,
   status: null,
   planTimer: null,
@@ -68,6 +71,13 @@ const Planner = {
         state.shape[ index ] = Object.assign( {} , state.shape[ index ] , { lat: lat , lon: lon } );
       } ),
       removeShape: ( index ) => this.change( "undo.plan_nudge" , ( state ) => { state.shape.splice( index , 1 ); } ),
+      moveLock: ( which , lat , lon ) => this.moveLock( which , lat , lon ),
+    } );
+    Dom.get( "plan-undo" ).addEventListener( "click" , () => Undo.undo() );
+    Dom.get( "plan-redo" ).addEventListener( "click" , () => Undo.redo() );
+    document.addEventListener( "undo-change" , () => this.renderHistory() );
+    document.addEventListener( "keydown" , ( event ) => {
+      if ( event.key === "Escape" && this.isLockPicking() ) this.startLock();
     } );
     window.addEventListener( "nav" , ( event ) => {
       if ( event.detail.screen === "plan" ) window.setTimeout( () => RouteMap.resize() , 0 );
@@ -189,7 +199,7 @@ const Planner = {
   snapshot() {
     return {
       stops: this.copyPoints( this.stops ) , loopPoints: this.copyPoints( this.loopPoints ) , options: this.copyOptions( this.options ),
-      shape: this.copyPoints( this.shape ) , lock: this.lock,
+      shape: this.copyPoints( this.shape ) , lock: this.lock , lockPending: this.lockPending,
     };
   },
 
@@ -199,6 +209,7 @@ const Planner = {
     this.options = this.copyOptions( state.options );
     this.shape = this.copyPoints( state.shape || [] );
     this.lock = state.lock || null;
+    this.lockPending = state.lockPending || null;
     this.picking = null;
     this.renderStops();
     this.renderOptions();
@@ -243,6 +254,7 @@ const Planner = {
   unshape( state ) {
     state.shape = [];
     state.lock = null;
+    state.lockPending = null;
   },
 
   setStop( index , stop , fit ) {
@@ -280,8 +292,11 @@ const Planner = {
   },
 
   onMapClick( lat , lon ) {
-    // Picking a lock point takes a click on the route itself (linePick).
-    if ( this.isLockPicking() ) return;
+    // Picking a lock point: a click anywhere takes the nearest point of the route.
+    if ( this.isLockPicking() ) {
+      this.linePick( lat , lon );
+      return;
+    }
     const points = this.points();
     let index = this.picking;
     if ( index === null || index >= points.length ) {
@@ -493,8 +508,8 @@ const Planner = {
   showHint() {
     let text;
     const points = this.loopPoints;
-    if ( this.picking === "lock-from" ) text = I18n.get( "plan.hint_lock_from" );
-    else if ( this.picking === "lock-to" ) text = I18n.get( "plan.hint_lock_to" );
+    if ( this.isLockPicking() ) text = I18n.get( this.lockPending ? "plan.hint_lock_to" : "plan.hint_lock_from" );
+    else if ( this.lockPending ) text = I18n.get( "plan.hint_lock_one" );
     else if ( this.picking !== null ) text = Format.fill( "plan.hint_pick" , { stop: this.stopName( this.picking ) } );
     else if ( this.lock ) text = I18n.get( "plan.hint_locked" );
     else if ( this.isLoop() ) {
@@ -710,6 +725,7 @@ const Planner = {
       this.showBusy( null );
       this.result = null;
       RouteMap.clearRoutes();
+      this.renderShapeTools();
       Dom.show( Dom.get( "plan-result" ) , false );
       if ( fit ) RouteMap.fitTo( [] , this.points() );
       return;
@@ -871,21 +887,22 @@ const Planner = {
       RouteMap.drawLocks( [] );
       return;
     }
-    const [ lo , hi ] = this.isLockPicking() ? [ 0 , line.length - 1 ] : this.editRange( line );
-    RouteMap.drawEdit( line.slice( lo , hi + 1 ) );
+    const picking = this.isLockPicking();
+    const [ lo , hi ] = picking ? [ 0 , line.length - 1 ] : this.editRange( line );
+    RouteMap.drawEdit( line.slice( lo , hi + 1 ) , !picking );
     // A nudge sits where it met the road, once a plan has put it there.
     const met = this.result ? ( this.result.snapped || [] ).filter( ( point , index ) => ( this.result.shape || [] )[ index ] ) : [];
     RouteMap.drawShape( met.length === this.shape.length ? met : this.shape );
     const locks = [];
     if ( this.lock ) locks.push( this.lock.coords[ this.lock.start ] , this.lock.coords[ this.lock.end ] );
-    if ( this.picking === "lock-to" && this.lockFrom !== null ) locks.push( line[ this.lockFrom ] );
+    if ( this.lockPending ) locks.push( this.lockPending );
     RouteMap.drawLocks( locks );
   },
 
   // --- nudging and locking ---------------------------------------------------
 
   isLockPicking() {
-    return this.picking === "lock-from" || this.picking === "lock-to";
+    return this.picking === "lock";
   },
 
   newLockId() {
@@ -973,31 +990,51 @@ const Planner = {
     this.change( "undo.plan_nudge" , ( state ) => { state.shape.splice( place , 0 , { lat: lat , lon: lon , leg: leg } ); } );
   },
 
+  // The toolbar's Lock point: wait for a click on the route (again to cancel).
   startLock() {
     if ( !this.chosen() ) return;
-    this.picking = this.isLockPicking() ? null : "lock-from";
-    this.lockFrom = null;
+    this.picking = this.isLockPicking() ? null : "lock";
     this.closeMenus();
     this.showHint();
     this.drawShaping();
     this.renderShapeTools();
   },
 
-  // A click on the route while picking the lock's two points. false: not
-  // picking, so the map treats it as a grab.
+  // A click on (or near) the route while placing a lock point. The first
+  // one waits for the second; the second locks. false: not placing one, so
+  // the map treats it as a grab.
   linePick( lat , lon ) {
     if ( !this.isLockPicking() ) return false;
     const line = this.routeLine();
+    if ( line.length < 2 ) return true;
     const vertex = this.nearest( line , lat , lon , 0 , line.length - 1 );
-    if ( this.picking === "lock-from" ) {
-      this.lockFrom = vertex;
-      this.picking = "lock-to";
+    if ( !this.lockPending ) {
+      this.change( "undo.plan_lock" , ( state ) => { state.lockPending = line[ vertex ].slice(); } );
+      // Still placing: the second point is next.
+      this.picking = "lock";
       this.showHint();
       this.drawShaping();
+      this.renderShapeTools();
       return true;
     }
-    this.makeLock( line , this.lockFrom , vertex );
+    const first = this.nearest( line , this.lockPending[ 0 ] , this.lockPending[ 1 ] , 0 , line.length - 1 );
+    this.makeLock( line , first , vertex );
     return true;
+  },
+
+  // A padlock dragged along the route: 0 and 1 the lock's ends, 2 the first
+  // point still waiting for its second.
+  moveLock( which , lat , lon ) {
+    const line = this.routeLine();
+    if ( line.length < 2 ) return;
+    const vertex = this.nearest( line , lat , lon , 0 , line.length - 1 );
+    if ( which === 2 || !this.lock ) {
+      this.change( "undo.plan_lock" , ( state ) => { state.lockPending = line[ vertex ].slice(); } );
+      return;
+    }
+    const other = this.lock.coords[ which === 0 ? this.lock.end : this.lock.start ];
+    const otherVertex = this.nearest( line , other[ 0 ] , other[ 1 ] , 0 , line.length - 1 , 1 );
+    if ( !this.makeLock( line , otherVertex , vertex ) ) this.draw();
   },
 
   makeLock( line , first , second ) {
@@ -1005,7 +1042,7 @@ const Planner = {
     const end = Math.max( first , second );
     if ( end - start < 2 ) {
       App.showError( I18n.get( "plan.lock_too_short" ) );
-      return;
+      return false;
     }
     const marks = this.marks( line , 0 );
     // The points the middle still has to pass: the plan's own (not nudges),
@@ -1042,12 +1079,18 @@ const Planner = {
       id: this.newLockId() , coords: line , seconds: this.chosen().seconds , start: start , end: end , middle: middle , trip: trip,
     };
     this.picking = null;
-    this.lockFrom = null;
-    this.change( "undo.plan_lock" , ( state ) => { state.lock = lock; state.shape = shape; } );
+    this.change( "undo.plan_lock" , ( state ) => { state.lock = lock; state.shape = shape; state.lockPending = null; } );
+    return true;
   },
 
   resetShape() {
-    if ( !this.shape.length && !this.lock ) return;
+    this.picking = null;
+    if ( !this.shape.length && !this.lock && !this.lockPending ) {
+      this.showHint();
+      this.drawShaping();
+      this.renderShapeTools();
+      return;
+    }
     this.change( "undo.plan_reset" , ( state ) => this.unshape( state ) );
   },
 
@@ -1056,12 +1099,21 @@ const Planner = {
     const picking = this.isLockPicking();
     lockButton.classList.toggle( "active" , picking );
     lockButton.setAttribute( "aria-pressed" , picking ? "true" : "false" );
-    Dom.text( lockButton.querySelector( "span" ) , I18n.get( picking ? "plan.lock_cancel" : "plan.lock_part" ) );
-    Dom.show( Dom.get( "plan-reset-shape" ) , this.shape.length > 0 || this.lock !== null );
+    Dom.text( lockButton.querySelector( "span" ) , I18n.get( picking ? "plan.lock_cancel" : "plan.lock_point" ) );
+    lockButton.disabled = !this.chosen();
+    Dom.show( Dom.get( "plan-reset-shape" ) , this.shape.length > 0 || this.lock !== null || this.lockPending !== null );
     const parts = [];
     if ( this.shape.length ) parts.push( this.shape.length === 1 ? I18n.get( "plan.nudge_one" ) : Format.fill( "plan.nudge_count" , { n: this.shape.length } ) );
     if ( this.lock ) parts.push( I18n.get( "plan.nudge_locked" ) );
-    Dom.text( Dom.get( "plan-shape-status" ) , parts.join( " · " ) );
+    const status = Dom.get( "plan-shape-status" );
+    Dom.text( status , parts.join( " · " ) );
+    Dom.show( status , parts.length > 0 );
+  },
+
+  // The toolbar's undo and redo arrows follow the history.
+  renderHistory() {
+    Dom.get( "plan-undo" ).disabled = !Undo.canUndo();
+    Dom.get( "plan-redo" ).disabled = !Undo.canRedo();
   },
 
   select( index ) {

@@ -186,17 +186,21 @@ const RouteMap = {
 
   // The part of the chosen route that can be grabbed, as [lat, lon] pairs
   // (null: none). A wide invisible line over it finds the nearest point.
-  drawEdit( coords ) {
+  // grab false (placing a lock point): no handle, so a click is only a click.
+  drawEdit( coords , grab ) {
     this.edit.clearLayers();
     this.editHit = null;
     this.hideGhost( true );
     if ( !coords || coords.length < 2 ) return;
     const hit = L.polyline( coords , { color: "#000000" , weight: 18 , opacity: 0 , interactive: true , bubblingMouseEvents: false } );
-    hit.on( "mousemove" , ( event ) => this.showGhost( event.latlng ) );
-    hit.on( "mouseout" , () => this.hideGhost( false ) );
+    this.editGrab = grab !== false;
+    if ( this.editGrab ) {
+      hit.on( "mousemove" , ( event ) => this.showGhost( event.latlng ) );
+      hit.on( "mouseout" , () => this.hideGhost( false ) );
+    }
     hit.on( "click" , ( event ) => {
       const at = this.onLine( event.latlng );
-      if ( !this.handlers.linePick( at.lat , at.lng ) ) this.showGhost( event.latlng );
+      if ( !this.handlers.linePick( at.lat , at.lng ) && this.editGrab ) this.showGhost( event.latlng );
     } );
     this.edit.addLayer( hit );
     this.editHit = hit;
@@ -269,20 +273,28 @@ const RouteMap = {
     } );
   },
 
-  // A locked route's ends (and the first one while the second is picked).
+  // A locked route's ends (and the first one while the second is picked):
+  // padlocks to drag along the route (handlers.moveLock with the index).
   drawLocks( points ) {
     this.locks.clearLayers();
-    points.forEach( ( point ) => {
-      this.locks.addLayer( L.marker( [ point[ 0 ] , point[ 1 ] ] , {
-        interactive: false,
-        keyboard: false,
+    points.forEach( ( point , index ) => {
+      const pin = L.marker( [ point[ 0 ] , point[ 1 ] ] , {
+        draggable: true,
+        keyboard: true,
+        title: I18n.get( "plan.lock_pin" ),
+        zIndexOffset: 500,
         icon: L.divIcon( {
           className: "plan-pin plan-pin-lock",
           html: "<i class=\"bi bi-lock-fill\" aria-hidden=\"true\"></i>",
           iconSize: [ 24 , 24 ],
           iconAnchor: [ 12 , 12 ],
         } ),
-      } ) );
+      } );
+      pin.on( "dragend" , () => {
+        const at = pin.getLatLng();
+        this.handlers.moveLock( points.length === 1 ? 2 : index , at.lat , at.lng );
+      } );
+      this.locks.addLayer( pin );
     } );
   },
 };

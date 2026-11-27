@@ -60,6 +60,7 @@ const Undo = {
     if ( action.merge && last && last.merge === action.merge && now - last.at < this.mergeWindow ) {
       last.redo = action.redo;
       last.at = now;
+      this.changed();
       return;
     }
     this.done.push( {
@@ -73,6 +74,7 @@ const Undo = {
       at: now,
     } );
     if ( this.done.length > this.limit ) this.done.shift();
+    this.changed();
     // Labels are written to follow "Undone:", so one opening a sentence gets
     // a capital: "Name changed · Undo".
     if ( action.toast && action.label ) this.offer( action.label.charAt( 0 ).toUpperCase() + action.label.slice( 1 ) , "undo" );
@@ -95,6 +97,7 @@ const Undo = {
   clear() {
     this.done = [];
     this.undone = [];
+    this.changed();
   },
 
   // A form calls this once it has saved: the field it was typed in lets go
@@ -140,6 +143,7 @@ const Undo = {
     } finally {
       this.replaying = false;
       this.busy = false;
+      this.changed();
     }
   },
 
@@ -160,9 +164,20 @@ const Undo = {
     return label ? prefix + " " + label : prefix;
   },
 
+  // Only a field that takes typed text counts: a checkbox, radio button,
+  // slider or select keeps focus after it is used, and Ctrl+Z there should
+  // still undo what it changed.
   typing( target ) {
     if ( !target || !target.closest ) return false;
-    return Boolean( target.closest( "input, textarea, select, [contenteditable]:not([contenteditable='false'])" ) );
+    const field = target.closest( "input, textarea, [contenteditable]:not([contenteditable='false'])" );
+    if ( !field ) return false;
+    if ( field.tagName !== "INPUT" ) return true;
+    return ![ "checkbox" , "radio" , "range" , "button" , "submit" , "reset" , "color" , "file" , "image" ].includes( ( field.type || "" ).toLowerCase() );
+  },
+
+  // Tells buttons that undo or redo (Undo.canUndo / canRedo) may have changed.
+  changed() {
+    document.dispatchEvent( new CustomEvent( "undo-change" ) );
   },
 
   // shortcuts.js runs undo and redo, with whatever keys each person chose, so
