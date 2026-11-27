@@ -1,14 +1,13 @@
-"""Reads an OpenStreetMap .pbf extract into flat arrays of the ways a car may
-drive on. Needs osmium (app/requirements-build.txt), so only `manage
-build-graph` imports this module.
+"""Reads an OpenStreetMap .pbf extract: the ways a car may drive on, handed a
+way at a time to the streaming build (build_stream.py), which writes them to
+disk. Needs osmium (app/requirements-build.txt), so only `manage build-graph`
+imports read_into.
 
-Everything goes into flat typed arrays rather than per-way Python objects: an
-extract the size of Ohio has around a million road ways and ten million node
-references, and a list of floats per way would need gigabytes.
+Ways is the same data held in memory, for tests and small hand-made maps
+(build_stream.build_from_ways).
 """
 from __future__ import annotations
 
-from array import array
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -83,137 +82,66 @@ def _unpaved(tags, highway: str) -> bool:
     return highway == "track"
 
 
-def read(pbf: Path, progress=print) -> Ways:
+def read_into(pbf: Path, writer, index_path: Path, progress=print) -> None:
+    """Appends the extract's drivable ways to writer (build_stream.WayWriter).
+    Node locations go through an osmium index on disk (index_path), so even a
+    large extract's billions of nodes stay out of memory; the index is
+    removed afterwards."""
     import osmium  # noqa: PLC0415  (build-time only)
 
-    refs, lat, lon = array("q"), array("d"), array("d")
-    starts = array("q", [0])
-    way_ids = array("q")
-    road_class, kmh, oneway, unpaved, name_id = array("B"), array("f"), array("b"), array("B"), array("i")
-    category, restricted = array("B"), array("B")
-    names: list[str] = [""]
-    name_index: dict[str, int] = {"": 0}
-
-    signals, stops = array("q"), array("q")
-
-    # Nodes and ways with a highway tag: the ways are the roads, the nodes the
-    # traffic signals and stop signs on them. Every node still passes through
-    # the location handler first, so the ways get their coordinates.
+    index_path.unlink(missing_ok=True)
     processor = (
         osmium.FileProcessor(str(pbf), osmium.osm.NODE | osmium.osm.WAY)
-        .with_locations()
+        .with_locations(f"sparse_file_array,{index_path}")
         .with_filter(osmium.filter.KeyFilter("highway"))
     )
-    seen = 0
-    for way in processor:
-        if way.is_node():
-            control = way.tags.get("highway", "")
-            if control == "traffic_signals":
-                signals.append(way.id)
-            elif control == "stop":
-                stops.append(way.id)
-            continue
-        seen += 1
-        if seen % 500_000 == 0:
-            progress(f"  read {seen:,} highway ways, kept {len(road_class):,}")
-        tags = way.tags
-        highway = tags.get("highway", "")
-        access = _access(tags, highway)
-        if access == "closed" or len(way.nodes) < 2:
-            continue
-        ok = True
-        way_refs, way_lat, way_lon = [], [], []
-        for node in way.nodes:
-            location = node.location
-            if not location.valid():
-                ok = False
-                break
-            way_refs.append(node.ref)
-            way_lat.append(location.lat)
-            way_lon.append(location.lon)
-        if not ok:
-            continue
-        refs.extend(way_refs)
-        lat.extend(way_lat)
-        lon.extend(way_lon)
-        starts.append(len(refs))
-        way_ids.append(way.id)
-        road_class.append(classes.CLASS_INDEX[highway])
-        kmh.append(classes.speed_kmh(highway, tags.get("maxspeed")))
-        oneway.append(_oneway(tags, highway))
-        unpaved.append(1 if _unpaved(tags, highway) else 0)
-        category.append(classes.CATEGORY_INDEX[classes.category_of(highway, tags.get("ref", ""))])
-        restricted.append(1 if access == "restricted" else 0)
-        name = tags.get("name", "")
-        ref = tags.get("ref", "").replace(";", ", ")
-        label = f"{name} ({ref})" if name and ref else name or ref
-        # Names are stored joined by newlines (build.py).
-        label = " ".join(label.split())
-        if label not in name_index:
-            name_index[label] = len(names)
-            names.append(label)
-        name_id.append(name_index[label])
-
-    progress(f"  read {seen:,} highway ways, kept {len(road_class):,} drivable, {len(refs):,} node references; "
-             f"{len(signals):,} traffic signals, {len(stops):,} stop signs")
-    return Ways(
-        refs=np.frombuffer(refs, dtype=np.int64).copy(),
-        lat=np.frombuffer(lat, dtype=np.float64).copy(),
-        lon=np.frombuffer(lon, dtype=np.float64).copy(),
-        starts=np.frombuffer(starts, dtype=np.int64).copy(),
-        road_class=np.frombuffer(road_class, dtype=np.uint8).copy(),
-        kmh=np.frombuffer(kmh, dtype=np.float32).copy(),
-        oneway=np.frombuffer(oneway, dtype=np.int8).copy(),
-        unpaved=np.frombuffer(unpaved, dtype=np.uint8).astype(bool),
-        category=np.frombuffer(category, dtype=np.uint8).copy(),
-        restricted=np.frombuffer(restricted, dtype=np.uint8).astype(bool),
-        name_id=np.frombuffer(name_id, dtype=np.int32).copy(),
-        names=names,
-        signals=np.frombuffer(signals, dtype=np.int64).copy(),
-        stops=np.frombuffer(stops, dtype=np.int64).copy(),
-        way_ids=np.frombuffer(way_ids, dtype=np.int64).copy(),
-    )
-
-
-def merge(parts: list[Ways], progress=print) -> Ways:
-    """Several extracts (neighbouring states) as one. Geofabrik's extracts keep
-    every way that crosses a border whole, in both states, so a way found in
-    more than one is kept once -- otherwise each of its nodes would look like an
-    intersection, and the road would be there twice."""
-    if len(parts) == 1:
-        return parts[0]
-    names: list[str] = [""]
-    name_index: dict[str, int] = {"": 0}
-    name_ids = []
-    for part in parts:
-        remap = np.empty(len(part.names), dtype=np.int32)
-        for i, label in enumerate(part.names):
-            if label not in name_index:
-                name_index[label] = len(names)
-                names.append(label)
-            remap[i] = name_index[label]
-        name_ids.append(remap[part.name_id])
-    way_ids = np.concatenate([p.way_ids for p in parts])
-    lengths = np.concatenate([np.diff(p.starts) for p in parts])
-    _, first = np.unique(way_ids, return_index=True)
-    keep = np.zeros(len(way_ids), dtype=bool)
-    keep[first] = True
-    at = np.repeat(keep, lengths)
-    progress(f"  merged {len(parts)} extracts: {len(way_ids):,} ways, {int((~keep).sum()):,} on a border kept once")
-    return Ways(
-        refs=np.concatenate([p.refs for p in parts])[at],
-        lat=np.concatenate([p.lat for p in parts])[at],
-        lon=np.concatenate([p.lon for p in parts])[at],
-        starts=np.concatenate(([0], np.cumsum(lengths[keep]))).astype(np.int64),
-        road_class=np.concatenate([p.road_class for p in parts])[keep],
-        kmh=np.concatenate([p.kmh for p in parts])[keep],
-        oneway=np.concatenate([p.oneway for p in parts])[keep],
-        unpaved=np.concatenate([p.unpaved for p in parts])[keep],
-        category=np.concatenate([p.category for p in parts])[keep],
-        restricted=np.concatenate([p.restricted for p in parts])[keep],
-        name_id=np.concatenate(name_ids)[keep],
-        names=names,
-        signals=np.unique(np.concatenate([p.signals for p in parts])),
-        stops=np.unique(np.concatenate([p.stops for p in parts])),
-        way_ids=way_ids[keep],
-    )
+    seen = kept = refs_total = signals = stops = 0
+    try:
+        for item in processor:
+            if item.is_node():
+                control = item.tags.get("highway", "")
+                if control == "traffic_signals":
+                    writer.control(item.id, "signal")
+                    signals += 1
+                elif control == "stop":
+                    writer.control(item.id, "stop")
+                    stops += 1
+                continue
+            seen += 1
+            if seen % 500_000 == 0:
+                progress(f"  read {seen:,} highway ways, kept {kept:,}")
+            tags = item.tags
+            highway = tags.get("highway", "")
+            access = _access(tags, highway)
+            if access == "closed" or len(item.nodes) < 2:
+                continue
+            way_refs, way_lat, way_lon = [], [], []
+            ok = True
+            for node in item.nodes:
+                location = node.location
+                if not location.valid():
+                    ok = False
+                    break
+                way_refs.append(node.ref)
+                way_lat.append(location.lat)
+                way_lon.append(location.lon)
+            if not ok:
+                continue
+            name = tags.get("name", "")
+            ref = tags.get("ref", "").replace(";", ", ")
+            label = " ".join((f"{name} ({ref})" if name and ref else name or ref).split())
+            writer.add(way_refs, way_lat, way_lon,
+                       road_class=classes.CLASS_INDEX[highway],
+                       kmh=classes.speed_kmh(highway, tags.get("maxspeed")),
+                       oneway=_oneway(tags, highway),
+                       unpaved=_unpaved(tags, highway),
+                       category=classes.CATEGORY_INDEX[classes.category_of(highway, tags.get("ref", ""))],
+                       restricted=access == "restricted",
+                       name=writer.name_id(label),
+                       way_id=item.id)
+            kept += 1
+            refs_total += len(way_refs)
+    finally:
+        index_path.unlink(missing_ok=True)
+    progress(f"  read {seen:,} highway ways, kept {kept:,} drivable, {refs_total:,} node references; "
+             f"{signals:,} traffic signals, {stops:,} stop signs")

@@ -4,9 +4,9 @@ with backroads off) and its alternatives.
 
 Every route is measured on our map the same way (match.py for the others), and
 scored the way our own router scores a route: its time, plus each minute on a
-main road counted penalty times over. With combine="best" only the lowest
-score is kept; with "all" every route comes back, best first, so the person
-can look at them side by side. Near-copies (two engines finding the same
+main road counted penalty times over. With a count of 1 only the lowest
+score is kept; with more, that many come back, best first, so the person
+can look at them side by side and pick one. Near-copies (two engines finding the same
 roads) are kept once.
 
 The other engines are asked in parallel while our own router runs, and an
@@ -94,11 +94,12 @@ def _same(a: Summary, b: Summary) -> bool:
     return abs(a.meters - b.meters) <= max(150.0, 0.004 * a.meters) and abs(a.main_meters - b.main_meters) <= max(150.0, 0.01 * a.meters)
 
 
-def plan(graph: Graph, points: list[tuple[float, float]], options: costs.Options, sources: list[str], combine: str,
+def plan(graph: Graph, points: list[tuple[float, float]], options: costs.Options, sources: list[str], count: int,
          compare_fastest: bool, max_snap_m: float, access: Access, snapped: list[Snap] | None = None,
          reuse_factor: float = 1.0) -> Plan:
-    """snapped: the points already on the road (a loop's ring), else snapped
-    here. reuse_factor: see router.plan."""
+    """count: how many routes to keep, best first (our router plans that many
+    alternatives itself). snapped: the points already on the road (a loop's
+    ring), else snapped here. reuse_factor: see router.plan."""
     import time
 
     began = time.monotonic()
@@ -128,17 +129,17 @@ def plan(graph: Graph, points: list[tuple[float, float]], options: costs.Options
     if use_ours or (compare_fastest and backroads):
         try:
             ours = router.plan(graph, points, options, compare_fastest, max_snap_m, chosen=use_ours, snapped=snapped,
-                               reuse_factor=reuse_factor)
+                               reuse_factor=reuse_factor, alternatives=count if use_ours else 1)
         except NoRoute as error:
             if not asked:
                 raise
             out.problems.append(Problem(OURS, str(error)))
         else:
             for planned in ours.routes:
-                if use_ours and planned.kind == kind and not choices:
-                    choices.append(Choice(OURS, kind, planned.summary, score(planned.summary, options.penalty)))
-                else:
+                if planned.compare:
                     fastest = Choice(OURS, "fastest", planned.summary, planned.summary.seconds, compare=True)
+                else:
+                    choices.append(Choice(OURS, kind, planned.summary, score(planned.summary, options.penalty), rank=planned.rank))
 
     rating = costs.rating(graph, options) if asked else None
     for source, future in asked.items():
@@ -173,7 +174,7 @@ def plan(graph: Graph, points: list[tuple[float, float]], options: costs.Options
                 twin.also.append(choice.source)
             continue
         kept.append(choice)
-    out.routes = kept[:1] if combine == "best" else kept[:MAX_ROUTES]
+    out.routes = kept[:max(1, min(count, MAX_ROUTES))]
     if fastest is not None:
         out.routes.append(fastest)
     out.milliseconds = int((time.monotonic() - began) * 1000)

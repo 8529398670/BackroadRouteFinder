@@ -47,7 +47,7 @@ nav:
   map_data: "Map data"
   settings: "Server settings"
 
-# The route planner (static/js/planner.js, map.js, gpx.js).
+# The route planner (static/js/planner.js, map.js, export.js).
 plan:
   heading: "Plan a route"
   map_label: "Map. Click to set the start, then the destination."
@@ -152,9 +152,8 @@ plan:
   source_ours: "Our map"
   source_unusable_owner: "Add a key in Settings"
   source_unusable: "Not set up"
-  combine_label: "With more than one source"
-  combine_best: "Use the best route"
-  combine_all: "Show every route"
+  alternatives_label: "Routes to offer"
+  choice_name: "Route {n} · {source}"
   sources_need_one: "Pick at least one source."
   # A route from another engine: its time is its own, the main-road share is measured on our map.
   estimated: "Time from {source}. Main-road share measured on our map."
@@ -198,7 +197,23 @@ plan:
   save_name: "Name"
   save_name_default: "{from} to {to}"
   saved: "Route saved."
-  gpx: "Export GPX"
+  export: "Export"
+  export_gpx: "GPX track"
+  export_gpx_hint: "Phones, most GPS apps; follows the line exactly"
+  export_gpx_route: "GPX route"
+  export_gpx_route_hint: "Garmin and TomTom units that want a route (shaping point each km)"
+  export_tcx: "Garmin course (TCX)"
+  export_tcx_hint: "Garmin Connect, Garmin devices"
+  export_itn: "TomTom itinerary (ITN)"
+  export_itn_hint: "TomTom units and MyDrive"
+  export_kml: "KML"
+  export_kml_hint: "Google Earth, Google My Maps"
+  export_geojson: "GeoJSON"
+  export_geojson_hint: "GIS tools and web maps"
+  export_csv: "CSV"
+  export_csv_hint: "Spreadsheets: lat, lon, km"
+  export_google: "Open in Google Maps"
+  export_google_hint: "Up to 9 points along the way; Google plans between them"
   gpx_name: "Backroad route"
   # Units. The app shows miles; {n} is a number.
   miles: "{n} mi"
@@ -837,6 +852,15 @@ jobs:
 my_settings:
   heading: "Settings"
 
+# The "Your data" card on the Settings screen (static/js/account_data.js).
+data:
+  heading: "Your data"
+  description: "Download your saved routes, planner defaults, keyboard shortcuts and themes as one file, or load such a file here (into this or another account). API keys are not in the file. Loading adds routes you do not have yet; defaults and shortcuts in the file replace yours."
+  export: "Download my data"
+  import: "Load from a file"
+  not_json: "That file is not a data file from this app."
+  imported: "Loaded: {added} routes added, {skipped} already here, {themes} themes added."
+
 settings:
   heading: "Server settings"
   # The routing engines card on the Settings screen (static/js/providers.js).
@@ -1000,14 +1024,13 @@ mapdata:
   downloaded: "Downloaded"
   summary_none: "Nothing ticked."
   summary: "{count} area(s), {size} of extracts; {fetch} still to download."
-  warn_memory: "Building this map needs about {need} of memory, and this server may use {have}. It may fail or be very slow: pick fewer states, or raise docker.memory in Server settings (Docker)."
   warn_disk: "Only {free} of disk space is free here, which may not be enough."
   no_osmium: "Building needs osmium, which is not installed on this server. Run: .venv/bin/pip install -r app/requirements-build.txt (the Docker image already has it). Downloading still works."
   activate_after: "Use it when built"
   download: "Download"
   build: "Build map"
   confirm_fresh: "Every ticked state is already downloaded. Download fresh copies?"
-  confirm_us: "The whole US is about 11 GB to download, and building it needs tens of GB of memory and a long time. Go ahead?"
+  confirm_us: "The whole US is about 11 GB to download, and building it takes hours and about 60 GB of free disk while it runs (the map itself is about 15 GB). Memory stays within routing.build_memory_mb. Go ahead?"
   graphs_heading: "Built maps"
   graphs_empty: "No maps built yet."
   extracts_heading: "Downloaded extracts"

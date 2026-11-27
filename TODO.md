@@ -1,12 +1,10 @@
 # TODO
 
 ## Expand from Ohio to the whole USA
-- The graph build is currently in-memory Python: Ohio (330 MB extract, 8.8 M node refs) peaks around 1.1 GB and takes about a minute. The US extract (~10 GB) would need tens of GB that way. Options:
-  - stream the build: two passes with osmium (count node uses first, then cut ways), writing arrays to disk with `numpy.memmap` instead of holding them;
-  - per-state graphs (one `routing.region` each) joined at the borders, routing a trip across the states it touches;
-  - or move to one of the engines below once the map is that big.
-- Search time grows with the graph: a whole-graph Dijkstra on the turn graph is ~0.9 s for Ohio, and would be ~30x for the US. It needs a bounded search (A* with a straight-line heuristic, or bidirectional) before then.
-- Raise `docker.memory`, and give place search the new area (it already uses the graph's bounding box).
+Done: maps live on disk (memory-mapped, searched in a corridor per route) and build in bounded memory (`routing.build_memory_mb`), so the US fits a 4 GB machine. Next:
+- Build the whole US once on the target machine and time it (Ohio: 2½ min at 512 MB; expect hours for the US, and about 60 GB free disk while it runs).
+- Long trips: a cross-country corridor reads millions of roads. A coarse first pass on main roads only (or contraction of the backroads between junctions) would bound it.
+- Give place search the new area (it already uses the graph's bounding box).
 
 ## Other routing engines
 Done: Valhalla, OSRM, OpenRouteService, GraphHopper, TomTom, HERE, Mapbox and Google can be asked beside our own router (app/routing/providers/), each route measured on our map and scored the same way. Next:
@@ -28,7 +26,7 @@ Done: Valhalla, OSRM, OpenRouteService, GraphHopper, TomTom, HERE, Mapbox and Go
   - mapped turn restrictions (OSM `type=restriction` relations: no_left_turn, only_straight_on, ...), which the edge-based graph can now forbid;
   - tune the seconds against real drives (record a few GPS traces, compare);
   - only ~28k stop signs are mapped in Ohio, so most stops are inferred from which road is bigger; 4-way stops between equal roads get 2 s of "caution" only.
-- Speed: a whole-graph Dijkstra on the turn graph is ~0.9 s on the Mac and ~1 s in Docker per route (two with the comparison). A bounded search (A*, or a `limit` from the straight-line distance) would cut short trips to milliseconds.
+- Speed: a route reads its corridor's roads from disk and searches them (0.3–4 s across Ohio). A* or a bidirectional search inside the corridor would cut that.
 - Snap a start/destination to the road it is on, not the nearest one, when a point sits between two parallel roads (driveway-aware).
 - Scenic or "curvy" scoring: prefer winding roads, rivers, forests (sinuosity from the geometry, landuse from OSM).
 - Turn-by-turn directions from the pieces (the "via" list is a start).

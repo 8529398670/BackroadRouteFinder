@@ -275,8 +275,8 @@ const Dom = {
   },
 
   // Saves text as a file, for what is better kept than copied.
-  download( name , text ) {
-    const url = URL.createObjectURL( new Blob( [ text ] , { type: "text/plain" } ) );
+  download( name , text , type ) {
+    const url = URL.createObjectURL( new Blob( [ text ] , { type: type || "text/plain" } ) );
     const link = this.el( "a" , { attrs: { href: url , download: name } } );
     document.body.appendChild( link );
     link.click();

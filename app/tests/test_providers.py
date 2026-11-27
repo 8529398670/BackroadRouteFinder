@@ -259,14 +259,26 @@ class MapDataTest(unittest.TestCase):
                 name_id=np.arange(1, len(ids) + 1, dtype=np.int32), names=[""] + names,
                 signals=np.array([1], dtype=np.int64), stops=np.array([], dtype=np.int64), way_ids=np.array(ids, dtype=np.int64))
 
+        import tempfile
+        from pathlib import Path
+
+        from app.routing import build_stream
+        from app.routing.disk import ArrayDir
+
         a = ways([10, 11], ["A St", "Border Rd"], [[1, 2], [2, 3, 4]])
         b = ways([11, 12], ["Border Rd", "B Ave"], [[2, 3, 4], [4, 5]])
-        merged = osm_parse.merge([a, b], progress=lambda _line: None)
-        self.assertEqual(list(merged.way_ids), [10, 11, 12])
-        self.assertEqual(list(merged.refs), [1, 2, 2, 3, 4, 4, 5])
-        self.assertEqual(list(merged.starts), [0, 2, 5, 7])
-        self.assertEqual([merged.names[i] for i in merged.name_id], ["A St", "Border Rd", "B Ave"])
-        self.assertEqual(list(merged.signals), [1])
+        with tempfile.TemporaryDirectory() as folder:
+            work = ArrayDir(Path(folder))
+            writer = build_stream.WayWriter(work)
+            writer.add_ways(a)
+            writer.add_ways(b)
+            names = writer.close()
+            build_stream._dedupe(work, build_stream.Budget(64 << 20), lambda _line: None)
+            self.assertEqual(list(work.open("way_id")), [10, 11, 12])
+            self.assertEqual(list(work.open("pos_ref")), [1, 2, 2, 3, 4, 4, 5])
+            self.assertEqual(list(work.open("way_len")), [2, 3, 2])
+            self.assertEqual([names[i] for i in work.open("way_name")], ["A St", "Border Rd", "B Ave"])
+            self.assertEqual(list(work.open("signal_ids")), [1, 1])
 
 
 if __name__ == "__main__":

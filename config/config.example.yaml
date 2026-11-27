@@ -240,7 +240,7 @@ logs:
 # Both files live in <app dir>/mapdata/, outside storage/, so backups stay
 # small: they can always be downloaded and built again.
 routing:
-  # Names the map files: mapdata/<region>.osm.pbf and mapdata/<region>.npz.
+  # Names the map files: mapdata/<region>.osm.pbf and mapdata/<region>.graph/.
   # Lowercase letters, digits and dashes. [restart]
   region: ohio
 
@@ -283,6 +283,16 @@ routing:
   # How many times over a road a loop already drove counts on the rest of
   # it: 1 lets it double back, 3 makes it come back another way. 1-10. [live]
   loop_reuse: 3
+
+  # How many routes the planner offers to choose between, best first, for
+  # anyone who has not picked their own: the best and up to this many less
+  # one alternatives on different roads. 1-10. [live]
+  alternatives: 5
+
+  # How much memory building a map may use at once, in MB: the build works a
+  # chunk of this size at a time, with the rest on disk, so the whole country
+  # builds on a small machine (more is faster). 128-65536. [live]
+  build_memory_mb: 512
 
   # How far a clicked or searched point may be from a road and still be
   # used, in metres. 50-20000. [live]
@@ -340,7 +350,7 @@ docker:
   restart: unless-stopped          # no | always | unless-stopped | on-failure[:N]
 
   # Blast-radius limits. Raise them deliberately for real load.
-  memory: 4g                       # one state's graph ~1.7 GB; building or switching maps holds more
+  memory: 1g                       # maps are read from disk; building works within routing.build_memory_mb
   cpus: "1"
   pids_limit: 128
   tmpfs_size: 16m                  # the only writable path besides data_dir

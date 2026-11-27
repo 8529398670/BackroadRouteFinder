@@ -90,7 +90,7 @@ const RouteMap = {
 
   // routes as the API answers them; the first is the one to follow, the
   // second (fastest, for comparison) is drawn faint and dashed underneath.
-  drawRoutes( routes ) {
+  drawRoutes( routes , onPick ) {
     const layers = [];
     const styles = getComputedStyle( document.documentElement );
     const back = styles.getPropertyValue( "--plan-back" ).trim() || "#198754";
@@ -98,7 +98,16 @@ const RouteMap = {
     const fastest = styles.getPropertyValue( "--plan-fastest" ).trim() || "#6c757d";
     routes.slice( 1 ).forEach( ( route ) => {
       route.runs.forEach( ( run ) => {
-        layers.push( L.polyline( run.coords , { color: fastest , weight: 4 , opacity: 0.6 , dashArray: "6 8" , interactive: false } ) );
+        const line = L.polyline( run.coords , { color: fastest , weight: 4 , opacity: 0.6 , dashArray: "6 8" , interactive: false } );
+        layers.push( line );
+        // A wide invisible line over each other route, to click it.
+        if ( onPick && !route.compare ) {
+          const hit = L.polyline( run.coords , { color: "#000000" , weight: 16 , opacity: 0 , interactive: true , bubblingMouseEvents: false } );
+          hit.on( "click" , () => onPick( route ) );
+          hit.on( "mouseover" , () => this.highlight( route ) );
+          hit.on( "mouseout" , () => this.highlight( null ) );
+          layers.push( hit );
+        }
       } );
     } );
     if ( routes.length ) {
@@ -111,7 +120,20 @@ const RouteMap = {
     }
     this.lines.clearLayers();
     this.ring.clearLayers();
+    if ( this.glow ) this.glow.clearLayers();
     layers.forEach( ( layer ) => this.lines.addLayer( layer ) );
+  },
+
+  // Another route shown boldly for a moment (hovering its row or its line);
+  // null takes it away.
+  highlight( route ) {
+    if ( !this.glow ) this.glow = L.layerGroup().addTo( this.map );
+    this.glow.clearLayers();
+    if ( !route ) return;
+    const color = getComputedStyle( document.documentElement ).getPropertyValue( "--bs-primary" ).trim() || "#0d6efd";
+    route.runs.forEach( ( run ) => {
+      this.glow.addLayer( L.polyline( run.coords , { color: color , weight: 6 , opacity: 0.85 , interactive: false } ) );
+    } );
   },
 
   fitTo( routes , stops ) {
@@ -147,5 +169,6 @@ const RouteMap = {
   clearRoutes() {
     this.lines.clearLayers();
     this.ring.clearLayers();
+    if ( this.glow ) this.glow.clearLayers();
   },
 };

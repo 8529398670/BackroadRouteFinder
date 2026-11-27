@@ -10,7 +10,6 @@ import numpy as np
 from app.routing.costs import Rating
 from app.routing.graph import Graph
 from app.routing.search import Piece
-from app.routing.snap import segment_along
 
 # A road shorter than this in the "via" list is folded into its neighbours.
 VIA_MIN_METRES = 150.0
@@ -47,13 +46,10 @@ class Summary:
     via: list[Via] = field(default_factory=list)
 
 
-def _piece_coords(graph: Graph, s: int, start: float, end: float) -> list[list[float]]:
-    """The shape of one piece, in the direction driven."""
+def _piece_coords(lat: np.ndarray, lon: np.ndarray, along: np.ndarray, start: float, end: float) -> list[list[float]]:
+    """The shape of one piece, in the direction driven: lat/lon are the
+    segment's shape points, along their distance from its a end."""
     lo, hi = min(start, end), max(start, end)
-    g0, g1 = int(graph.seg_g0[s]), int(graph.seg_g1[s])
-    lat = graph.geom_lat[g0:g1 + 1]
-    lon = graph.geom_lon[g0:g1 + 1]
-    along = segment_along(graph, s)
     inside = (along > lo) & (along < hi)
     lats = np.concatenate(([np.interp(lo, along, lat)], lat[inside], [np.interp(hi, along, lat)]))
     lons = np.concatenate(([np.interp(lo, along, lon)], lon[inside], [np.interp(hi, along, lon)]))
@@ -61,27 +57,60 @@ def _piece_coords(graph: Graph, s: int, start: float, end: float) -> list[list[f
     return points[::-1] if end < start else points
 
 
+def _alongs(lat: np.ndarray, lon: np.ndarray, length: float) -> np.ndarray:
+    """Metres from the first shape point at each one, scaled to the true length."""
+    cos0 = np.cos(np.radians(lat[0]))
+    steps = np.hypot(np.diff(lon) * cos0, np.diff(lat)) * 111_320.0
+    along = np.concatenate(([0.0], np.cumsum(steps)))
+    if along[-1] > 0:
+        along *= length / along[-1]
+    return along
+
+
 def summarize(graph: Graph, pieces: list[Piece], rating: Rating, delay_seconds: float = 0.0) -> Summary:
     """rating: what the request makes of each segment (costs.rating)."""
     out = Summary(seconds=delay_seconds, delay_seconds=delay_seconds)
     via: list[Via] = []
-    for s, start, end in pieces:
+    if not pieces:
+        return out
+    # Everything per segment read at once, in disk order.
+    segs = np.fromiter((p[0] for p in pieces), dtype=np.int64, count=len(pieces))
+    uniq, back = np.unique(segs, return_inverse=True)
+    seg_len = np.asarray(graph.seg_len[uniq], dtype=np.float64)[back]
+    seg_seconds = np.asarray(graph.seg_seconds[uniq], dtype=np.float64)[back]
+    unpaved = np.asarray(graph.seg_unpaved[uniq], dtype=bool)[back]
+    name_ids = np.asarray(graph.seg_name[uniq])[back]
+    avoided = np.asarray(rating.avoided[uniq], dtype=bool)[back]
+    factor = np.asarray(rating.factor[uniq], dtype=np.float64)[back]
+    g0 = np.asarray(graph.seg_g0[uniq], dtype=np.int64)
+    g1 = np.asarray(graph.seg_g1[uniq], dtype=np.int64)
+    from app.routing.disk import ranges
+
+    where = ranges(g0, g1 + 1)
+    all_lat = np.asarray(graph.geom_lat[where])
+    all_lon = np.asarray(graph.geom_lon[where])
+    offsets = np.concatenate(([0], np.cumsum(g1 - g0 + 1)))
+    names: dict[int, str] = {}
+    for i, (s, start, end) in enumerate(pieces):
         metres = abs(end - start)
         if metres <= 0:
             continue
-        length = graph.seg_len[s]
-        seconds = float(graph.seg_seconds[s] * metres / length) if length > 0 else 0.0
-        main = bool(rating.avoided[s])
-        out.extra_seconds += seconds * (float(rating.factor[s]) - 1.0)
+        length = seg_len[i]
+        seconds = float(seg_seconds[i] * metres / length) if length > 0 else 0.0
+        main = bool(avoided[i])
+        out.extra_seconds += seconds * (float(factor[i]) - 1.0)
         out.seconds += seconds
         out.meters += metres
         if main:
             out.main_seconds += seconds
             out.main_meters += metres
-        if graph.seg_unpaved[s]:
+        if unpaved[i]:
             out.unpaved_meters += metres
 
-        coords = _piece_coords(graph, s, start, end)
+        u = back[i]
+        lat = all_lat[offsets[u]:offsets[u + 1]]
+        lon = all_lon[offsets[u]:offsets[u + 1]]
+        coords = _piece_coords(lat, lon, _alongs(lat, lon, float(length)), start, end)
         if out.runs and out.runs[-1].main == main:
             run = out.runs[-1]
             run.coords.extend(coords[1:] if run.coords and run.coords[-1] == coords[0] else coords)
@@ -90,7 +119,10 @@ def summarize(graph: Graph, pieces: list[Piece], rating: Rating, delay_seconds: 
             joined = ([out.runs[-1].coords[-1]] if out.runs and out.runs[-1].coords[-1] != coords[0] else []) + coords
             out.runs.append(Run(main=main, coords=joined))
 
-        name = graph.names[int(graph.seg_name[s])]
+        name_id = int(name_ids[i])
+        name = names.get(name_id)
+        if name is None:
+            name = names[name_id] = graph.names[name_id]
         if via and via[-1].name == name:
             via[-1].meters += metres
             via[-1].seconds += seconds

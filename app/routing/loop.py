@@ -27,7 +27,7 @@ import numpy as np
 from scipy.sparse import csr_matrix
 from scipy.sparse.csgraph import dijkstra
 
-from app.routing import costs
+from app.routing import costs, grid
 from app.routing.graph import Graph
 from app.routing.search import NoRoute
 from app.routing.snap import OffNetwork, Snap, snap
@@ -79,7 +79,7 @@ def _distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     return 2 * EARTH_RADIUS_M * math.asin(math.sqrt(min(a, 1.0)))
 
 
-def _ring_miles(graph: Graph, center: Snap, miles: float, count: int, shunned: np.ndarray) -> list[Snap]:
+def _ring_miles(graph: Graph, center: Snap, miles: float, count: int, shunned) -> list[Snap]:
     radius = miles * METRES_PER_MILE
     reach = max(MIN_SNAP_M, radius * SNAP_SHARE)
     out = []
@@ -92,73 +92,68 @@ def _ring_miles(graph: Graph, center: Snap, miles: float, count: int, shunned: n
     return out
 
 
-@dataclass
-class _Pairs:
-    """The node-to-node graph's shape, the same for every request: the edges
-    sorted by (src, dst), where each distinct pair starts, and its csr layout."""
-    order: np.ndarray
-    first: np.ndarray
-    dst: np.ndarray
-    indptr: np.ndarray
-
-
-_pairs_cache: dict[int, _Pairs] = {}
-
-
-def _node_pairs(graph: Graph) -> _Pairs:
-    cached = _pairs_cache.get(id(graph))
-    if cached is not None:
-        return cached
-    order = np.lexsort((graph.edge_dst, graph.edge_src))
-    src, dst = graph.edge_src[order], graph.edge_dst[order]
-    new = np.ones(len(src), dtype=bool)
-    new[1:] = (src[1:] != src[:-1]) | (dst[1:] != dst[:-1])
-    first = np.flatnonzero(new)
-    indptr = np.zeros(graph.node_count + 1, dtype=np.int64)
-    np.add.at(indptr, src[first] + 1, 1)
-    pairs = _Pairs(order=order, first=first, dst=dst[first].astype(np.int32), indptr=np.cumsum(indptr))
-    _pairs_cache.clear()  # one map at a time
-    _pairs_cache[id(graph)] = pairs
-    return pairs
+# The fastest a minutes ring may reach, metres a second (about 80 mph): the
+# search runs inside a circle that radius-in-time times this, round the center.
+RING_SPEED = 36.0
 
 
 def _ring_minutes(graph: Graph, center: Snap, minutes: float, count: int, options: costs.Options,
-                  shunned: np.ndarray) -> list[Snap]:
+                  shunned) -> list[Snap]:
     """The fastest drive from the center, on intersections: for each sector,
-    the intersection reached in the time closest to the radius."""
+    the intersection reached in the time closest to the radius. Only the
+    roads within reach are read (grid.py)."""
     target = minutes * 60.0
-    seconds = costs.segment_weights(graph, costs.Options(penalty=1.0, rules=options.rules))
-    pairs = _node_pairs(graph)
+    reach = target * SEARCH_LIMIT * RING_SPEED
+    segs = grid.segments_near(graph, center.lat, center.lon, reach)
+    segs = np.unique(np.concatenate((segs, [center.segment])))
+    seconds = costs.segment_weights(graph, costs.Options(penalty=1.0, rules=options.rules), segs)
+    a_all = np.asarray(graph.seg_a[segs], dtype=np.int64)
+    b_all = np.asarray(graph.seg_b[segs], dtype=np.int64)
+    oneway = np.asarray(graph.seg_oneway[segs])
+    nodes, inverse = np.unique(np.concatenate((a_all, b_all)), return_inverse=True)
+    la, lb = inverse[:len(segs)], inverse[len(segs):]
+    forward, backward = oneway >= 0, oneway <= 0
+    src = np.concatenate((la[forward], lb[backward]))
+    dst = np.concatenate((lb[forward], la[backward]))
+    weight = np.maximum(np.concatenate((seconds[forward], seconds[backward])), costs.MIN_WEIGHT)
     # Two roads between the same pair of intersections: the quicker one (a
     # sparse matrix would add them up).
-    weight = np.minimum.reduceat(seconds[graph.edge_seg][pairs.order], pairs.first)
-    matrix = csr_matrix((np.maximum(weight, costs.MIN_WEIGHT), pairs.dst, pairs.indptr), shape=(graph.node_count, graph.node_count))
+    order = np.lexsort((weight, dst, src))
+    src, dst, weight = src[order], dst[order], weight[order]
+    first = np.ones(len(src), dtype=bool)
+    first[1:] = (src[1:] != src[:-1]) | (dst[1:] != dst[:-1])
+    size = len(nodes)
+    matrix = csr_matrix((weight[first], (src[first], dst[first])), shape=(size, size))
     # Start from both ends of the center's segment, each with the part of the
     # segment it takes to get there.
     s = center.segment
+    at = int(np.searchsorted(segs, s))
     length = float(graph.seg_len[s]) or 1.0
-    to_a = seconds[s] * center.along / length
-    to_b = seconds[s] * (length - center.along) / length
-    a, b = int(graph.seg_a[s]), int(graph.seg_b[s])
+    to_a = seconds[at] * center.along / length
+    to_b = seconds[at] * (length - center.along) / length
+    a = int(np.searchsorted(nodes, int(graph.seg_a[s])))
+    b = int(np.searchsorted(nodes, int(graph.seg_b[s])))
     times = dijkstra(matrix, directed=True, indices=[a, b], limit=target * SEARCH_LIMIT, min_only=False)
     times = np.minimum(times[0] + to_a, times[1] + to_b)
     reached = np.flatnonzero(np.isfinite(times) & (times < costs.EXCLUDED_WEIGHT))
     if len(reached) == 0:
         return []
-    bearings = _bearing(center.lat, center.lon, graph.node_lat[reached], graph.node_lon[reached])
+    lat = np.asarray(graph.node_lat[nodes[reached]])
+    lon = np.asarray(graph.node_lon[nodes[reached]])
+    bearings = _bearing(center.lat, center.lon, lat, lon)
     width = 360.0 / count
     out = []
     for k in range(count):
         middle = width * k
         off = np.abs((bearings - middle + 180) % 360 - 180)
-        inside = reached[off <= width / 2]
+        inside = np.flatnonzero(off <= width / 2)
         if len(inside) == 0:
             continue
-        best = int(inside[np.argmin(np.abs(times[inside] - target))])
-        if times[best] < target * 0.4:
+        best = int(inside[np.argmin(np.abs(times[reached[inside]] - target))])
+        if times[reached[best]] < target * 0.4:
             continue  # nothing reaches out that far this way: a gap in the ring
         try:
-            out.append(snap(graph, float(graph.node_lat[best]), float(graph.node_lon[best]), MIN_SNAP_M, shunned))
+            out.append(snap(graph, float(lat[best]), float(lon[best]), MIN_SNAP_M, shunned))
         except OffNetwork:
             continue
     return out
@@ -182,7 +177,7 @@ def _dedupe(points: list[Snap]) -> list[Snap]:
 
 def plan(graph: Graph, center: tuple[float, float], radius: float, unit: str, start: str, direction: str,
          options: costs.Options, max_snap_m: float, start_point: tuple[float, float] | None = None, count: int = 6) -> Loop:
-    shunned = costs.excluded_segments(graph, options)
+    shunned = lambda segments: costs.excluded_segments(graph, options, segments)  # noqa: E731
     try:
         middle = snap(graph, center[0], center[1], max_snap_m, shunned)
     except OffNetwork as error:

@@ -17,7 +17,7 @@ const Planner = {
   stops: [ null , null ],
   loopPoints: [ null , null ],
   options: {
-    backroads: true , penalty: 8 , road_rules: {} , road_factors: {} , compare_fastest: true , sources: [ "ours" ] , combine: "best",
+    backroads: true , penalty: 8 , road_rules: {} , road_factors: {} , compare_fastest: true , sources: [ "ours" ] , combine: "best" , alternatives: 5,
     loop: { on: false , radius: 20 , unit: "mi" , start: "center" , direction: "cw" , points: 6 , reuse: 3 },
   },
 
@@ -28,6 +28,15 @@ const Planner = {
   result: null,
   // Which of the result's routes is shown on the map, saved and exported.
   selected: 0,
+  // Recent plans by request, with the route picked in each, so going back
+  // to a request tried a moment ago (undo, an option switched back) shows it
+  // at once without asking the server.
+  cache: new Map(),
+  CACHE_SIZE: 20,
+  cacheKey: null,
+  // A saved route's pick ({source, rank}), chosen once its plan comes back.
+  pendingPick: null,
+  ALTERNATIVES: [ 1 , 2 , 3 , 4 , 5 , 6 , 7 , 8 , 9 , 10 ],
   picking: null,
   turn: 0,
   status: null,
@@ -68,12 +77,14 @@ const Planner = {
     Dom.all( "#plan-presets [data-penalty]" ).forEach( ( button ) => {
       button.addEventListener( "click" , () => this.setOption( "penalty" , Number( button.getAttribute( "data-penalty" ) ) ) );
     } );
-    Dom.all( "input[name=plan-combine]" ).forEach( ( radio ) => {
-      radio.addEventListener( "change" , () => { if ( radio.checked ) this.setOption( "combine" , radio.value ); } );
-    } );
+    const many = Dom.get( "plan-alternatives" );
+    this.ALTERNATIVES.forEach( ( n ) => many.appendChild( Dom.el( "option" , { text: String( n ) , attrs: { value: String( n ) } } ) ) );
+    many.addEventListener( "change" , () => this.setOption( "alternatives" , Number( many.value ) ) );
     Dom.onPress( Dom.get( "plan-save-prefs" ) , () => this.savePrefs() );
     Dom.onPress( Dom.get( "plan-save" ) , () => this.saveRoute() );
-    Dom.get( "plan-gpx" ).addEventListener( "click" , () => this.exportGpx() );
+    Dom.all( "#plan-export-menu [data-export]" ).forEach( ( item ) => {
+      item.addEventListener( "click" , () => this.exportAs( item.dataset.export ) );
+    } );
 
     const [ status , prefs ] = await Promise.all( [
       Api.request( "/api/routing/status" ),
@@ -299,7 +310,9 @@ const Planner = {
       }
       if ( saved.options.sources ) state.options.sources = saved.options.sources.slice();
       if ( saved.options.combine ) state.options.combine = saved.options.combine;
+      if ( saved.options.alternatives ) state.options.alternatives = saved.options.alternatives;
     } , null , true );
+    this.pendingPick = saved.options.pick || null;
     Nav.go( "/plan" );
   },
 
@@ -606,10 +619,7 @@ const Planner = {
       return Dom.el( "div" , { class: "form-check" , children: [ input , label , told ].filter( Boolean ) } );
     } );
     Dom.swap( Dom.get( "plan-sources" ) , ...rows );
-    const combine = this.options.combine || "best";
-    Dom.get( "plan-combine-best" ).checked = combine === "best";
-    Dom.get( "plan-combine-all" ).checked = combine === "all";
-    Dom.get( "plan-combine" ).disabled = this.usableSources().length < 2;
+    Dom.get( "plan-alternatives" ).value = String( this.options.alternatives || 1 );
   },
 
   async savePrefs() {
@@ -617,6 +627,7 @@ const Planner = {
     await Api.post( "/api/planner/prefs" , {
       backroads: options.backroads , penalty: options.penalty , road_rules: options.road_rules , road_factors: options.road_factors,
       compare_fastest: options.compare_fastest , sources: options.sources , combine: options.combine || "best",
+      alternatives: options.alternatives || 1,
       loop_radius: options.loop.radius , loop_unit: options.loop.unit , loop_points: options.loop.points , loop_reuse: options.loop.reuse,
     } );
     Dom.toast( I18n.get( "plan.prefs_saved" ) , "ok" );
@@ -674,9 +685,19 @@ const Planner = {
       road_factors: options.road_factors,
       compare_fastest: options.backroads && options.compare_fastest,
       sources: sources,
-      combine: options.combine || "best",
+      alternatives: options.alternatives || 1,
     };
     if ( loop ) body.loop = this.loopSpec();
+    const key = JSON.stringify( body );
+    const cached = this.cache.get( key );
+    if ( cached ) {
+      // Seen a moment ago: show it as it was, with the route picked then.
+      this.cache.delete( key );
+      this.cache.set( key , cached );
+      this.show( key , cached.result , cached.selected , fit );
+      this.showBusy( null );
+      return;
+    }
     const summary = Dom.get( "plan-summary" );
     summary.classList.add( "opacity-50" );
     this.showBusy( "updating" );
@@ -697,12 +718,33 @@ const Planner = {
     // difference here does not look like it was ignored.
     const before = this.result ? this.signature( this.result ) : null;
     this.showBusy( before === null ? null : before === this.signature( result ) ? "unchanged" : "updated" );
+    this.cache.set( key , { result: result , selected: 0 } );
+    while ( this.cache.size > this.CACHE_SIZE ) this.cache.delete( this.cache.keys().next().value );
+    let selected = 0;
+    if ( this.pendingPick ) {
+      const pick = this.pendingPick;
+      const found = result.routes.filter( ( route ) => !route.compare ).findIndex( ( route ) => route.source === pick.source && ( route.rank || 0 ) === pick.rank );
+      if ( found >= 0 ) selected = found;
+      this.pendingPick = null;
+    }
+    this.show( key , result , selected , fit );
+  },
+
+  show( key , result , selected , fit ) {
+    this.cacheKey = key;
     this.result = result;
-    this.selected = 0;
+    this.selected = selected;
+    this.remember();
     this.draw();
     if ( fit || !this.shownOnce ) RouteMap.fitTo( result.routes , this.points() );
     this.shownOnce = true;
     this.renderResult( result );
+  },
+
+  // Keep the pick with the cached plan.
+  remember() {
+    const entry = this.cacheKey && this.cache.get( this.cacheKey );
+    if ( entry ) entry.selected = this.selected;
   },
 
   signature( result ) {
@@ -747,7 +789,11 @@ const Planner = {
       RouteMap.clearRoutes();
       return;
     }
-    RouteMap.drawRoutes( [ chosen , ...this.result.routes.filter( ( route ) => route !== chosen ) ] );
+    const choices = this.choices();
+    RouteMap.drawRoutes( [ chosen , ...this.result.routes.filter( ( route ) => route !== chosen ) ] , ( route ) => {
+      const index = choices.indexOf( route );
+      if ( index >= 0 ) this.select( index );
+    } );
     if ( this.isLoop() && this.result.ring && this.result.ring.length ) {
       const loop = this.options.loop;
       RouteMap.drawRing( this.loopPoints[ 0 ] , this.result.ring , loop.unit === "mi" ? loop.radius * 1609.344 : null );
@@ -757,6 +803,7 @@ const Planner = {
   select( index ) {
     if ( index === this.selected ) return;
     this.selected = index;
+    this.remember();
     this.draw();
     this.renderResult( this.result );
   },
@@ -839,7 +886,7 @@ const Planner = {
       attrs: { type: "button" , "aria-pressed": on ? "true" : "false" , "data-key": "route-" + index },
       children: [
         Dom.el( "div" , { class: "d-flex align-items-center gap-2" , children: [
-          Dom.el( "span" , { class: "fw-semibold small me-auto" , text: this.sourceLabel( route.source , route.source_name ) } ),
+          Dom.el( "span" , { class: "fw-semibold small me-auto" , text: Format.fill( "plan.choice_name" , { n: index + 1 , source: this.sourceLabel( route.source , route.source_name ) } ) } ),
           index === 0 ? Dom.el( "span" , { class: "badge text-bg-success" , text: I18n.get( "plan.best_badge" ) } ) : null,
         ].filter( Boolean ) } ),
         Dom.el( "div" , { class: "small text-body-secondary" , text: [
@@ -849,7 +896,13 @@ const Planner = {
         ].join( " · " ) } ),
         bar,
       ],
-      on: { click: () => this.select( index ) },
+      on: {
+        click: () => this.select( index ),
+        mouseenter: () => { if ( index !== this.selected ) RouteMap.highlight( route ); },
+        mouseleave: () => RouteMap.highlight( null ),
+        focus: () => { if ( index !== this.selected ) RouteMap.highlight( route ); },
+        blur: () => RouteMap.highlight( null ),
+      },
     } );
   },
 
@@ -932,6 +985,8 @@ const Planner = {
             road_factors: this.options.road_factors,
             sources: this.usableSources(),
             combine: this.options.combine || "best",
+            alternatives: this.options.alternatives || 1,
+            pick: { source: route.source , rank: route.rank || 0 },
             loop: loop,
           },
           summary: { seconds: route.seconds , meters: route.meters , main_seconds: route.main_seconds , main_meters: route.main_meters },
@@ -949,10 +1004,10 @@ const Planner = {
     SavedRoutes.refresh();
   },
 
-  exportGpx() {
+  exportAs( format ) {
     const route = this.chosen();
     if ( !route ) return;
     const stops = this.points().filter( Boolean );
-    Gpx.download( this.defaultName() || I18n.get( "plan.gpx_name" ) , stops , route );
+    Export.run( format , this.defaultName() || I18n.get( "plan.gpx_name" ) , stops , route );
   },
 };

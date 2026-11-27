@@ -156,6 +156,68 @@
         ],
         "type": "object"
       },
+      "AccountData": {
+        "properties": {
+          "exported_at": {
+            "type": "string"
+          },
+          "format": {
+            "default": "backroad-route-finder/1",
+            "description": "Always backroad-route-finder/1.",
+            "type": "string"
+          },
+          "planner_prefs": {
+            "description": "Null: you had not set your own.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PlannerPrefs"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "saved_routes": {
+            "items": {
+              "$ref": "#/components/schemas/ExportedRoute"
+            },
+            "maxItems": 500,
+            "type": "array"
+          },
+          "shortcuts": {
+            "description": "The keyboard shortcuts you changed.",
+            "oneOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "theme_id": {
+            "type": "string"
+          },
+          "themes": {
+            "description": "Your own themes; null while you follow the server's.",
+            "oneOf": [
+              {
+                "items": {
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object"
+      },
       "BulkReply": {
         "properties": {
           "done": {
@@ -325,6 +387,37 @@
         },
         "required": [
           "error"
+        ],
+        "type": "object"
+      },
+      "ExportedRoute": {
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 80,
+            "minLength": 1,
+            "type": "string"
+          },
+          "options": {
+            "$ref": "#/components/schemas/RouteOptions"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/RouteSummary"
+          },
+          "waypoints": {
+            "items": {
+              "$ref": "#/components/schemas/Waypoint"
+            },
+            "maxItems": 10,
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "options",
+          "waypoints"
         ],
         "type": "object"
       },
@@ -1190,6 +1283,10 @@
             "description": "Of meters: not on our map (outside it, or roads it leaves out), counted as backroad.",
             "type": "number"
           },
+          "rank": {
+            "description": "Its place among its source's own answers: 0 the source's best, then its alternatives.",
+            "type": "integer"
+          },
           "runs": {
             "items": {
               "$ref": "#/components/schemas/Run"
@@ -1242,6 +1339,13 @@
       },
       "PlannerPrefs": {
         "properties": {
+          "alternatives": {
+            "default": 5,
+            "description": "How many routes to offer, best first: the best and up to this many less one alternatives on different roads.",
+            "maximum": 10,
+            "minimum": 1,
+            "type": "integer"
+          },
           "backroads": {
             "default": true,
             "description": "Backroads mode on; off plans the plain fastest route.",
@@ -1249,7 +1353,7 @@
           },
           "combine": {
             "default": "best",
-            "description": "best keeps only the best-scoring route; all returns every route, best first.",
+            "description": "Older than alternatives: best is 1 route, all is up to 12. Ignored when alternatives is given.",
             "pattern": "^(best|all)$",
             "type": "string"
           },
@@ -1456,13 +1560,22 @@
               "null"
             ]
           },
+          "alternatives": {
+            "description": "How many routes to offer, best first: the best and up to this many less one alternatives on different roads.",
+            "maximum": 10,
+            "minimum": 1,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
           "backroads": {
             "default": true,
             "type": "boolean"
           },
           "combine": {
             "default": "best",
-            "description": "best keeps only the best-scoring route; all returns every route, best first.",
+            "description": "Older than alternatives: best is 1 route, all is up to 12. Ignored when alternatives is given.",
             "pattern": "^(best|all)$",
             "type": "string"
           },
@@ -1483,6 +1596,17 @@
             "maximum": 100,
             "minimum": 1,
             "type": "number"
+          },
+          "pick": {
+            "description": "Which of the routes offered was chosen, so opening it again shows the same one.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/RoutePick"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "road_factors": {
             "description": "Its avoid strengths; null for a route saved before they could be set (the server's).",
@@ -1528,6 +1652,24 @@
             "type": "array"
           }
         },
+        "type": "object"
+      },
+      "RoutePick": {
+        "properties": {
+          "rank": {
+            "maximum": 20,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "source": {
+            "description": "ours, or another engine: valhalla, osrm, ors, graphhopper, tomtom, here, mapbox, google.",
+            "pattern": "^(ours|valhalla|osrm|ors|graphhopper|tomtom|here|mapbox|google)$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source"
+        ],
         "type": "object"
       },
       "RouteSummary": {
@@ -2325,6 +2467,141 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/account/export": {
+      "get": {
+        "description": "Your saved routes, planner defaults, keyboard shortcuts and themes, as one file to keep or load into another account. API keys are left out.",
+        "operationId": "get_api_account_export",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountData"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "$ref": "#/components/responses/E503"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "Download all your data",
+        "tags": [
+          "Account"
+        ]
+      }
+    },
+    "/api/account/import": {
+      "post": {
+        "description": "Merge a file from GET /api/account/export into your account. Saved routes already here are skipped and themes are added by id; planner defaults and shortcuts in the file replace yours.",
+        "operationId": "post_api_account_import",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "csrf_token": {
+                    "description": "From GET /api/me. Browser sessions only.",
+                    "type": "string"
+                  },
+                  "data": {
+                    "$ref": "#/components/schemas/AccountData",
+                    "description": "A file from GET /api/account/export."
+                  }
+                },
+                "required": [
+                  "data"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "prefs_replaced": {
+                      "type": "boolean"
+                    },
+                    "routes_added": {
+                      "type": "integer"
+                    },
+                    "routes_skipped": {
+                      "type": "integer"
+                    },
+                    "shortcuts_replaced": {
+                      "type": "boolean"
+                    },
+                    "themes_added": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "prefs_replaced",
+                    "routes_added",
+                    "routes_skipped",
+                    "shortcuts_replaced",
+                    "themes_added"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "409": {
+            "$ref": "#/components/responses/E409"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "$ref": "#/components/responses/E503"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "Load your data from a file",
+        "tags": [
+          "Account"
+        ]
+      }
+    },
     "/api/account/login-link": {
       "post": {
         "description": "A link that signs your own account in on a browser or another device. An API key may ask only if your account let it, from a browser session (POST /api/keys/{key_id}/sign-in); its link works once, for at most 15 minutes.",
@@ -9182,7 +9459,7 @@
                     "type": "string"
                   },
                   "kind": {
-                    "description": "extract (a downloaded .osm.pbf) or map (a built .npz).",
+                    "description": "extract (a downloaded .osm.pbf) or map (a built map).",
                     "pattern": "^(extract|map)$",
                     "type": "string"
                   },
@@ -10246,12 +10523,21 @@
                       "null"
                     ]
                   },
+                  "alternatives": {
+                    "description": "How many routes to offer, best first: the best and up to this many less one alternatives on different roads.",
+                    "maximum": 10,
+                    "minimum": 1,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
                   "backroads": {
                     "type": "boolean"
                   },
                   "combine": {
                     "default": "best",
-                    "description": "best keeps only the best-scoring route; all returns every route, best first.",
+                    "description": "Older than alternatives: best is 1 route, all is up to 12. Ignored when alternatives is given.",
                     "pattern": "^(best|all)$",
                     "type": "string"
                   },
@@ -10786,7 +11072,7 @@
     },
     "/api/route": {
       "post": {
-        "description": "The route through the waypoints that keeps time on main roads down: each minute on a road type its road_rules avoid counts penalty times over (or the type's own strength in road_factors). Times include turns, traffic signals and stop signs (delay_seconds). sources picks who plans: our own router (ours) and/or other engines (see GET /api/routing/status), each asked for its backroads route and alternatives. Every route is measured on our map and scored the same way; combine=best keeps the best, combine=all returns them all, best first. A source that fails is listed in problems and the rest still answer. With compare_fastest, the plain fastest route on our map comes last (compare=true). A waypoint with no road within routing.max_snap_m is refused with its index.",
+        "description": "The route through the waypoints that keeps time on main roads down: each minute on a road type its road_rules avoid counts penalty times over (or the type's own strength in road_factors). Times include turns, traffic signals and stop signs (delay_seconds). sources picks who plans: our own router (ours) and/or other engines (see GET /api/routing/status), each asked for its backroads route and alternatives (our own router plans its own alternatives on different roads). Every route is measured on our map and scored the same way, and the best alternatives routes come back, best first. Plans are cached for 15 minutes. A source that fails is listed in problems and the rest still answer. With compare_fastest, the plain fastest route on our map comes last (compare=true). A waypoint with no road within routing.max_snap_m is refused with its index.",
         "operationId": "post_api_route",
         "requestBody": {
           "content": {
@@ -10801,9 +11087,18 @@
                       "null"
                     ]
                   },
+                  "alternatives": {
+                    "description": "How many routes to offer, best first (1-10). Left out: 1 with combine=best, the most with combine=all.",
+                    "maximum": 10,
+                    "minimum": 1,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
                   "combine": {
                     "default": "best",
-                    "description": "best keeps only the best-scoring route; all returns every route, best first.",
+                    "description": "Older than alternatives: best is 1 route, all is up to 12. Ignored when alternatives is given.",
                     "pattern": "^(best|all)$",
                     "type": "string"
                   },

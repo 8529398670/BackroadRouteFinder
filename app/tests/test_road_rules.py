@@ -60,7 +60,7 @@ class GridCase(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         with tempfile.TemporaryDirectory() as folder:
-            path = Path(folder) / "grid.npz"
+            path = Path(folder) / "grid.graph"
             build.build(grid_ways(), path, "test", progress=lambda _line: None)
             cls.graph = graph_module.load(path)
 
@@ -179,10 +179,11 @@ class RulesTest(GridCase):
 
     def test_reuse_discourages_driven_roads(self) -> None:
         options = costs.Options(penalty=1.0)
-        plain = search.weights(self.graph, options)
-        shy = search.weights(self.graph, options, discourage=np.array([0, 1]), factor=3.0)
-        self.assertAlmostEqual(shy.segment[0], plain.segment[0] * 3)
-        self.assertAlmostEqual(shy.segment[2], plain.segment[2])
+        sub = search.Sub(self.graph, options, np.arange(self.graph.segment_count))
+        plain = sub.weight.copy()
+        sub.scale(np.array([0, 1]), 3.0)
+        self.assertAlmostEqual(sub.weight[0], plain[0] * 3)
+        self.assertAlmostEqual(sub.weight[2], plain[2])
 
 
 class LoopTest(GridCase):

@@ -132,57 +132,81 @@ class Options:
         return float(self.factors.get(key, self.penalty))
 
 
-def _matching(graph: Graph, options: Options, value: str) -> np.ndarray:
+def _column(array: np.ndarray, segments: np.ndarray | None) -> np.ndarray:
+    """A per-segment column for these segments (all of them when None; only
+    a small map should ask for all)."""
+    return np.asarray(array) if segments is None else np.asarray(array[segments])
+
+
+def _matching(graph: Graph, options: Options, value: str, segments: np.ndarray | None = None) -> np.ndarray:
     """Per segment: does any rule give it this value."""
     by_category = np.array([options.rule(name) == value for name in classes.CATEGORIES], dtype=bool)
-    out = by_category[graph.seg_category]
+    out = by_category[_column(graph.seg_category, segments)]
     if options.rule("unpaved") == value:
-        out = out | graph.seg_unpaved.astype(bool)
+        out = out | _column(graph.seg_unpaved, segments).astype(bool)
     if options.rule("restricted") == value:
-        out = out | graph.seg_restricted.astype(bool)
+        out = out | _column(graph.seg_restricted, segments).astype(bool)
     return out
 
 
-def segment_factors(graph: Graph, options: Options) -> np.ndarray:
+def segment_factors(graph: Graph, options: Options, segments: np.ndarray | None = None) -> np.ndarray:
     """Per segment: what a second on it counts, from its avoid rules (1 where
     none avoids it, the strongest strength where several do)."""
     by_category = np.array([options.strength(name) if options.rule(name) == AVOID else 1.0 for name in classes.CATEGORIES])
-    out = by_category[graph.seg_category]
+    out = by_category[_column(graph.seg_category, segments)]
     for flag, column in (("unpaved", graph.seg_unpaved), ("restricted", graph.seg_restricted)):
         if options.rule(flag) == AVOID:
-            out = np.where(column.astype(bool), np.maximum(out, options.strength(flag)), out)
+            out = np.where(_column(column, segments).astype(bool), np.maximum(out, options.strength(flag)), out)
     return out
 
 
-@dataclass
+class _PerSegment:
+    """A per-segment value worked out only for the segments asked for:
+    rating.avoided[s] for one segment or an array of them."""
+
+    def __init__(self, compute) -> None:
+        self.compute = compute
+
+    def __getitem__(self, index):
+        array = np.atleast_1d(np.asarray(index, dtype=np.int64))
+        values = self.compute(np.maximum(array, 0))
+        return values[0] if np.ndim(index) == 0 else values.reshape(np.shape(index))
+
+
 class Rating:
     """What a request makes of each segment, for summing up a route already
     found: avoided (counted as main, coloured red) and the factor its seconds
-    count in the score."""
-    avoided: np.ndarray
-    factor: np.ndarray
+    count in the score. Indexed by segment; nothing is worked out for the
+    whole map."""
+
+    def __init__(self, graph: Graph, options: Options) -> None:
+        self.avoided = _PerSegment(lambda segs: avoided_segments(graph, options, segs))
+
+        def factor(segs: np.ndarray) -> np.ndarray:
+            never = excluded_segments(graph, options, segs)
+            base = segment_factors(graph, options, segs)
+            return np.where(never, np.maximum(base, max(NEVER_SCORE_FACTOR, options.penalty)), base)
+
+        self.factor = _PerSegment(factor)
 
 
 def rating(graph: Graph, options: Options) -> Rating:
-    never = excluded_segments(graph, options)
-    factor = segment_factors(graph, options)
-    return Rating(avoided=avoided_segments(graph, options),
-                  factor=np.where(never, np.maximum(factor, max(NEVER_SCORE_FACTOR, options.penalty)), factor))
+    return Rating(graph, options)
 
 
-def avoided_segments(graph: Graph, options: Options) -> np.ndarray:
+def avoided_segments(graph: Graph, options: Options, segments: np.ndarray | None = None) -> np.ndarray:
     """Per segment: is it a road the rules avoid or rule out. These are what a
     route's "main" time, the score and the line's colours count."""
-    return _matching(graph, options, AVOID) | _matching(graph, options, NEVER)
+    return _matching(graph, options, AVOID, segments) | _matching(graph, options, NEVER, segments)
 
 
-def excluded_segments(graph: Graph, options: Options) -> np.ndarray:
-    return _matching(graph, options, NEVER)
+def excluded_segments(graph: Graph, options: Options, segments: np.ndarray | None = None) -> np.ndarray:
+    return _matching(graph, options, NEVER, segments)
 
 
-def segment_weights(graph: Graph, options: Options) -> np.ndarray:
+def segment_weights(graph: Graph, options: Options, segments: np.ndarray | None = None) -> np.ndarray:
     """One weight per segment (direction does not change it)."""
-    weight = graph.seg_seconds * segment_factors(graph, options)
-    weight = weight * np.where(graph.seg_class == classes.SERVICE, SERVICE_FACTOR, 1.0)
-    weight = np.where(excluded_segments(graph, options), weight + EXCLUDED_WEIGHT, weight)
+    weight = _column(graph.seg_seconds, segments).astype(np.float64) * segment_factors(graph, options, segments)
+    weight = weight * np.where(_column(graph.seg_class, segments) == classes.SERVICE, SERVICE_FACTOR, 1.0)
+    weight = np.where(excluded_segments(graph, options, segments), weight + EXCLUDED_WEIGHT, weight)
     return np.maximum(weight, MIN_WEIGHT)

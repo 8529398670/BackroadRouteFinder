@@ -26,8 +26,10 @@ SOURCE_IDS = (OURS, *ENGINES)
 
 Source = Annotated[str, Meta(pattern="^(" + "|".join(SOURCE_IDS) + ")$", description="ours, or another engine: " + ", ".join(ENGINES) + ".",
                              extra={"error": "unknown source"})]
-Combine = Annotated[str, Meta(pattern="^(best|all)$", description="best keeps only the best-scoring route; all returns every route, best first.",
+Combine = Annotated[str, Meta(pattern="^(best|all)$", description="Older than alternatives: best is 1 route, all is up to 12. Ignored when alternatives is given.",
                               extra={"error": "combine must be best or all"})]
+Alternatives = Annotated[int, Meta(ge=1, le=10, description="How many routes to offer, best first: the best and up to this many less one alternatives on different roads.",
+                                   extra={"error": "alternatives must be 1-10"})]
 
 Penalty = Annotated[float, Meta(ge=1, le=100, description="How many times over a minute on a main road counts. 1 is the plain fastest route.", extra={"error": "penalty must be 1-100"})]
 
@@ -115,6 +117,7 @@ class PlannedRoute(Reply):
     delay_seconds: Annotated[float, Meta(description="Of seconds: turning, and waiting at traffic signals and stop signs.")]
     runs: list[Run]
     via: list[Via]
+    rank: Annotated[int, Meta(description="Its place among its source's own answers: 0 the source's best, then its alternatives.")] = 0
 
 
 def _holder(request: Request) -> Holder:
@@ -145,6 +148,7 @@ class PlanRoute(RequestType):
     sources: Annotated[list[Source], Meta(min_length=1, max_length=len(SOURCE_IDS), description="Who to ask: our own router and/or other engines.",
                                           extra={"error": "pick at least one source"})] = msgspec.field(default_factory=lambda: [OURS])
     combine: Combine = "best"
+    alternatives: Annotated[Alternatives | None, Meta(description="How many routes to offer, best first (1-10). Left out: 1 with combine=best, the most with combine=all.")] = None
 
 
 class Problem(Reply):
@@ -201,8 +205,9 @@ def access_of(request: Request) -> sources.Access:
     "road type its road_rules avoid counts penalty times over (or the type's own strength in road_factors). "
     "Times include turns, traffic signals and stop signs (delay_seconds). "
     "sources picks who plans: our own router (ours) and/or other engines (see GET /api/routing/status), "
-    "each asked for its backroads route and alternatives. Every route is measured on our map and scored "
-    "the same way; combine=best keeps the best, combine=all returns them all, best first. A source that "
+    "each asked for its backroads route and alternatives (our own router plans its own alternatives on "
+    "different roads). Every route is measured on our map and scored the same way, and the best "
+    "alternatives routes come back, best first. Plans are cached for 15 minutes. A source that "
     "fails is listed in problems and the rest still answer. "
     "With compare_fastest, the plain fastest route on our map comes last (compare=true). A waypoint with "
     "no road within routing.max_snap_m is refused with its index.",
@@ -215,6 +220,7 @@ def plan_route(request: Request, body: PlanRoute) -> PlanRouteReply:
     routing = cfg.file.routing
     picked = list(dict.fromkeys(body.sources))
     max_snap = cfg.file.routing.max_snap_m
+    count = body.alternatives or (1 if body.combine == "best" else sources.MAX_ROUTES)
     ring: list = []
     try:
         if body.loop is not None:
@@ -227,13 +233,13 @@ def plan_route(request: Request, body: PlanRoute) -> PlanRouteReply:
             circle = loop.plan(graph, (spec.center_lat, spec.center_lon), spec.radius, spec.unit, spec.start, spec.direction,
                                options, max_snap, start_point=start, count=spec.points or routing.loop_points)
             ring = circle.ring
-            result = sources.plan(graph, [(s.lat, s.lon) for s in circle.stops], options, picked, body.combine,
+            result = sources.plan(graph, [(s.lat, s.lon) for s in circle.stops], options, picked, count,
                                   body.compare_fastest, max_snap, access_of(request), snapped=circle.stops,
                                   reuse_factor=spec.reuse if spec.reuse is not None else float(routing.loop_reuse))
         else:
             if len(body.waypoints) < 2:
                 raise Refused(400, f"give 2-{MAX_WAYPOINTS} points", field="waypoints")
-            result = sources.plan(graph, [(p.lat, p.lon) for p in body.waypoints], options, picked, body.combine,
+            result = sources.plan(graph, [(p.lat, p.lon) for p in body.waypoints], options, picked, count,
                                   body.compare_fastest, max_snap, access_of(request))
     except router.PointOffNetwork as off:
         raise Refused(400, f"point {off.index + 1} is not near a road on the map ({off})", field="waypoints", index=off.index) from None
@@ -246,6 +252,7 @@ def plan_route(request: Request, body: PlanRoute) -> PlanRouteReply:
             source_name=source_name(choice.source),
             also=choice.also,
             compare=choice.compare,
+            rank=choice.rank,
             estimated=choice.estimated,
             off_map_meters=round(choice.off_map_meters, 1),
             score=round(choice.score, 1),
@@ -430,6 +437,7 @@ class PlannerPrefs(Reply):
     compare_fastest: bool = True
     sources: list[Source] = msgspec.field(default_factory=lambda: [OURS])
     combine: Combine = "best"
+    alternatives: Alternatives = 5
     loop_radius: LoopRadius = 20.0
     loop_unit: LoopUnit = "mi"
     loop_points: LoopPoints = 6
@@ -444,6 +452,7 @@ class PrefsReply(Reply):
 def _defaults(request: Request) -> PlannerPrefs:
     routing = get_config(request).file.routing
     return PlannerPrefs(penalty=float(routing.default_penalty), road_rules=default_rules(request), road_factors=default_factors(request),
+                        alternatives=routing.alternatives,
                         loop_radius=float(routing.loop_radius), loop_unit=routing.loop_unit, loop_points=routing.loop_points,
                         loop_reuse=float(routing.loop_reuse))
 
@@ -472,6 +481,7 @@ class SetPrefs(RequestType):
     compare_fastest: bool
     sources: Annotated[list[Source], Meta(min_length=1, max_length=len(SOURCE_IDS), extra={"error": "pick at least one source"})] = msgspec.field(default_factory=lambda: [OURS])
     combine: Combine = "best"
+    alternatives: Alternatives | None = None
     road_rules: RoadRules = msgspec.field(default_factory=dict)
     road_factors: RoadFactors | None = None
     loop_radius: LoopRadius | None = None
@@ -493,6 +503,7 @@ def set_prefs(request: Request, body: SetPrefs) -> PrefsReply:
                          road_rules=rules_of(request, body.road_rules, body.secondary_is_main, body.allow_unpaved),
                          road_factors=factors_of(request, body.road_factors), compare_fastest=body.compare_fastest,
                          sources=list(dict.fromkeys(body.sources)), combine=body.combine,
+                         alternatives=body.alternatives or defaults.alternatives,
                          loop_radius=body.loop_radius if body.loop_radius is not None else defaults.loop_radius,
                          loop_unit=body.loop_unit or defaults.loop_unit,
                          loop_points=body.loop_points or defaults.loop_points,

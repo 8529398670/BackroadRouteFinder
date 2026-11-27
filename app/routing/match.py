@@ -8,7 +8,7 @@ nearest road, preferring one running the same way (so a route crossing a
 freeway on a bridge stays on its own road). A stretch shorter than
 MIN_RUN_POINTS points that differs from the road on both sides of it is taken
 as a mismatch at a junction and given the neighbours' class. Points farther
-than MAX_OFF_M from any road are "not on the map" (outside Ohio, or a road we
+than MAX_OFF_M from any road are "not on the map" (outside the map, or a road we
 leave out), counted as backroad.
 
 The time is the engine's own; only its split into main and backroad comes
@@ -16,13 +16,13 @@ from our map (in proportion to our speeds on the roads matched).
 """
 from __future__ import annotations
 
-import threading
-
 import numpy as np
 from scipy.spatial import cKDTree
 
+from app.routing import grid
 from app.routing.costs import Rating
 from app.routing.graph import Graph
+from app.routing.snap import pieces_of
 from app.routing.summarize import DECIMALS, Run, Summary, Via, _fold
 
 STEP_M = 20.0
@@ -34,10 +34,10 @@ CROSSING_M = 25.0
 MIN_RUN_POINTS = 4
 
 
-def _densify(graph: Graph, coords: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+def _densify(graph: Graph, coords: np.ndarray, lat0: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Points every STEP_M along the line: their lat/lon, local x/y, and
     whether each was one of the line's own points."""
-    xy = graph.project(coords[:, 0], coords[:, 1])
+    xy = graph.project(coords[:, 0], coords[:, 1], lat0)
     lat_out, lon_out, vertex = [coords[:1, 0]], [coords[:1, 1]], [np.array([True])]
     steps = np.hypot(np.diff(xy[:, 0]), np.diff(xy[:, 1]))
     for i, length in enumerate(steps):
@@ -49,57 +49,51 @@ def _densify(graph: Graph, coords: np.ndarray) -> tuple[np.ndarray, np.ndarray, 
         mark[-1] = True
         vertex.append(mark)
     lat, lon = np.concatenate(lat_out), np.concatenate(lon_out)
-    return np.column_stack((lat, lon)), graph.project(lat, lon), np.concatenate(vertex)
+    return np.column_stack((lat, lon)), graph.project(lat, lon, lat0), np.concatenate(vertex)
 
 
-# Long straight pieces (freeways, section-line roads) have shape points far
-# apart, so the graph's own index of shape points can miss them. A second
-# index holds points every LONG_STEP_M along each piece longer than that.
-LONG_STEP_M = 60.0
-LONG_CANDIDATES = 4
-_long_index: dict[int, tuple[cKDTree, np.ndarray]] = {}
-_long_lock = threading.Lock()
+# Pieces are sampled every SAMPLE_M for the nearest-piece lookup, so a long
+# straight piece (a freeway, a section-line road) with shape points far apart
+# is found as readily as a short one.
+SAMPLE_M = 30.0
 
 
-def _long_pieces(graph: Graph) -> tuple[cKDTree, np.ndarray]:
-    """A tree of points along long pieces, and each point's piece (the index
-    of the piece's first shape point). Built once per graph, on first use."""
-    with _long_lock:
-        hit = _long_index.get(id(graph))
-        if hit is not None:
-            return hit
-        xy = graph.project(graph.geom_lat, graph.geom_lon)
-        starts = np.arange(len(xy) - 1)
-        seg_of = np.searchsorted(graph.seg_g0, starts, side="right") - 1
-        same = (np.searchsorted(graph.seg_g0, starts + 1, side="right") - 1) == seg_of
-        length = np.hypot(xy[1:, 0] - xy[:-1, 0], xy[1:, 1] - xy[:-1, 1])
-        long = starts[same & (length > LONG_STEP_M)]
-        parts = np.ceil(length[long] / LONG_STEP_M).astype(np.int64)
-        owner = np.repeat(long, parts - 1)
-        # fractions 1/parts .. (parts-1)/parts for each long piece
-        first = np.repeat(np.cumsum(parts - 1) - (parts - 1), parts - 1)
-        step_no = np.arange(len(owner)) - first + 1
-        fraction = step_no / np.repeat(parts, parts - 1)
-        points = xy[owner] + fraction[:, None] * (xy[owner + 1] - xy[owner])
-        built = (cKDTree(points), owner)
-        _long_index.clear()
-        _long_index[id(graph)] = built
-        return built
+def _local_pieces(graph: Graph, points: np.ndarray, lat0: float):
+    """The roads near the line: their pieces (first shape point index, segment,
+    both ends in local x/y), and a tree of points along them with each point's
+    piece."""
+    reach = MAX_OFF_M + CROSSING_M
+    dlat = reach / grid.METRES_PER_DEGREE
+    dlon = reach / (grid.METRES_PER_DEGREE * max(0.05, np.cos(np.radians(lat0))))
+    keys = []
+    for sl, so in ((-dlat, -dlon), (-dlat, dlon), (dlat, -dlon), (dlat, dlon)):
+        r, c = grid.cell_rc(points[:, 0] + sl, points[:, 1] + so)
+        keys.append(grid.key_of(r, c))
+    segments = grid.segments_in_cells(graph, np.concatenate(keys))
+    starts, owner = pieces_of(graph, segments)
+    order = np.argsort(starts)
+    starts, owner = starts[order], owner[order]
+    a = graph.project(graph.geom_lat[starts], graph.geom_lon[starts], lat0)
+    b = graph.project(graph.geom_lat[starts + 1], graph.geom_lon[starts + 1], lat0)
+    length = np.hypot(*(b - a).T)
+    parts = np.maximum(1, np.ceil(length / SAMPLE_M).astype(np.int64))
+    which = np.repeat(np.arange(len(starts)), parts + 1)
+    step = np.arange(len(which)) - np.repeat(np.cumsum(parts + 1) - (parts + 1), parts + 1)
+    t = step / np.repeat(parts, parts + 1)
+    samples = a[which] + t[:, None] * (b[which] - a[which])
+    return owner, a, b, (cKDTree(samples) if len(samples) else None), which
 
 
-def _nearest_segments(graph: Graph, xy: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+def _nearest_segments(graph: Graph, points: np.ndarray, xy: np.ndarray, lat0: float) -> tuple[np.ndarray, np.ndarray]:
     """For each point, the segment it is on (-1 when none is near) and its
     distance to it."""
     count = len(xy)
-    total = len(graph.geom_lat)
-    k = min(CANDIDATES, total)
-    _, near = graph.tree.query(xy, k=k)
-    near = np.asarray(near).reshape(count, -1)
-    tree, owner = _long_pieces(graph)
-    candidate_sets = [near - 1, near]
-    if len(owner):
-        _, extra = tree.query(xy, k=min(LONG_CANDIDATES, len(owner)))
-        candidate_sets.append(owner[np.asarray(extra).reshape(count, -1)])
+    owner, pa, pb, tree, which = _local_pieces(graph, points, lat0)
+    if tree is None:
+        return np.full(count, -1, dtype=np.int64), np.full(count, np.inf)
+    k = min(CANDIDATES * 2, tree.n)
+    _, near = tree.query(xy, k=k)
+    cand = which[np.asarray(near).reshape(count, -1)]       # (count, k) piece indices
 
     # The direction of travel at each point.
     heading = np.zeros_like(xy)
@@ -109,33 +103,20 @@ def _nearest_segments(graph: Graph, xy: np.ndarray) -> tuple[np.ndarray, np.ndar
     norm[norm == 0] = 1
     heading /= norm[:, None]
 
-    best_cost = np.full(count, np.inf)
-    best_dist = np.full(count, np.inf)
-    best_seg = np.full(count, -1, dtype=np.int64)
     rows = np.arange(count)
-    for start in candidate_sets:                           # (count, m): first shape point of a piece
-        m = start.shape[1]
-        valid = (start >= 0) & (start + 1 < total)
-        start_c = np.clip(start, 0, total - 2)
-        seg_a = np.searchsorted(graph.seg_g0, start_c, side="right") - 1
-        seg_b = np.searchsorted(graph.seg_g0, start_c + 1, side="right") - 1
-        valid &= seg_a == seg_b
-        a = graph.project(graph.geom_lat[start_c].ravel(), graph.geom_lon[start_c].ravel()).reshape(count, m, 2)
-        b = graph.project(graph.geom_lat[start_c + 1].ravel(), graph.geom_lon[start_c + 1].ravel()).reshape(count, m, 2)
-        piece = b - a
-        length_sq = (piece ** 2).sum(axis=2)
-        safe = np.where(length_sq == 0, 1, length_sq)
-        t = np.clip(((xy[:, None, :] - a) * piece).sum(axis=2) / safe, 0, 1)
-        closest = a + t[..., None] * piece
-        dist = np.hypot(*(xy[:, None, :] - closest).transpose(2, 0, 1))
-        along = np.abs((piece * heading[:, None, :]).sum(axis=2)) / np.sqrt(safe)
-        along = np.where(length_sq == 0, 1, along)
-        cost = np.where(valid, dist + CROSSING_M * (1 - along), np.inf)
-        pick = np.argmin(cost, axis=1)
-        better = cost[rows, pick] < best_cost
-        best_cost = np.where(better, cost[rows, pick], best_cost)
-        best_dist = np.where(better, dist[rows, pick], best_dist)
-        best_seg = np.where(better, seg_a[rows, pick], best_seg)
+    a, b = pa[cand], pb[cand]
+    piece = b - a
+    length_sq = (piece ** 2).sum(axis=2)
+    safe = np.where(length_sq == 0, 1, length_sq)
+    t = np.clip(((xy[:, None, :] - a) * piece).sum(axis=2) / safe, 0, 1)
+    closest = a + t[..., None] * piece
+    dist = np.hypot(*(xy[:, None, :] - closest).transpose(2, 0, 1))
+    along = np.abs((piece * heading[:, None, :]).sum(axis=2)) / np.sqrt(safe)
+    along = np.where(length_sq == 0, 1, along)
+    cost = dist + CROSSING_M * (1 - along)
+    pick = np.argmin(cost, axis=1)
+    best_dist = dist[rows, pick]
+    best_seg = owner[cand[rows, pick]]
     best_seg = np.where(best_dist <= MAX_OFF_M, best_seg, -1)
     return best_seg, best_dist
 
@@ -163,8 +144,9 @@ def measure(graph: Graph, coords: list[tuple[float, float]], seconds: float, rat
     line = np.asarray(coords, dtype=np.float64)
     if len(line) < 2:
         return Summary(seconds=seconds), 0.0
-    points, xy, vertex = _densify(graph, line)
-    segments, _ = _nearest_segments(graph, xy)
+    lat0 = float(np.mean(line[:, 0]))
+    points, xy, vertex = _densify(graph, line, lat0)
+    segments, _ = _nearest_segments(graph, points, xy, lat0)
     on_map = segments >= 0
     seg = np.where(on_map, segments, 0)
     main = np.where(on_map, rating.avoided[seg], False)

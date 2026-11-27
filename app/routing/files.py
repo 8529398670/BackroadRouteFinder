@@ -1,6 +1,6 @@
 """Where the map files live: <app dir>/mapdata/<region>.osm.pbf (the
-downloaded extract) and <app dir>/mapdata/<region>.npz (the graph built from
-it). Outside storage/ on purpose, so backups leave them out: both can be
+downloaded extract) and <app dir>/mapdata/<region>.graph/ (the map built from
+it, a directory of arrays: graph.py). Outside storage/ on purpose, so backups leave them out: both can be
 fetched and built again at any time.
 
 Which map the server routes on is mapdata/active.json when the Map data
@@ -35,8 +35,27 @@ def pbf_for(cfg: Config, slug: str) -> Path:
     return mapdata_dir(cfg) / f"{slug}.osm.pbf"
 
 
+GRAPH_SUFFIX = ".graph"
+
+
 def graph_for(cfg: Config, region: str) -> Path:
-    return mapdata_dir(cfg) / f"{region}.npz"
+    return mapdata_dir(cfg) / f"{region}{GRAPH_SUFFIX}"
+
+
+def region_of(path: Path) -> str:
+    return path.name.removesuffix(GRAPH_SUFFIX)
+
+
+def is_built(path: Path) -> bool:
+    return (path / "meta.json").is_file()
+
+
+def size_of(path: Path) -> int:
+    """A map directory's size on disk."""
+    try:
+        return sum(p.stat().st_size for p in path.iterdir() if p.is_file())
+    except OSError:
+        return 0
 
 
 def active_region(cfg: Config) -> str:

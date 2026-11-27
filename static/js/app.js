@@ -194,6 +194,7 @@ const App = {
     loading.push( Planner.init( me ) );
     loading.push( SavedRoutes.init( me ) );
     loading.push( ProviderKeys.init( me ) );
+    AccountData.init();
 
     // A viewer looks and changes nothing: the server refuses every write with
     // 403 view_only, so the controls that would write (data-write) are hidden

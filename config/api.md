@@ -44,6 +44,8 @@ An error reply is a JSON object whose `error` says what went wrong.
 
 | Method | Path | Summary | Who may call |
 |---|---|---|---|
+| GET | [`/api/account/export`](#get-apiaccountexport) | Download all your data | browser session or API key, anyone signed in |
+| POST | [`/api/account/import`](#post-apiaccountimport) | Load your data from a file | browser session or API key, anyone signed in |
 | POST | [`/api/account/login-link`](#post-apiaccountlogin-link) | A login link for yourself | browser session or API key, anyone signed in |
 | POST | [`/api/account/login-link/cancel`](#post-apiaccountlogin-linkcancel) | Stop your own login link working | browser session or API key, anyone signed in |
 | POST | [`/api/account/rename`](#post-apiaccountrename) | Rename your account | browser session or API key, anyone signed in |
@@ -63,6 +65,49 @@ An error reply is a JSON object whose `error` says what went wrong.
 | POST | [`/api/logs/events`](#post-apilogsevents) | Record what happened on the page | browser session or API key, anyone signed in |
 | GET | [`/api/me`](#get-apime) | Who am I | browser session or API key, anyone signed in |
 | GET | [`/api/team`](#get-apiteam) | List team | browser session or API key, anyone signed in |
+
+### GET /api/account/export
+
+Download all your data
+
+Your saved routes, planner defaults, keyboard shortcuts and themes, as one file to keep or load into another account. API keys are left out.
+
+|  |  |
+|---|---|
+| Who may call | browser session or API key, anyone signed in |
+| Errors | 401, 429, 503 |
+
+**Reply 200**: Success
+
+[`AccountData`](#accountdata).
+
+### POST /api/account/import
+
+Load your data from a file
+
+Merge a file from GET /api/account/export into your account. Saved routes already here are skipped and themes are added by id; planner defaults and shortcuts in the file replace yours.
+
+|  |  |
+|---|---|
+| Who may call | browser session or API key, anyone signed in |
+| Errors | 400, 401, 403, 409, 429, 503 |
+
+**Request body**
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `csrf_token` | string | no |  | From GET /api/me. Browser sessions only. |
+| `data` | [`AccountData`](#accountdata) | yes |  | A file from GET /api/account/export. |
+
+**Reply 200**: Success
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `prefs_replaced` | boolean | yes |  |  |
+| `routes_added` | integer | yes |  |  |
+| `routes_skipped` | integer | yes |  |  |
+| `shortcuts_replaced` | boolean | yes |  |  |
+| `themes_added` | integer | yes |  |  |
 
 ### POST /api/account/login-link
 
@@ -2126,7 +2171,7 @@ Deletes a downloaded extract or a built map to free disk space. The map the serv
 | Field | Type | Required | Limits | Description |
 |---|---|---|---|---|
 | `csrf_token` | string | no |  | From GET /api/me. Browser sessions only. |
-| `kind` | string | yes |  | extract (a downloaded .osm.pbf) or map (a built .npz). |
+| `kind` | string | yes |  | extract (a downloaded .osm.pbf) or map (a built map). |
 | `name` | string | yes |  | The area's slug, or the map's name. |
 
 **Reply 200**: Success
@@ -2543,8 +2588,9 @@ Save how the planner opens for you. Send the whole set; a loop setting or road_f
 | Field | Type | Required | Limits | Description |
 |---|---|---|---|---|
 | `allow_unpaved` | boolean or null | no |  | Deprecated, use road_rules: true is unpaved and track use. |
+| `alternatives` | integer or null | no | 1 to 10 | How many routes to offer, best first: the best and up to this many less one alternatives on different roads. |
 | `backroads` | boolean | yes |  |  |
-| `combine` | string | no | default `best` | best keeps only the best-scoring route; all returns every route, best first. |
+| `combine` | string | no | default `best` | Older than alternatives: best is 1 route, all is up to 12. Ignored when alternatives is given. |
 | `compare_fastest` | boolean | yes |  |  |
 | `csrf_token` | string | no |  | From GET /api/me. Browser sessions only. |
 | `loop_points` | integer or null | no | 4 to 8 |  |
@@ -2568,7 +2614,7 @@ Save how the planner opens for you. Send the whole set; a loop setting or road_f
 
 Plan a route
 
-The route through the waypoints that keeps time on main roads down: each minute on a road type its road_rules avoid counts penalty times over (or the type's own strength in road_factors). Times include turns, traffic signals and stop signs (delay_seconds). sources picks who plans: our own router (ours) and/or other engines (see GET /api/routing/status), each asked for its backroads route and alternatives. Every route is measured on our map and scored the same way; combine=best keeps the best, combine=all returns them all, best first. A source that fails is listed in problems and the rest still answer. With compare_fastest, the plain fastest route on our map comes last (compare=true). A waypoint with no road within routing.max_snap_m is refused with its index.
+The route through the waypoints that keeps time on main roads down: each minute on a road type its road_rules avoid counts penalty times over (or the type's own strength in road_factors). Times include turns, traffic signals and stop signs (delay_seconds). sources picks who plans: our own router (ours) and/or other engines (see GET /api/routing/status), each asked for its backroads route and alternatives (our own router plans its own alternatives on different roads). Every route is measured on our map and scored the same way, and the best alternatives routes come back, best first. Plans are cached for 15 minutes. A source that fails is listed in problems and the rest still answer. With compare_fastest, the plain fastest route on our map comes last (compare=true). A waypoint with no road within routing.max_snap_m is refused with its index.
 
 |  |  |
 |---|---|
@@ -2580,7 +2626,8 @@ The route through the waypoints that keeps time on main roads down: each minute 
 | Field | Type | Required | Limits | Description |
 |---|---|---|---|---|
 | `allow_unpaved` | boolean or null | no |  | Deprecated, use road_rules: true is unpaved and track use. |
-| `combine` | string | no | default `best` | best keeps only the best-scoring route; all returns every route, best first. |
+| `alternatives` | integer or null | no | 1 to 10 | How many routes to offer, best first (1-10). Left out: 1 with combine=best, the most with combine=all. |
+| `combine` | string | no | default `best` | Older than alternatives: best is 1 route, all is up to 12. Ignored when alternatives is given. |
 | `compare_fastest` | boolean | no | default `true` | Also plan the plain fastest route, for comparison. |
 | `csrf_token` | string | no |  | From GET /api/me. Browser sessions only. |
 | `loop` | [`Loop`](#loop) or null | no |  | Plan a loop round a center instead of a trip through the waypoints. |
@@ -2949,6 +2996,18 @@ The shapes the routes above refer to by name.
 | `role` | string | yes | one of `admin`, `user`, `viewer` |  |
 | `user_id` | integer | yes |  |  |
 
+### AccountData
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `exported_at` | string | no |  |  |
+| `format` | string | no | default `backroad-route-finder/1` | Always backroad-route-finder/1. |
+| `planner_prefs` | [`PlannerPrefs`](#plannerprefs) or null | no |  | Null: you had not set your own. |
+| `saved_routes` | array of [`ExportedRoute`](#exportedroute) | no |  |  |
+| `shortcuts` | map of string or null | no |  | The keyboard shortcuts you changed. |
+| `theme_id` | string | no |  |  |
+| `themes` | array of object or null | no |  | Your own themes; null while you follow the server's. |
+
 ### BulkReply
 
 | Field | Type | Required | Limits | Description |
@@ -2996,6 +3055,16 @@ The shapes the routes above refer to by name.
 | `error` | string | yes |  |  |
 | `field` | string | no |  | On a 400 about one field: its name. |
 | `request_id` | string | no |  | On a 5xx: the reference that finds this failure in the log. |
+
+### ExportedRoute
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `created_at` | string | no |  |  |
+| `name` | string | yes | 1 to 80 characters |  |
+| `options` | [`RouteOptions`](#routeoptions) | yes |  |  |
+| `summary` | [`RouteSummary`](#routesummary) | no |  |  |
+| `waypoints` | array of [`Waypoint`](#waypoint) | yes |  |  |
 
 ### IPNames
 
@@ -3225,6 +3294,7 @@ The shapes the routes above refer to by name.
 | `main_seconds` | number | yes |  |  |
 | `meters` | number | yes |  |  |
 | `off_map_meters` | number | yes |  | Of meters: not on our map (outside it, or roads it leaves out), counted as backroad. |
+| `rank` | integer | no |  | Its place among its source's own answers: 0 the source's best, then its alternatives. |
 | `runs` | array of [`Run`](#run) | yes |  |  |
 | `score` | number | yes |  | seconds plus (penalty - 1) times main_seconds: lower is better. |
 | `seconds` | number | yes |  |  |
@@ -3237,8 +3307,9 @@ The shapes the routes above refer to by name.
 
 | Field | Type | Required | Limits | Description |
 |---|---|---|---|---|
+| `alternatives` | integer | no | 1 to 10; default `5` | How many routes to offer, best first: the best and up to this many less one alternatives on different roads. |
 | `backroads` | boolean | no | default `true` | Backroads mode on; off plans the plain fastest route. |
-| `combine` | string | no | default `best` | best keeps only the best-scoring route; all returns every route, best first. |
+| `combine` | string | no | default `best` | Older than alternatives: best is 1 route, all is up to 12. Ignored when alternatives is given. |
 | `compare_fastest` | boolean | no | default `true` |  |
 | `loop_points` | integer | no | 4 to 8; default `6` |  |
 | `loop_radius` | number | no | 0.5 to 200; default `20` |  |
@@ -3301,14 +3372,23 @@ The shapes the routes above refer to by name.
 | Field | Type | Required | Limits | Description |
 |---|---|---|---|---|
 | `allow_unpaved` | boolean or null | no |  | Deprecated, use road_rules: true is unpaved and track use. |
+| `alternatives` | integer or null | no | 1 to 10 | How many routes to offer, best first: the best and up to this many less one alternatives on different roads. |
 | `backroads` | boolean | no | default `true` |  |
-| `combine` | string | no | default `best` | best keeps only the best-scoring route; all returns every route, best first. |
+| `combine` | string | no | default `best` | Older than alternatives: best is 1 route, all is up to 12. Ignored when alternatives is given. |
 | `loop` | [`Loop`](#loop) or null | no |  | A loop round a center, planned in place of the waypoints. |
 | `penalty` | number | no | 1 to 100; default `8` | How many times over a minute on a main road counts. 1 is the plain fastest route. |
+| `pick` | [`RoutePick`](#routepick) or null | no |  | Which of the routes offered was chosen, so opening it again shows the same one. |
 | `road_factors` | map of number or null | no |  | Its avoid strengths; null for a route saved before they could be set (the server's). |
 | `road_rules` | map of string | no |  | What to do with each road type: use it, avoid it (each minute on it counts penalty times over), or never (only when there is no other way). Categories: interstate, us_highway, state_route, county_road, local, service, track; and any road that is unpaved or restricted (private, permit or farm access). Types left out take the defaults in GET /api/routing/status. |
 | `secondary_is_main` | boolean or null | no |  | Deprecated, use road_rules: false is state_route use. |
 | `sources` | array of string | no |  |  |
+
+### RoutePick
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `rank` | integer | no | 0 to 20 |  |
+| `source` | string | yes |  | ours, or another engine: valhalla, osrm, ors, graphhopper, tomtom, here, mapbox, google. |
 
 ### RouteSummary
 

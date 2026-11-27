@@ -149,7 +149,7 @@
         screen that does one thing is one card.
       -->
       <section id="signed-in" hidden>
-        <!-- The route planner (planner.js, map.js, gpx.js). The controls are a
+        <!-- The route planner (planner.js, map.js, export.js). The controls are a
              toolbar of dropdowns above the map, so the map has the full width;
              the route's summary follows the map. -->
         <section class="view view-full" data-view="plan" data-path="/plan" id="plan-panel">
@@ -263,17 +263,6 @@
               <div class="dropdown-menu plan-menu plan-menu-scroll p-3 shadow" id="plan-menu-sources" aria-labelledby="plan-menu-sources-toggle">
                 <p class="small text-body-secondary" data-i18n="plan.sources_help"></p>
                 <div id="plan-sources" class="d-flex flex-column gap-1 mb-2"></div>
-                <fieldset id="plan-combine">
-                  <legend class="form-label fs-6 mb-1" data-i18n="plan.combine_label"></legend>
-                  <div class="form-check">
-                    <input type="radio" class="form-check-input" name="plan-combine" id="plan-combine-best" value="best" />
-                    <label class="form-check-label" for="plan-combine-best" data-i18n="plan.combine_best"></label>
-                  </div>
-                  <div class="form-check">
-                    <input type="radio" class="form-check-input" name="plan-combine" id="plan-combine-all" value="all" />
-                    <label class="form-check-label" for="plan-combine-all" data-i18n="plan.combine_all"></label>
-                  </div>
-                </fieldset>
               </div>
             </div>
           </div>
@@ -297,6 +286,10 @@
                 <div class="card-body">
                   <h3 class="card-title" data-i18n="plan.result_heading"></h3>
                   <div id="plan-problems" class="small alert alert-warning py-2" role="status" hidden></div>
+                  <div class="d-flex align-items-center gap-2 mb-2">
+                    <label for="plan-alternatives" class="small text-body-secondary" data-i18n="plan.alternatives_label"></label>
+                    <select id="plan-alternatives" class="form-select form-select-sm w-auto"></select>
+                  </div>
                   <div id="plan-summary"></div>
                   <details class="mt-3">
                     <summary class="small fw-semibold" data-i18n="plan.via_heading"></summary>
@@ -304,7 +297,20 @@
                   </details>
                   <div class="d-flex flex-wrap gap-2 mt-3">
                     <button id="plan-save" type="button" class="btn btn-sm btn-primary" data-write><i class="bi bi-bookmark-plus" aria-hidden="true"></i> <span data-i18n="plan.save"></span></button>
-                    <button id="plan-gpx" type="button" class="btn btn-sm btn-outline-secondary"><i class="bi bi-download" aria-hidden="true"></i> <span data-i18n="plan.gpx"></span></button>
+                    <div class="dropdown">
+                      <button id="plan-export" type="button" class="btn btn-sm btn-outline-secondary dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false"><i class="bi bi-download" aria-hidden="true"></i> <span data-i18n="plan.export"></span></button>
+                      <ul class="dropdown-menu" id="plan-export-menu">
+                        <li><button type="button" class="dropdown-item" data-export="gpx"><span data-i18n="plan.export_gpx"></span><small class="d-block text-body-secondary" data-i18n="plan.export_gpx_hint"></small></button></li>
+                        <li><button type="button" class="dropdown-item" data-export="gpx_route"><span data-i18n="plan.export_gpx_route"></span><small class="d-block text-body-secondary" data-i18n="plan.export_gpx_route_hint"></small></button></li>
+                        <li><button type="button" class="dropdown-item" data-export="tcx"><span data-i18n="plan.export_tcx"></span><small class="d-block text-body-secondary" data-i18n="plan.export_tcx_hint"></small></button></li>
+                        <li><button type="button" class="dropdown-item" data-export="itn"><span data-i18n="plan.export_itn"></span><small class="d-block text-body-secondary" data-i18n="plan.export_itn_hint"></small></button></li>
+                        <li><button type="button" class="dropdown-item" data-export="kml"><span data-i18n="plan.export_kml"></span><small class="d-block text-body-secondary" data-i18n="plan.export_kml_hint"></small></button></li>
+                        <li><button type="button" class="dropdown-item" data-export="geojson"><span data-i18n="plan.export_geojson"></span><small class="d-block text-body-secondary" data-i18n="plan.export_geojson_hint"></small></button></li>
+                        <li><button type="button" class="dropdown-item" data-export="csv"><span data-i18n="plan.export_csv"></span><small class="d-block text-body-secondary" data-i18n="plan.export_csv_hint"></small></button></li>
+                        <li><hr class="dropdown-divider" /></li>
+                        <li><button type="button" class="dropdown-item" data-export="google"><i class="bi bi-box-arrow-up-right me-1" aria-hidden="true"></i><span data-i18n="plan.export_google"></span><small class="d-block text-body-secondary" data-i18n="plan.export_google_hint"></small></button></li>
+                      </ul>
+                    </div>
                   </div>
                 </div>
               </section>
@@ -356,6 +362,18 @@
                   </thead>
                   <tbody id="engines-rows"></tbody>
                 </table>
+              </div>
+            </div>
+          </section>
+
+          <section class="card mb-3" id="data-card" data-path="/settings/data">
+            <div class="card-body">
+              <h3 class="card-title" data-i18n="data.heading"></h3>
+              <p class="small text-body-secondary" data-i18n="data.description"></p>
+              <div class="d-flex flex-wrap gap-2">
+                <button type="button" id="data-export" class="btn btn-sm btn-outline-primary"><i class="bi bi-download" aria-hidden="true"></i> <span data-i18n="data.export"></span></button>
+                <button type="button" id="data-import" class="btn btn-sm btn-outline-primary" data-write><i class="bi bi-upload" aria-hidden="true"></i> <span data-i18n="data.import"></span></button>
+                <input type="file" id="data-import-file" accept="application/json,.json" hidden />
               </div>
             </div>
           </section>
@@ -1227,11 +1245,12 @@
   <script src="/vendor/leaflet.js"></script>
   <script src="/js/format.js"></script>
   <script src="/js/map.js"></script>
-  <script src="/js/gpx.js"></script>
+  <script src="/js/export.js"></script>
   <script src="/js/planner.js"></script>
   <script src="/js/providers.js"></script>
   <script src="/js/mapdata.js"></script>
   <script src="/js/saved_routes.js"></script>
+  <script src="/js/account_data.js"></script>
   <script src="/js/app.js"></script>
 </body>
 </html>

@@ -71,58 +71,71 @@ class Turns:
         return float(self.seconds[row][hits[0]]) if len(hits) else 0.0
 
 
-def _bearing(dx: np.ndarray, dy: np.ndarray) -> np.ndarray:
-    """Degrees clockwise from north."""
-    return np.degrees(np.arctan2(dx, dy))
+def bearing_deg(lat0, lon0, lat1, lon1) -> np.ndarray:
+    """Degrees clockwise from north, from one point to the next (flat, which
+    is exact enough over a few metres)."""
+    lat0, lat1 = np.asarray(lat0, dtype=np.float64), np.asarray(lat1, dtype=np.float64)
+    dx = ((np.asarray(lon1, dtype=np.float64) - np.asarray(lon0, dtype=np.float64) + 540.0) % 360.0 - 180.0) * np.cos(np.radians((lat0 + lat1) / 2))
+    dy = lat1 - lat0
+    return np.degrees(np.arctan2(dx, dy)) % 360.0
 
 
-def build(
-    *,
-    node_count: int,
-    seg_a: np.ndarray, seg_b: np.ndarray, seg_class: np.ndarray,
-    seg_g0: np.ndarray, seg_g1: np.ndarray, seg_stop_a: np.ndarray, seg_stop_b: np.ndarray,
-    node_signal: np.ndarray, node_stop: np.ndarray,
-    geom_x: np.ndarray, geom_y: np.ndarray,
-    edge_seg: np.ndarray, edge_rev: np.ndarray, edge_src: np.ndarray, edge_dst: np.ndarray,
-) -> Turns:
-    """edge_* must be sorted by edge_src."""
-    edges = len(edge_seg)
+@dataclass
+class Tables:
+    """What pricing a move needs, all per edge, segment or node; disk arrays
+    (build_stream step H) or in memory. edge_* sorted by start node, and
+    node_edge_ptr[n] the first edge leaving node n."""
+    edge_seg: np.ndarray
+    edge_rev: np.ndarray
+    edge_dst: np.ndarray
+    node_edge_ptr: np.ndarray
+    seg_class: np.ndarray
+    seg_stop_a: np.ndarray
+    seg_stop_b: np.ndarray
+    node_signal: np.ndarray
+    node_stop: np.ndarray
+    node_degree: np.ndarray
+    node_biggest: np.ndarray
+    leaves: np.ndarray        # degrees: which way each edge leaves its start
+    arrives: np.ndarray       # and arrives at its end
 
-    # Which way each edge leaves its start and arrives at its end.
-    g0, g1 = seg_g0[edge_seg], seg_g1[edge_seg]
-    first = _bearing(geom_x[g0 + 1] - geom_x[g0], geom_y[g0 + 1] - geom_y[g0])
-    last = _bearing(geom_x[g1] - geom_x[g1 - 1], geom_y[g1] - geom_y[g1 - 1])
-    leaves = np.where(edge_rev, (last + 180.0) % 360.0, first).astype(np.float32)
-    arrives = np.where(edge_rev, (first + 180.0) % 360.0, last).astype(np.float32)
-    del g0, g1, first, last
 
-    # Each intersection: how many roads meet there, and the biggest of them.
-    degree = np.bincount(seg_a, minlength=node_count) + np.bincount(seg_b, minlength=node_count)
-    seg_rank = classes.RANKS[seg_class].astype(np.int16)
-    biggest = np.zeros(node_count, dtype=np.int16)
-    np.maximum.at(biggest, seg_a, seg_rank)
-    np.maximum.at(biggest, seg_b, seg_rank)
+def _take(source: np.ndarray, index: np.ndarray) -> np.ndarray:
+    """source[index], reading a disk array in order."""
+    index = np.asarray(index)
+    order = np.argsort(index, kind="stable")
+    out = np.empty(len(index), dtype=source.dtype)
+    out[order] = source[index[order]]
+    return out
 
-    # Every move: from edge e onto each edge leaving the node e arrives at.
-    out_ptr = np.zeros(node_count + 1, dtype=np.int64)
-    np.cumsum(np.bincount(edge_src, minlength=node_count), out=out_ptr[1:])
-    counts = out_ptr[edge_dst + 1] - out_ptr[edge_dst]
-    move_from = np.repeat(np.arange(edges, dtype=np.int64), counts)
+
+def moves(t: Tables, lo: int, hi: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Every move out of edges lo..hi-1: how many leave each edge, and each
+    move's next edge and seconds, in order of the edge they leave."""
+    edges = hi - lo
+    from_ids = np.arange(lo, hi, dtype=np.int64)
+    dst = np.asarray(t.edge_dst[lo:hi], dtype=np.int64)
+    out_lo = _take(t.node_edge_ptr, dst)
+    out_hi = _take(t.node_edge_ptr, dst + 1)
+    counts = out_hi - out_lo
+    move_from = np.repeat(from_ids, counts)
     offsets = np.arange(len(move_from), dtype=np.int64) - np.repeat(np.cumsum(counts) - counts, counts)
-    move_to = out_ptr[edge_dst[move_from]] + offsets
+    move_to = np.repeat(out_lo, counts) + offsets
     del offsets
 
-    uturn = edge_seg[move_to] == edge_seg[move_from]
-    dead_end = counts[move_from] == 1
+    seg_from_all = np.asarray(t.edge_seg[lo:hi], dtype=np.int64)
+    rev_from_all = np.asarray(t.edge_rev[lo:hi], dtype=bool)
+    arrives_all = np.asarray(t.arrives[lo:hi], dtype=np.float32)
+    local = move_from - lo
+    seg_from = seg_from_all[local]
+    seg_to = _take(t.edge_seg, move_to).astype(np.int64)
+    uturn = seg_to == seg_from
+    dead_end = counts[local] == 1
     keep = ~uturn | dead_end
-    move_from, move_to, uturn = move_from[keep], move_to[keep], uturn[keep]
-    del dead_end, keep
-    # Halves the memory of everything below; a turn's seconds need no more.
-    move_from = move_from.astype(np.int32)
-    move_to = move_to.astype(np.int32)
+    move_from, move_to, uturn, local, seg_from, seg_to = move_from[keep], move_to[keep], uturn[keep], local[keep], seg_from[keep], seg_to[keep]
 
-    node = edge_dst[move_from]
-    delta = (leaves[move_to] - arrives[move_from] + 540.0) % 360.0 - 180.0
+    node = dst[local]
+    delta = (_take(t.leaves, move_to) - arrives_all[local] + 540.0) % 360.0 - 180.0
     angle = np.abs(delta)
     right = delta > 0
     straight = angle < STRAIGHT_DEG
@@ -133,16 +146,15 @@ def build(
         [0.0, SLIGHT_S, np.where(right, RIGHT_S, LEFT_S)],
         np.where(right, SHARP_RIGHT_S, SHARP_LEFT_S),
     )
-
-    from_class = seg_class[edge_seg[move_from]]
-    to_class = seg_class[edge_seg[move_to]]
+    from_class = _take(t.seg_class, seg_from)
+    to_class = _take(t.seg_class, seg_to)
     from_rank = classes.RANKS[from_class]
     to_rank = classes.RANKS[to_class]
-    big = biggest[node]
+    big = _take(t.node_biggest, node)
     merge = classes.LINKS[from_class] & classes.MERGE_TARGETS[to_class]
-    seg_from = edge_seg[move_from]
-    stop_sign = node_stop[node] | np.where(edge_rev[move_from], seg_stop_a[seg_from], seg_stop_b[seg_from])
-    signal = node_signal[node]
+    stop_end = np.where(rev_from_all[local], _take(t.seg_stop_a, seg_from), _take(t.seg_stop_b, seg_from))
+    stop_sign = _take(t.node_stop, node) | stop_end
+    signal = _take(t.node_signal, node)
     gives_way = (from_rank < big) & ~merge
     gap = np.where(right, 0.0, np.where(big >= MAJOR_RANK, GAP_MAJOR_S, GAP_MINOR_S))
     stays_on_top = (from_rank == big) & (to_rank == big) & straight
@@ -152,11 +164,9 @@ def build(
         [SIGNAL_S + np.where(left, SIGNAL_LEFT_S, 0.0), STOP_S + gap, 0.0, STOP_S + gap, CAUTION_S, 0.0],
         0.0,
     )
-    junction = degree[node] >= 3
+    junction = _take(t.node_degree, node) >= 3
     bend = np.where(angle >= SLIGHT_DEG, BEND_S, 0.0)
     seconds = np.where(junction, turn + control, bend)
     seconds = np.where(uturn, UTURN_S, seconds)
-
-    ptr = np.zeros(edges + 1, dtype=np.int64)
-    np.cumsum(np.bincount(move_from, minlength=edges), out=ptr[1:])
-    return Turns(ptr=ptr, to=move_to.astype(np.int32), seconds=seconds.astype(np.float32))
+    out_counts = np.bincount(move_from - lo, minlength=edges).astype(np.int64)
+    return out_counts, move_to.astype(np.int32), seconds.astype(np.float32)

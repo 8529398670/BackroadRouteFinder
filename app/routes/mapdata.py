@@ -149,10 +149,12 @@ def _reply(request: Request) -> MapDataReply:
     us = AreaInfo(slug=regions.US, name=regions.US_NAME, approx_mb=regions.US_MB, downloaded=_file(files.pbf_for(cfg, regions.US)))
     graphs = []
     if folder.is_dir():
-        for path in sorted(folder.glob("*.npz")):
-            info = _file(path)
-            if info is not None:
-                graphs.append(GraphInfo(region=path.stem, areas=files.areas_of(cfg, path.stem), file=info, active=path.stem == region))
+        for path in sorted(folder.glob("*" + files.GRAPH_SUFFIX)):
+            if not files.is_built(path):
+                continue
+            info = FileInfo(bytes=files.size_of(path), modified=_iso((path / "meta.json").stat().st_mtime))
+            name = files.region_of(path)
+            graphs.append(GraphInfo(region=name, areas=files.areas_of(cfg, name), file=info, active=name == region))
     task = _runner(request).task
     task_info = None
     if task is not None:
@@ -187,7 +189,7 @@ class RunMapTask(RequestType):
 def _activate(request: Request, region: str) -> str:
     cfg = get_config(request)
     path = files.graph_for(cfg, region)
-    if not path.is_file():
+    if not files.is_built(path):
         raise Refused(404, f"no map named {region} has been built")
     _holder(request).switch(path)
     files.set_active(cfg, region)
@@ -266,7 +268,7 @@ def activate(request: Request, body: RegionOnly) -> MapDataReply:
 
 
 class DeleteFile(RequestType):
-    kind: Annotated[str, Meta(pattern="^(extract|map)$", description="extract (a downloaded .osm.pbf) or map (a built .npz).",
+    kind: Annotated[str, Meta(pattern="^(extract|map)$", description="extract (a downloaded .osm.pbf) or map (a built map).",
                               extra={"error": "kind must be extract or map"})]
     name: Annotated[str, Meta(pattern=r"^[a-z0-9][a-z0-9_+-]{0,127}$", description="The area's slug, or the map's name.",
                               extra={"error": "unknown file"})]
@@ -288,9 +290,14 @@ def delete_file(request: Request, body: DeleteFile) -> MapDataReply:
         path = files.graph_for(cfg, body.name)
     else:
         path = files.pbf_for(cfg, body.name)
-    if not path.is_file():
-        raise Refused(404, "no such file")
-    path.unlink()
+    if body.kind == "map":
+        if not files.is_built(path):
+            raise Refused(404, "no such file")
+        shutil.rmtree(path)
+    else:
+        if not path.is_file():
+            raise Refused(404, "no such file")
+        path.unlink()
     if body.kind == "map":
         files.mapdata_dir(cfg).joinpath(f"{body.name}.json").unlink(missing_ok=True)
     audit(request, KIND_ADMIN, "map file deleted", {"kind": body.kind, "name": body.name})

@@ -43,6 +43,7 @@ from app.core.live_reload import Watcher
 from app.core.static_files import StaticServer
 from app.routes import (
     account,
+    account_data,
     admin,
     api_docs_md,
     api_keys,
@@ -92,6 +93,7 @@ class RequireLogs(Guard):
 # Every module with declared routes, in the order the docs list ties.
 MODULES = [
     account,
+    account_data,
     admin,
     api_docs_md,
     api_keys,

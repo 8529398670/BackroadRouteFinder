@@ -12,7 +12,7 @@ from app.apidocs import Request as RequestType
 from app.core.security import actor_from
 from app.models import saved_routes
 from app.routes.helpers import DateTime, Page, Paged, Refused, cut_page, get_store
-from app.routes.planner import MAX_WAYPOINTS, OURS, Combine, LegacySecondary, LegacyUnpaved, LoopSpec, Penalty, RoadFactors, RoadRules, Source
+from app.routes.planner import MAX_WAYPOINTS, OURS, Alternatives, Combine, LegacySecondary, LegacyUnpaved, LoopSpec, Penalty, RoadFactors, RoadRules, Source
 from app.routing import costs
 
 RouteName = Annotated[str, Meta(min_length=1, max_length=saved_routes.NAME_MAX, extra={"error": f"name must be 1-{saved_routes.NAME_MAX} characters"})]
@@ -26,6 +26,12 @@ class Waypoint(Reply):
     label: Annotated[str, Meta(max_length=200)] = ""
 
 
+class RoutePick(Reply):
+    api_name: ClassVar[str] = "RoutePick"
+    source: Source
+    rank: Annotated[int, Meta(ge=0, le=20)] = 0
+
+
 class RouteOptions(Reply):
     api_name: ClassVar[str] = "RouteOptions"
     backroads: bool = True
@@ -34,6 +40,8 @@ class RouteOptions(Reply):
     road_factors: Annotated[RoadFactors | None, Meta(description="Its avoid strengths; null for a route saved before they could be set (the server's).")] = None
     sources: list[Source] = msgspec.field(default_factory=lambda: [OURS])
     combine: Combine = "best"
+    alternatives: Alternatives | None = None
+    pick: Annotated[RoutePick | None, Meta(description="Which of the routes offered was chosen, so opening it again shows the same one.")] = None
     loop: Annotated[LoopSpec | None, Meta(description="A loop round a center, planned in place of the waypoints.")] = None
     secondary_is_main: LegacySecondary = None
     allow_unpaved: LegacyUnpaved = None

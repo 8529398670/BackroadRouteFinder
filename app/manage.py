@@ -56,7 +56,8 @@ Usage:
   paths                                 where this app keeps its state
   fetch-osm       [--state slug ...]    download the OpenStreetMap extract (or US states)
                                         (routing.pbf_url) into <app dir>/mapdata/
-  build-graph     [--pbf path | --state slug ...]
+  convert-graph   [--npz path] [--keep]  convert old .npz maps to the on-disk format
+  build-graph     [--pbf path | --state slug ...] [--memory-mb N]
                                         turn the extract(s) into the router's graph;
                                         needs app/requirements-build.txt (osmium),
                                         then restart the server to load it
@@ -188,6 +189,11 @@ def build_parser() -> argparse.ArgumentParser:
     p = commands.add_parser("build-graph", help="turn the extract into the router's graph")
     p.add_argument("--pbf", default="", help="an extract to build from instead of mapdata/<region>.osm.pbf")
     p.add_argument("--state", action="append", default=[], help="build one map from these downloaded states (repeatable), named after them")
+    p.add_argument("--memory-mb", type=int, default=0, help="memory the build may use at once (default routing.build_memory_mb)")
+    p = commands.add_parser("convert-graph", help="convert old single-file .npz maps to the on-disk format")
+    p.add_argument("--npz", default="", help="one file; default every mapdata/*.npz")
+    p.add_argument("--memory-mb", type=int, default=0, help="memory the conversion may use at once")
+    p.add_argument("--keep", action="store_true", help="keep the .npz afterwards")
 
     p = commands.add_parser("logs", help="the activity log: days, or one day's entries")
     p.add_argument("--day", default="", help="a UTC date, YYYY-MM-DD; without it, list the days")
@@ -216,6 +222,9 @@ def run(arguments: list[str]) -> None:
         return
     if args.command == "build-graph":
         command_build_graph(cfg, args)
+        return
+    if args.command == "convert-graph":
+        command_convert_graph(cfg, args)
         return
     # "logs" reads the log files, never the database, so it works the same
     # with the server up or down -- the files are only ever appended to.
@@ -622,12 +631,8 @@ def command_fetch_osm(cfg: config.Config, args: argparse.Namespace) -> None:
 
 
 def command_build_graph(cfg: config.Config, args: argparse.Namespace) -> None:
-    from app.routing import files, regions
+    from app.routing import build_stream, files, regions
 
-    try:
-        from app.routing import build, osm_parse
-    except ImportError as error:
-        raise ManageError(f"{error}: install the build tools first: .venv/bin/pip install -r app/requirements-build.txt") from None
     if args.state:
         for slug in args.state:
             if not regions.valid(slug):
@@ -648,16 +653,30 @@ def command_build_graph(cfg: config.Config, args: argparse.Namespace) -> None:
     except ImportError as error:
         raise ManageError(f"{error}: install the build tools first: .venv/bin/pip install -r app/requirements-build.txt") from None
     say = lambda line: print(line, flush=True)  # noqa: E731
-    parts = []
-    for source in sources:
-        say(f"reading {source}")
-        parts.append(osm_parse.read(source, progress=say))
-    ways = osm_parse.merge(parts, progress=say)
-    del parts
-    say("building the graph")
-    meta = build.build(ways, out, ",".join(s.name for s in sources), progress=say)
+    budget = args.memory_mb or cfg.file.routing.build_memory_mb
+    meta = build_stream.build_from_pbfs(sources, out, budget_mb=budget, progress=say)
     if slugs:
-        files.write_areas(cfg, out.stem, slugs)
+        files.write_areas(cfg, files.region_of(out), slugs)
     say(f"wrote {out}: {meta['nodes']:,} intersections, {meta['segments']:,} segments, "
-        f"{meta['bytes'] / 1e6:.0f} MB, in {meta['seconds']}s")
+        f"{meta['bytes'] / 1e6:.0f} MB, in {meta['seconds']}s, peak memory {meta['peak_mb']} MB")
     print("Use it from the Map data screen, or restart the server (scripts/run.sh).", flush=True)
+
+
+def command_convert_graph(cfg: config.Config, args: argparse.Namespace) -> None:
+    """Old single-file maps (.npz) into the on-disk format, without the extract."""
+    from app.routing import build_stream, files
+
+    folder = files.mapdata_dir(cfg)
+    olds = [Path(args.npz)] if args.npz else sorted(folder.glob("*.npz"))
+    if not olds:
+        print("no old .npz maps to convert", flush=True)
+        return
+    say = lambda line: print(line, flush=True)  # noqa: E731
+    for old in olds:
+        out = folder / f"{old.stem}{files.GRAPH_SUFFIX}"
+        say(f"converting {old} to {out}")
+        meta = build_stream.convert_npz(old, out, budget_mb=args.memory_mb or cfg.file.routing.build_memory_mb, progress=say)
+        say(f"wrote {out}: {meta['nodes']:,} intersections, {meta['segments']:,} segments, {meta['bytes'] / 1e6:.0f} MB")
+        if not args.keep:
+            old.unlink()
+            say(f"removed {old}")
