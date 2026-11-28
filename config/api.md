@@ -1829,10 +1829,9 @@ Runs POST /api/admin/users/{user_id}/sessions/{session_id}/revoke once per item:
 | POST | [`/api/owner/logs/prune`](#post-apiownerlogsprune) | Apply the retention rules now | browser session only, the owner |
 | GET | [`/api/owner/logs/stream`](#get-apiownerlogsstream) | New log entries as they happen | browser session only, the owner |
 | GET | [`/api/owner/mapdata`](#get-apiownermapdata) | Map data | browser session only, the owner |
-| POST | [`/api/owner/mapdata/activate`](#post-apiownermapdataactivate) | Route on another map | browser session only, the owner |
 | POST | [`/api/owner/mapdata/cancel`](#post-apiownermapdatacancel) | Stop the map task | browser session only, the owner |
 | POST | [`/api/owner/mapdata/delete`](#post-apiownermapdatadelete) | Delete a map file | browser session only, the owner |
-| POST | [`/api/owner/mapdata/run`](#post-apiownermapdatarun) | Download and build a map | browser session only, the owner |
+| POST | [`/api/owner/mapdata/run`](#post-apiownermapdatarun) | Download and build maps | browser session only, the owner |
 | GET | [`/api/owner/portal`](#get-apiownerportal) | ProjectPortal's accounts | browser session only, the owner |
 | POST | [`/api/owner/portal/connect`](#post-apiownerportalconnect) | Connect ProjectPortal | browser session only, the owner |
 | POST | [`/api/owner/portal/disconnect`](#post-apiownerportaldisconnect) | Disconnect ProjectPortal | browser session only, the owner |
@@ -2075,7 +2074,7 @@ Text, as `text/event-stream`.
 
 Map data
 
-The map the server routes on, the extracts downloaded and maps built so far, every US state and country that can be downloaded, and the download or build running now (with its output).
+The maps built so far (which are open now), the extracts downloaded, every US state and country that can be downloaded, and the download or build running now (with its output) and those waiting.
 
 |  |  |
 |---|---|
@@ -2092,49 +2091,16 @@ The map the server routes on, the extracts downloaded and maps built so far, eve
 | `disk_free_bytes` | integer | yes |  |  |
 | `folder` | string | yes |  |  |
 | `graphs` | array of [`MapGraph`](#mapgraph) | yes |  |  |
-| `loaded` | [`MapLoaded`](#maploaded) | yes |  |  |
 | `memory_bytes` | integer | yes |  | This machine's memory, 0 when unknown. |
 | `task` | [`MapTask`](#maptask) or null | yes |  |  |
 | `us` | [`MapArea`](#maparea) | yes |  |  |
-
-### POST /api/owner/mapdata/activate
-
-Route on another map
-
-Switches the server to a map built earlier, without a restart. The current one keeps answering until the new one has loaded. Remembered across restarts.
-
-|  |  |
-|---|---|
-| Who may call | browser session only, the owner |
-| Errors | 400, 403, 404, 409, 429, 503 |
-
-**Request body**
-
-| Field | Type | Required | Limits | Description |
-|---|---|---|---|---|
-| `csrf_token` | string | no |  | From GET /api/me. Browser sessions only. |
-| `region` | string | yes |  | A built map's name, as GET /api/owner/mapdata lists it. |
-
-**Reply 200**: Success
-
-| Field | Type | Required | Limits | Description |
-|---|---|---|---|---|
-| `areas` | array of [`MapArea`](#maparea) | yes |  | The US states. |
-| `can_build` | boolean | yes |  | Whether osmium is installed here, which building needs. |
-| `countries` | array of [`MapArea`](#maparea) | yes |  | Every other country, by continent then name. |
-| `disk_free_bytes` | integer | yes |  |  |
-| `folder` | string | yes |  |  |
-| `graphs` | array of [`MapGraph`](#mapgraph) | yes |  |  |
-| `loaded` | [`MapLoaded`](#maploaded) | yes |  |  |
-| `memory_bytes` | integer | yes |  | This machine's memory, 0 when unknown. |
-| `task` | [`MapTask`](#maptask) or null | yes |  |  |
-| `us` | [`MapArea`](#maparea) | yes |  |  |
+| `waiting` | array of [`MapTaskWaiting`](#maptaskwaiting) | yes |  | Tasks queued behind the one running, in order. |
 
 ### POST /api/owner/mapdata/cancel
 
 Stop the map task
 
-Stops the download or build running now. A cut-off download leaves no file behind.
+Stops the download or build running now, or takes a waiting one off the queue (id). A cut-off download leaves no file behind.
 
 |  |  |
 |---|---|
@@ -2146,6 +2112,7 @@ Stops the download or build running now. A cut-off download leaves no file behin
 | Field | Type | Required | Limits | Description |
 |---|---|---|---|---|
 | `csrf_token` | string | no |  | From GET /api/me. Browser sessions only. |
+| `id` | integer or null | no |  | A waiting task to take off the queue; left out, the one running is stopped. |
 
 **Reply 200**: Success
 
@@ -2157,16 +2124,16 @@ Stops the download or build running now. A cut-off download leaves no file behin
 | `disk_free_bytes` | integer | yes |  |  |
 | `folder` | string | yes |  |  |
 | `graphs` | array of [`MapGraph`](#mapgraph) | yes |  |  |
-| `loaded` | [`MapLoaded`](#maploaded) | yes |  |  |
 | `memory_bytes` | integer | yes |  | This machine's memory, 0 when unknown. |
 | `task` | [`MapTask`](#maptask) or null | yes |  |  |
 | `us` | [`MapArea`](#maparea) | yes |  |  |
+| `waiting` | array of [`MapTaskWaiting`](#maptaskwaiting) | yes |  | Tasks queued behind the one running, in order. |
 
 ### POST /api/owner/mapdata/delete
 
 Delete a map file
 
-Deletes a downloaded extract or a built map to free disk space. The map the server is routing on cannot be deleted.
+Deletes a downloaded extract or a built map to free disk space. A joined map is built again when a trip needs it; an area's own map at the server's next start while its extract is still downloaded.
 
 |  |  |
 |---|---|
@@ -2191,31 +2158,31 @@ Deletes a downloaded extract or a built map to free disk space. The map the serv
 | `disk_free_bytes` | integer | yes |  |  |
 | `folder` | string | yes |  |  |
 | `graphs` | array of [`MapGraph`](#mapgraph) | yes |  |  |
-| `loaded` | [`MapLoaded`](#maploaded) | yes |  |  |
 | `memory_bytes` | integer | yes |  | This machine's memory, 0 when unknown. |
 | `task` | [`MapTask`](#maptask) or null | yes |  |  |
 | `us` | [`MapArea`](#maparea) | yes |  |  |
+| `waiting` | array of [`MapTaskWaiting`](#maptaskwaiting) | yes |  | Tasks queued behind the one running, in order. |
 
 ### POST /api/owner/mapdata/run
 
-Download and build a map
+Download and build maps
 
-Downloads the areas' extracts from Geofabrik (missing ones, all, or none), builds one map from them, and switches the server to it -- each step optional. Runs in the background; GET /api/owner/mapdata shows its progress. One task at a time.
+Downloads the areas' extracts from Geofabrik (missing ones, all, or none), then builds each into a map of its own -- or, with join, one map of them all. Every map built is used at once: each route opens the one that covers it. Runs in the background, after any task already running; GET /api/owner/mapdata shows its progress.
 
 |  |  |
 |---|---|
 | Who may call | browser session only, the owner |
-| Errors | 400, 403, 404, 409, 429, 503 |
+| Errors | 400, 403, 404, 429, 503 |
 
 **Request body**
 
 | Field | Type | Required | Limits | Description |
 |---|---|---|---|---|
-| `activate` | boolean | no | default `true` | Switch the server to the new map once it is built. |
 | `areas` | array of string | yes |  |  |
-| `build` | boolean | no | default `true` | Build one map from the areas after downloading. |
+| `build` | boolean | no | default `true` | Build a map of each area on its own after downloading (only those without one, or all with download=all), or with join one map of them all. |
 | `csrf_token` | string | no |  | From GET /api/me. Browser sessions only. |
 | `download` | string | no | default `missing` | Which extracts to fetch first: missing ones, all (fresh copies), or none. |
+| `join` | boolean | no |  | Build one joined map of all the areas instead of one each. |
 
 **Reply 200**: Success
 
@@ -2227,10 +2194,10 @@ Downloads the areas' extracts from Geofabrik (missing ones, all, or none), build
 | `disk_free_bytes` | integer | yes |  |  |
 | `folder` | string | yes |  |  |
 | `graphs` | array of [`MapGraph`](#mapgraph) | yes |  |  |
-| `loaded` | [`MapLoaded`](#maploaded) | yes |  |  |
 | `memory_bytes` | integer | yes |  | This machine's memory, 0 when unknown. |
 | `task` | [`MapTask`](#maptask) or null | yes |  |  |
 | `us` | [`MapArea`](#maparea) | yes |  |  |
+| `waiting` | array of [`MapTaskWaiting`](#maptaskwaiting) | yes |  | Tasks queued behind the one running, in order. |
 
 ### GET /api/owner/portal
 
@@ -2571,7 +2538,7 @@ Can the server do real work
 
 Search for a place
 
-Addresses and places matching q, within the map's area, best first. Asked of routing.geocoder_url by the server, at most once a second for everyone together; 404 while place search is off.
+Addresses and places matching q, anywhere, those in the map in view (near) first. Asked of routing.geocoder_url by the server, at most once a second for everyone together; 404 while place search is off.
 
 |  |  |
 |---|---|
@@ -2583,6 +2550,7 @@ Addresses and places matching q, within the map's area, best first. Asked of rou
 | Name | In | Type | Required | Limits | Description |
 |---|---|---|---|---|---|
 | `q` | query | string | no | 2 to 200 characters | An address or place name. |
+| `near` | query | string | no |  | south,west,north,east of the map in view: places there come first. |
 
 **Reply 200**: Success
 
@@ -2747,6 +2715,8 @@ The route through the waypoints that keeps time on main roads down: each minute 
 
 | Field | Type | Required | Limits | Description |
 |---|---|---|---|---|
+| `building` | string | no |  | With off_map: the areas a joined map is being built from for this trip, named; our router plans it once that is ready. |
+| `map` | string | no |  | The map it was planned on (empty with off_map). |
 | `milliseconds` | integer | yes |  |  |
 | `off_map` | boolean | no |  | Planned by the other engines alone, since a point is off our map (PlanRoute.off_map). |
 | `problems` | array of [`SourceProblem`](#sourceproblem) | yes |  |  |
@@ -2762,7 +2732,7 @@ The route through the waypoints that keeps time on main roads down: each minute 
 
 The router's state
 
-Whether the map is loaded, what it covers, and the server's planner defaults.
+Which maps are built and what they cover, and the server's planner defaults.
 
 |  |  |
 |---|---|
@@ -2773,7 +2743,8 @@ Whether the map is loaded, what it covers, and the server's planner defaults.
 
 | Field | Type | Required | Limits | Description |
 |---|---|---|---|---|
-| `bbox` | array of number | yes |  | [south, west, north, east] of the map, once loaded. |
+| `bbox` | array of number | yes |  | [south, west, north, east] of the map shown first. |
+| `building` | array of string | no |  | Maps being built or waiting to be (their task titles). |
 | `built_at` | string | yes |  |  |
 | `default_penalty` | number | yes |  |  |
 | `error` | string | yes |  |  |
@@ -2781,15 +2752,16 @@ Whether the map is loaded, what it covers, and the server's planner defaults.
 | `loop_radius` | number | yes |  | How the loop planner opens: radius, unit, ring points and reuse (routing.loop_*). |
 | `loop_reuse` | number | yes |  |  |
 | `loop_unit` | string | yes |  |  |
+| `maps` | array of [`MapBrief`](#mapbrief) | no |  | Every map built so far. |
 | `nodes` | integer | yes |  |  |
 | `place_search` | boolean | yes |  | Whether GET /api/geocode is available. |
-| `region` | string | yes |  |  |
+| `region` | string | yes |  | The map shown first: the last one a route used. |
 | `restricted_on_map` | boolean | yes |  | Whether the loaded map holds restricted roads (one built before them leaves them out). |
 | `road_types` | array of [`RoadType`](#roadtype) | yes |  | The road types road_rules names, in the order to show them, with the server's defaults. |
 | `secondary_is_main` | boolean | yes |  | Deprecated: see road_types. |
 | `segments` | integer | yes |  |  |
 | `sources` | array of [`SourceInfo`](#sourceinfo) | yes |  | Our router and the other engines, in the order to show them. |
-| `state` | string | yes |  | missing, loading, ready or error. |
+| `state` | string | yes |  | ready once any map is built, else missing. |
 
 ## Saved routes
 
@@ -3359,6 +3331,15 @@ The shapes the routes above refer to by name.
 | `name` | string | yes |  |  |
 | `slug` | string | yes |  |  |
 
+### MapBrief
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `areas` | array of string | yes |  | The areas it holds (slugs): one for an area's own map, several for a joined map. |
+| `bbox` | array of number | yes |  | [south, west, north, east]. |
+| `name` | string | yes |  |  |
+| `open` | boolean | yes |  | Opened now (it opens when a route first needs it). |
+
 ### MapFile
 
 | Field | Type | Required | Limits | Description |
@@ -3370,23 +3351,14 @@ The shapes the routes above refer to by name.
 
 | Field | Type | Required | Limits | Description |
 |---|---|---|---|---|
-| `active` | boolean | yes |  |  |
 | `areas` | array of string | yes |  |  |
+| `error` | string | no |  | Why it would not open, if it would not. |
 | `file` | [`MapFile`](#mapfile) | yes |  |  |
+| `kind` | string | yes |  | area (one area's own map) or joined (several, for trips across them). |
+| `nodes` | integer | no |  |  |
+| `open` | boolean | yes |  | Opened now: a route used it lately. |
 | `region` | string | yes |  |  |
-
-### MapLoaded
-
-| Field | Type | Required | Limits | Description |
-|---|---|---|---|---|
-| `areas` | array of string | yes |  |  |
-| `built_at` | string | yes |  |  |
-| `error` | string | yes |  |  |
-| `nodes` | integer | yes |  |  |
-| `region` | string | yes |  |  |
-| `segments` | integer | yes |  |  |
-| `state` | string | yes |  | missing, loading, ready or error. |
-| `switching` | boolean | yes |  | Another map is loading; this one answers until it is ready. |
+| `segments` | integer | no |  |  |
 
 ### MapTask
 
@@ -3399,6 +3371,13 @@ The shapes the routes above refer to by name.
 | `state` | string | yes |  | running, done, failed or cancelled. |
 | `step` | integer | yes |  |  |
 | `steps` | integer | yes |  |  |
+| `title` | string | yes |  |  |
+
+### MapTaskWaiting
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `id` | integer | yes |  |  |
 | `title` | string | yes |  |  |
 
 ### Me

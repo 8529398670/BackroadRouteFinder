@@ -1,6 +1,8 @@
 """The Map data screen's work: downloading extracts and building maps, one
 task at a time, each a list of `python -m app manage ...` steps run in a child
-process.
+process. Tasks asked for while one runs wait their turn in a queue: the
+owner's, and the joined maps the planner asks for (maps.py), each kept once
+by its key.
 
 A child process rather than a thread because a build holds a gigabyte or more
 while it runs and hands it all back when it exits, and because a download or
@@ -30,44 +32,75 @@ class Task:
     id: int
     title: str
     steps: list[list[str]]
-    state: str = "running"          # running, done, failed, cancelled
+    state: str = "running"          # waiting, running, done, failed, cancelled
     step: int = 0
     started: float = field(default_factory=time.time)
     finished: float = 0.0
     lines: collections.deque = field(default_factory=lambda: collections.deque(maxlen=MAX_LINES))
     then: Callable[[], str] | None = None   # run after the last step succeeds; returns a line to log
     process: subprocess.Popen | None = None
+    key: str = ""                           # the same work asked for twice is queued once
 
 
 class Runner:
     def __init__(self, cwd: str | None = None) -> None:
         self.cwd = cwd or PROJECT_ROOT
         self.task: Task | None = None
+        self.waiting: list[Task] = []
         self._next = 1
         self._lock = threading.Lock()
 
     def busy(self) -> bool:
         return self.task is not None and self.task.state == "running"
 
-    def start(self, title: str, steps: list[list[str]], then: Callable[[], str] | None = None) -> Task:
-        """steps are argument lists for `python -m app`."""
+    def pending(self, key: str) -> bool:
+        """Whether work with this key is running or waiting."""
         with self._lock:
-            if self.busy():
-                raise RuntimeError("another map task is still running")
-            task = Task(id=self._next, title=title, steps=steps, then=then)
+            return any(t.key == key for t in self.waiting) or (self.busy() and self.task is not None and self.task.key == key)
+
+    def start(self, title: str, steps: list[list[str]], then: Callable[[], str] | None = None, key: str = "") -> Task:
+        """steps are argument lists for `python -m app`. Starts now, or waits
+        behind the task running. With a key already running or waiting, that
+        task is returned and nothing new is queued."""
+        with self._lock:
+            if key:
+                for task in ([self.task] if self.busy() else []) + self.waiting:
+                    if task is not None and task.key == key:
+                        return task
+            task = Task(id=self._next, title=title, steps=steps, then=then, key=key)
             self._next += 1
+            if self.busy():
+                task.state = "waiting"
+                self.waiting.append(task)
+                return task
             self.task = task
         threading.Thread(target=self._run, args=(task,), name="map-task", daemon=True).start()
         return task
 
-    def cancel(self) -> bool:
+    def cancel(self, task_id: int | None = None) -> bool:
+        """Stop the running task, or take a waiting one (by id) off the queue."""
+        with self._lock:
+            for task in self.waiting:
+                if task.id == task_id:
+                    self.waiting.remove(task)
+                    return True
         task = self.task
-        if task is None or task.state != "running":
+        if task is None or task.state != "running" or (task_id is not None and task.id != task_id):
             return False
         task.state = "cancelled"
         if task.process is not None and task.process.poll() is None:
             task.process.terminate()
         return True
+
+    def _next_task(self) -> None:
+        with self._lock:
+            if self.busy() or not self.waiting:
+                return
+            task = self.waiting.pop(0)
+            task.state = "running"
+            task.started = time.time()
+            self.task = task
+        threading.Thread(target=self._run, args=(task,), name="map-task", daemon=True).start()
 
     def _run(self, task: Task) -> None:
         env = dict(os.environ, PYTHONUNBUFFERED="1")
@@ -99,7 +132,7 @@ class Runner:
             try:
                 task.lines.append(task.then())
             except Exception as error:  # noqa: BLE001 -- shown on the screen
-                task.lines.append(f"could not switch to the new map: {error}")
+                task.lines.append(f"could not use the new map: {error}")
                 task.state = "failed"
         if task.state == "running":
             task.state = "done"
@@ -107,3 +140,4 @@ class Runner:
             task.lines.append("cancelled")
         task.finished = time.time()
         task.process = None
+        self._next_task()

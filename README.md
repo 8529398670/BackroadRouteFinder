@@ -4,7 +4,7 @@ A route planner that, by default, keeps you on the backroads: it works to keep t
 
 It routes on its own road graph, built from OpenStreetMap. Each minute on a main road counts several times over (8× by default; the slider goes from "Balanced" 3× to "Max" 25× and beyond), so a main road is used only where every way around it is that many times slower. Every route is shown next to the plain fastest route, with the time on main roads for both. Times include turns, traffic signals and stop signs (mapped in OpenStreetMap, or implied where a smaller road meets a bigger one), which is what makes a backroads time realistic: those routes turn and stop far more often.
 
-Any set of US states can be downloaded and built from the Map data screen. See [TODO.md](TODO.md) for what the whole US still needs, and for other engines worth trying.
+Any US state (or the whole US) and any other country can be downloaded and built from the Map data screen. See [TODO.md](TODO.md) for what the whole US still needs, and for other engines worth trying.
 
 ## Running it
 
@@ -13,7 +13,9 @@ scripts/run.sh            # starts the server (creates .venv the first time)
 scripts/login.sh          # a login link for the owner
 ```
 
-The map data: the owner opens **Admin → Map data**, ticks any US states (or the whole country), and presses **Build map**. The server downloads the extracts from Geofabrik, builds one map from them (neighbouring states are joined, so trips can cross borders), and switches to it without a restart. Building needs osmium, once:
+The map data: the owner opens **Admin → Map data**, ticks any US states (or the whole country) or other countries, and presses **Download and build**. The server downloads the extracts from Geofabrik and builds each into a map of its own; nothing already built is built again.
+
+Every built map is used at once, with no map "in use" to pick: each route opens the smallest map with roads near all its points (`app/routing/maps.py`), the first time one needs it, and closes maps left unused (`routing.open_maps`, `routing.map_idle_minutes`). A trip that crosses from one area into another (Ohio to Michigan, Jordan to Israel) gets a map joined from those areas, plus any downloaded area bordering them inside the trip's box, built in the background the first time someone plans it (`routing.join_max_mb` caps its size); the other engines answer meanwhile, and the planner page plans the trip again once the join is ready. The owner can also join ticked areas by hand. Nothing is ever downloaded except by the owner. A point on no map at all is planned by the other engines alone (the Sources switch *Off our map, ask the other engines*). Building needs osmium, once:
 
 ```bash
 .venv/bin/pip install -r app/requirements-build.txt
@@ -26,7 +28,7 @@ scripts/run.sh manage fetch-osm --state ohio --state indiana
 scripts/run.sh manage build-graph --state ohio --state indiana   # writes mapdata/indiana_ohio.graph/
 ```
 
-Everything lives in `~/.config/backroad-route-finder/mapdata/`, outside `storage/`, so backups leave it out; `active.json` there names the map in use (otherwise `routing.region`).
+Everything lives in `~/.config/backroad-route-finder/mapdata/`, outside `storage/`, so backups leave it out. Each map has `<name>.json` beside it naming the areas it holds. At start, a downloaded area with no map of its own (one built only into a joined map) is built on its own in the background.
 
 ### Maps stay on disk
 

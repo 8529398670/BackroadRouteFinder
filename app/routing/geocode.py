@@ -42,7 +42,7 @@ _cache: OrderedDict[tuple, tuple[float, list[Place]]] = OrderedDict()
 
 
 def search(base_url: str, query: str, bbox: list[float], limit: int = 6) -> list[Place]:
-    """bbox is [south, west, north, east]."""
+    """bbox is [south, west, north, east]: places there first (empty: none)."""
     global _last_call
     key = (base_url, query.strip().lower(), tuple(round(v, 3) for v in bbox), limit)
     with _lock:
@@ -54,16 +54,12 @@ def search(base_url: str, query: str, bbox: list[float], limit: int = 6) -> list
         if wait > 0:
             time.sleep(wait)
         _last_call = time.monotonic()
-        south, west, north, east = bbox
-        params = urllib.parse.urlencode({
-            "q": query.strip(),
-            "format": "jsonv2",
-            "limit": limit,
-            "viewbox": f"{west},{north},{east},{south}",
-            "bounded": 1,
-            "countrycodes": "us",
-            "addressdetails": 0,
-        })
+        fields: dict[str, object] = {"q": query.strip(), "format": "jsonv2", "limit": limit, "addressdetails": 0}
+        if len(bbox) == 4:
+            # Places in view come first; the rest of the world still answers.
+            south, west, north, east = bbox
+            fields["viewbox"] = f"{west},{north},{east},{south}"
+        params = urllib.parse.urlencode(fields)
         request = urllib.request.Request(f"{base_url.rstrip('/')}/search?{params}", headers={"User-Agent": USER_AGENT})
         try:
             with urllib.request.urlopen(request, timeout=TIMEOUT) as response:  # noqa: S310 -- https only (validated)

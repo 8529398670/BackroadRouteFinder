@@ -14,9 +14,6 @@ turn (turns.py), so that what a turn costs can depend on both roads.
 from __future__ import annotations
 
 import json
-import threading
-import time
-import traceback
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -147,75 +144,3 @@ def old_categories(seg_class: np.ndarray, seg_name: np.ndarray, names: list[str]
         label = names[int(name_id)]
         table[row] = classes.CATEGORY_INDEX[classes.category_of(classes.CLASSES[int(class_id)], classes.ref_of_label(label))]
     return table[inverse.ravel()], np.zeros(len(seg_class), dtype=bool)
-
-
-class Holder:
-    """The one graph the server routes on, and where its loading stands:
-    missing (no file yet), loading, ready, or error."""
-
-    def __init__(self, path: Path) -> None:
-        self.path = path
-        self.graph: Graph | None = None
-        self.state = "missing"
-        self.error = ""
-        self.load_seconds = 0.0
-        self.switching = False
-        # The file the graph in memory came from (path is the one asked for,
-        # which differs while a switch is loading).
-        self.loaded_path: Path | None = None
-        self._lock = threading.Lock()
-
-    @property
-    def region(self) -> str:
-        """The name of the map answering now."""
-        return (self.loaded_path or self.path).name.removesuffix(".graph")
-
-    def start(self) -> None:
-        """Load in a background thread, if there is a file to load."""
-        old = self.path.with_name(self.path.name.removesuffix(".graph") + ".npz")
-        if not (self.path / "meta.json").is_file() and not old.is_file():
-            self.state = "missing"
-            return
-        with self._lock:
-            if self.state == "loading":
-                return
-            self.state = "loading"
-        threading.Thread(target=self._load, name="graph-load", daemon=True).start()
-
-    def switch(self, path: Path) -> None:
-        """Route on another graph file (the Map data screen). The one loaded
-        now keeps answering until the new one is ready; if the new one fails
-        to load, the old one stays and error says why."""
-        with self._lock:
-            if self.state == "loading" or self.switching:
-                raise RuntimeError("a map is already loading")
-            self.path = path
-            if self.graph is None:
-                self.state = "loading"
-            else:
-                self.switching = True
-        threading.Thread(target=self._load, name="graph-load", daemon=True).start()
-
-    def _load(self) -> None:
-        began = time.monotonic()
-        try:
-            old = self.path.with_name(self.path.name.removesuffix(".graph") + ".npz")
-            if not (self.path / "meta.json").is_file() and old.is_file():
-                # A map from before maps lived on disk: convert it once.
-                print(f"[routing] converting {old.name} to the on-disk format (once)", flush=True)
-                build_stream.convert_npz(old, self.path, progress=lambda line: print(f"[routing] {line}", flush=True))
-                old.unlink()
-            graph = load(self.path)
-        except Exception as error:  # noqa: BLE001 -- reported on the status route, never fatal
-            traceback.print_exc()
-            if self.switching:
-                self.switching, self.error = False, f"could not load {self.path.name}: {error}"
-            else:
-                self.state, self.error = "error", str(error)
-            return
-        self.graph = graph
-        self.loaded_path = self.path
-        self.load_seconds = round(time.monotonic() - began, 1)
-        self.state, self.error, self.switching = "ready", "", False
-        print(f"[routing] graph loaded from {self.path}: {graph.node_count:,} intersections, "
-              f"{len(graph.seg_a):,} segments, {len(graph.turns.to):,} turns, mapped from disk in {self.load_seconds}s", flush=True)

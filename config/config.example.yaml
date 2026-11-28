@@ -296,12 +296,26 @@ routing:
   # builds on a small machine (more is faster). 128-65536. [live]
   build_memory_mb: 512
 
+  # Maps: each downloaded area is built into a map of its own, and a route
+  # opens the map that covers its points when it first needs it. At most
+  # this many are open at once; one left unused this many minutes is closed
+  # (opening one again takes a fraction of a second). 1-50, 1-1440. [live]
+  open_maps: 4
+  map_idle_minutes: 15
+
+  # A trip that crosses from one area into another gets a map joined from
+  # those areas (and any downloaded area beside the trip), built in the
+  # background the first time; the other engines answer meanwhile. Joins
+  # whose extracts add up to more than this many MB are not built. 0 never
+  # builds one. 0-100000. [live]
+  join_max_mb: 3000
+
   # How far a clicked or searched point may be from a road and still be
   # used, in metres. 50-20000. [live]
   max_snap_m: 2000
 
   # Place search: a Nominatim server, asked by this server (never by the
-  # browser) at most once a second, limited to the map's area. The public
+  # browser) at most once a second, places in the map's view first. The public
   # one is free for light use. Empty switches place search off; points can
   # still be picked on the map. [live]
   geocoder_url: "https://nominatim.openstreetmap.org"

@@ -1,9 +1,12 @@
 """The owner's Map data screen: download OpenStreetMap extracts for any US
-states (or the whole country) and any other country, build a map from them, and switch the server
-to it without a restart.
+states (or the whole country) and any other country, and build each into a
+map of its own (or several into one joined map). Every built map is used:
+each route opens the one that covers its points (app/routing/maps.py), and a
+trip across areas gets a joined map built for it in the background.
 
 Downloads and builds run as `manage fetch-osm` / `manage build-graph` in a
-child process (app/routing/tasks.py), one task at a time, with their output
+child process (app/routing/tasks.py), one task at a time (later ones wait
+their turn), with their output
 shown on the screen. Building needs osmium (app/requirements-build.txt); the
 Docker image compiles it in (docker/Dockerfile), and a local run needs it
 installed in .venv.
@@ -23,7 +26,7 @@ from app.core.logs import KIND_ADMIN
 from app.routes.helpers import Refused, get_config
 from app.routes.logs import audit
 from app.routing import files, regions
-from app.routing.graph import Holder
+from app.routing import maps as map_set
 from app.routing.tasks import Runner
 
 Slug = Annotated[str, Meta(pattern="^[a-z][a-z-]{1,60}$", description="An area's slug: a US state's (ohio, new-york), us, or a country's (jordan).")]
@@ -51,7 +54,17 @@ class GraphInfo(Reply):
     region: str
     areas: list[str]
     file: FileInfo
-    active: bool
+    kind: Annotated[str, Meta(description="area (one area's own map) or joined (several, for trips across them).")]
+    open: Annotated[bool, Meta(description="Opened now: a route used it lately.")]
+    error: Annotated[str, Meta(description="Why it would not open, if it would not.")] = ""
+    nodes: int = 0
+    segments: int = 0
+
+
+class WaitingTask(Reply):
+    api_name: ClassVar[str] = "MapTaskWaiting"
+    id: int
+    title: str
 
 
 class TaskInfo(Reply):
@@ -66,25 +79,13 @@ class TaskInfo(Reply):
     lines: list[str]
 
 
-class Loaded(Reply):
-    api_name: ClassVar[str] = "MapLoaded"
-    region: str
-    areas: list[str]
-    state: Annotated[str, Meta(description="missing, loading, ready or error.")]
-    switching: Annotated[bool, Meta(description="Another map is loading; this one answers until it is ready.")]
-    error: str
-    built_at: str
-    nodes: int
-    segments: int
-
-
 class MapDataReply(Reply):
-    loaded: Loaded
     areas: Annotated[list[AreaInfo], Meta(description="The US states.")]
     us: AreaInfo
     countries: Annotated[list[AreaInfo], Meta(description="Every other country, by continent then name.")]
     graphs: list[GraphInfo]
     task: TaskInfo | None
+    waiting: Annotated[list[WaitingTask], Meta(description="Tasks queued behind the one running, in order.")]
     can_build: Annotated[bool, Meta(description="Whether osmium is installed here, which building needs.")]
     folder: str
     memory_bytes: Annotated[int, Meta(description="This machine's memory, 0 when unknown.")]
@@ -105,8 +106,8 @@ def _file(path) -> FileInfo | None:
     return FileInfo(bytes=st.st_size, modified=_iso(st.st_mtime))
 
 
-def _holder(request: Request) -> Holder:
-    return request.app.state.graph
+def _maps(request: Request) -> map_set.MapSet:
+    return request.app.state.maps
 
 
 def _runner(request: Request) -> Runner:
@@ -114,9 +115,7 @@ def _runner(request: Request) -> Runner:
 
 
 def _can_build() -> bool:
-    import importlib.util
-
-    return importlib.util.find_spec("osmium") is not None
+    return map_set.can_build()
 
 
 def _memory() -> int:
@@ -142,11 +141,8 @@ def _memory() -> int:
 def _reply(request: Request) -> MapDataReply:
     cfg = get_config(request)
     folder = files.mapdata_dir(cfg)
-    holder = _holder(request)
-    region = holder.region
-    meta = holder.graph.meta if holder.graph is not None else {}
-    loaded = Loaded(region=region, areas=files.areas_of(cfg, region), state=holder.state, switching=holder.switching,
-                    error=holder.error, built_at=meta.get("built_at", ""), nodes=meta.get("nodes", 0), segments=meta.get("segments", 0))
+    maps = _maps(request)
+    opened = set(maps.open_names())
     areas = [AreaInfo(slug=slug, name=name, approx_mb=mb, downloaded=_file(files.pbf_for(cfg, slug)))
              for slug, (name, mb) in regions.STATES.items()]
     us = AreaInfo(slug=regions.US, name=regions.US_NAME, approx_mb=regions.US_MB, downloaded=_file(files.pbf_for(cfg, regions.US)))
@@ -155,31 +151,34 @@ def _reply(request: Request) -> MapDataReply:
                           group=regions.GROUPS.get(c.group, c.group))
                  for c in sorted(regions.COUNTRIES.values(), key=lambda c: (order.index(c.group) if c.group in order else 99, c.name))]
     graphs = []
-    if folder.is_dir():
-        for path in sorted(folder.glob("*" + files.GRAPH_SUFFIX)):
-            if not files.is_built(path):
-                continue
-            info = FileInfo(bytes=files.size_of(path), modified=_iso((path / "meta.json").stat().st_mtime))
-            name = files.region_of(path)
-            graphs.append(GraphInfo(region=name, areas=files.areas_of(cfg, name), file=info, active=name == region))
-    task = _runner(request).task
+    for name, info in sorted(maps.maps.items(), key=lambda item: (item[1].kind != "area", item[0])):
+        try:
+            modified = (info.path / "meta.json").stat().st_mtime
+        except OSError:
+            continue
+        graphs.append(GraphInfo(region=name, areas=info.areas, file=FileInfo(bytes=info.bytes, modified=_iso(modified)),
+                                kind=info.kind, open=name in opened, error=maps.errors.get(name, ""),
+                                nodes=info.nodes, segments=info.segments))
+    runner = _runner(request)
+    task = runner.task
     task_info = None
     if task is not None:
         task_info = TaskInfo(id=task.id, title=task.title, state=task.state, step=task.step, steps=len(task.steps),
                              started=_iso(task.started), finished=_iso(task.finished), lines=list(task.lines))
+    waiting = [WaitingTask(id=t.id, title=t.title) for t in list(runner.waiting)]
     try:
         free = shutil.disk_usage(folder if folder.is_dir() else cfg.app_dir).free
     except OSError:
         free = 0
-    return MapDataReply(loaded=loaded, areas=areas, us=us, countries=countries, graphs=graphs, task=task_info, can_build=_can_build(),
+    return MapDataReply(areas=areas, us=us, countries=countries, graphs=graphs, task=task_info, waiting=waiting, can_build=_can_build(),
                         folder=str(folder), memory_bytes=_memory(), disk_free_bytes=free)
 
 
 @route(
     "GET /api/owner/mapdata", summary="Map data",
     tag="Owner", role=OWNER, feature="settings",
-    description="The map the server routes on, the extracts downloaded and maps built so far, every "
-    "US state and country that can be downloaded, and the download or build running now (with its output).",
+    description="The maps built so far (which are open now), the extracts downloaded, every US state and "
+    "country that can be downloaded, and the download or build running now (with its output) and those waiting.",
 )
 def get_mapdata(request: Request, body: NoInput) -> MapDataReply:
     return _reply(request)
@@ -189,88 +188,70 @@ class RunMapTask(RequestType):
     areas: Slugs
     download: Annotated[str, Meta(pattern="^(missing|all|none)$", description="Which extracts to fetch first: missing ones, all (fresh copies), or none.",
                                   extra={"error": "download must be missing, all or none"})] = "missing"
-    build: Annotated[bool, Meta(description="Build one map from the areas after downloading.")] = True
-    activate: Annotated[bool, Meta(description="Switch the server to the new map once it is built.")] = True
-
-
-def _activate(request: Request, region: str) -> str:
-    cfg = get_config(request)
-    path = files.graph_for(cfg, region)
-    if not files.is_built(path):
-        raise Refused(404, f"no map named {region} has been built")
-    _holder(request).switch(path)
-    files.set_active(cfg, region)
-    return f"switching to {region}: loading it now; the current map answers until it is ready"
+    build: Annotated[bool, Meta(description="Build a map of each area on its own after downloading (only those without one, "
+                                "or all with download=all), or with join one map of them all.")] = True
+    join: Annotated[bool, Meta(description="Build one joined map of all the areas instead of one each.")] = False
 
 
 @route(
-    "POST /api/owner/mapdata/run", summary="Download and build a map",
-    tag="Owner", role=OWNER, feature="settings", errors=(400, 409),
-    description="Downloads the areas' extracts from Geofabrik (missing ones, all, or none), builds one map "
-    "from them, and switches the server to it -- each step optional. Runs in the background; GET "
-    "/api/owner/mapdata shows its progress. One task at a time.",
+    "POST /api/owner/mapdata/run", summary="Download and build maps",
+    tag="Owner", role=OWNER, feature="settings", errors=(400,),
+    description="Downloads the areas' extracts from Geofabrik (missing ones, all, or none), then builds each "
+    "into a map of its own -- or, with join, one map of them all. Every map built is used at once: each "
+    "route opens the one that covers it. Runs in the background, after any task already running; GET "
+    "/api/owner/mapdata shows its progress.",
 )
 def run_task(request: Request, body: RunMapTask) -> MapDataReply:
     cfg = get_config(request)
     bad = [slug for slug in body.areas if not regions.valid(slug)]
     if bad:
         raise Refused(400, f"unknown area: {', '.join(bad)}", field="areas")
-    region = regions.region_name(body.areas)
     slugs = regions.normalized(body.areas)
+    maps = _maps(request)
     fetch = [s for s in slugs if body.download == "all" or (body.download == "missing" and not files.pbf_for(cfg, s).is_file())]
-    if not body.build and not fetch:
-        raise Refused(400, "nothing to do: every extract is already downloaded")
+    builds: list[list[str]] = []
     if body.build:
         missing = [s for s in slugs if s not in fetch and not files.pbf_for(cfg, s).is_file()]
         if missing:
             raise Refused(400, f"not downloaded yet: {', '.join(regions.name_of(s) for s in missing)}", field="areas")
         if not _can_build():
             raise Refused(400, "building needs osmium, which is not installed here: .venv/bin/pip install -r app/requirements-build.txt")
+        if body.join:
+            if len(slugs) < 2:
+                raise Refused(400, "tick two or more areas to join", field="areas")
+            builds.append(map_set.build_step(slugs))
+        else:
+            builds += [map_set.build_step([s]) for s in slugs if s in fetch or maps.area_map(s) is None]
+    if not fetch and not builds:
+        raise Refused(400, "nothing to do: every ticked area is downloaded" + (" and has its map" if body.build else ""))
     steps: list[list[str]] = []
     if fetch:
         steps.append(["manage", "fetch-osm", *[f"--state={s}" for s in fetch]])
-    if body.build:
-        steps.append(["manage", "build-graph", *[f"--state={s}" for s in slugs]])
+    steps += builds
     names = ", ".join(regions.name_of(s) for s in slugs)
-    title = ("Download and build: " if fetch and body.build else "Build: " if body.build else "Download: ") + names
-    then = (lambda: _activate(request, region)) if body.build and body.activate else None
-    try:
-        _runner(request).start(title, steps, then)
-    except RuntimeError as error:
-        raise Refused(409, str(error)) from None
-    audit(request, KIND_ADMIN, "map data task started", {"areas": slugs, "download": fetch, "build": body.build, "activate": body.activate})
+    title = ("Download and " if fetch and builds else "Download: " if fetch else "") + \
+        (("join: " if body.join else "build: ") if builds else "") + names
+    title = title[0].upper() + title[1:]
+    task = map_set.queue_build(_runner(request), maps, title, steps)
+    audit(request, KIND_ADMIN, "map data task started", {"areas": slugs, "download": fetch, "builds": len(builds),
+                                                         "join": body.join, "queued": task.state == "waiting"})
     return _reply(request)
+
+
+class CancelTask(RequestType):
+    id: Annotated[int | None, Meta(description="A waiting task to take off the queue; left out, the one running is stopped.")] = None
 
 
 @route(
     "POST /api/owner/mapdata/cancel", summary="Stop the map task",
     tag="Owner", role=OWNER, feature="settings", errors=(409,),
-    description="Stops the download or build running now. A cut-off download leaves no file behind.",
+    description="Stops the download or build running now, or takes a waiting one off the queue (id). "
+    "A cut-off download leaves no file behind.",
 )
-def cancel_task(request: Request, body: NoInput) -> MapDataReply:
-    if not _runner(request).cancel():
-        raise Refused(409, "no map task is running")
-    audit(request, KIND_ADMIN, "map data task cancelled", {})
-    return _reply(request)
-
-
-class RegionOnly(RequestType):
-    region: Annotated[str, Meta(pattern=r"^[a-z0-9][a-z0-9_+-]{0,127}$", description="A built map's name, as GET /api/owner/mapdata lists it.",
-                                extra={"error": "unknown map"})]
-
-
-@route(
-    "POST /api/owner/mapdata/activate", summary="Route on another map",
-    tag="Owner", role=OWNER, feature="settings", errors=(404, 409),
-    description="Switches the server to a map built earlier, without a restart. The current one keeps "
-    "answering until the new one has loaded. Remembered across restarts.",
-)
-def activate(request: Request, body: RegionOnly) -> MapDataReply:
-    try:
-        _activate(request, body.region)
-    except RuntimeError as error:
-        raise Refused(409, str(error)) from None
-    audit(request, KIND_ADMIN, "map switched", {"region": body.region})
+def cancel_task(request: Request, body: CancelTask) -> MapDataReply:
+    if not _runner(request).cancel(body.id):
+        raise Refused(409, "no such map task is running or waiting")
+    audit(request, KIND_ADMIN, "map data task cancelled", {"id": body.id})
     return _reply(request)
 
 
@@ -284,22 +265,21 @@ class DeleteFile(RequestType):
 @route(
     "POST /api/owner/mapdata/delete", summary="Delete a map file",
     tag="Owner", role=OWNER, feature="settings", errors=(404, 409),
-    description="Deletes a downloaded extract or a built map to free disk space. The map the server is "
-    "routing on cannot be deleted.",
+    description="Deletes a downloaded extract or a built map to free disk space. A joined map is built again "
+    "when a trip needs it; an area's own map at the server's next start while its extract is still downloaded.",
 )
 def delete_file(request: Request, body: DeleteFile) -> MapDataReply:
     cfg = get_config(request)
     if _runner(request).busy():
         raise Refused(409, "wait for the map task to finish")
     if body.kind == "map":
-        if body.name in (_holder(request).region, _holder(request).path.stem):
-            raise Refused(409, "that is the map the server is routing on: switch to another first")
         path = files.graph_for(cfg, body.name)
     else:
         path = files.pbf_for(cfg, body.name)
     if body.kind == "map":
         if not files.is_built(path):
             raise Refused(404, "no such file")
+        _maps(request).forget(body.name)
         shutil.rmtree(path)
     else:
         if not path.is_file():
@@ -307,5 +287,6 @@ def delete_file(request: Request, body: DeleteFile) -> MapDataReply:
         path.unlink()
     if body.kind == "map":
         files.mapdata_dir(cfg).joinpath(f"{body.name}.json").unlink(missing_ok=True)
+        _maps(request).rescan()
     audit(request, KIND_ADMIN, "map file deleted", {"kind": body.kind, "name": body.name})
     return _reply(request)

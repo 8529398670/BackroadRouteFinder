@@ -181,6 +181,9 @@ class RoutingSection:
     geocoder_url: str
     alternatives: int = 5
     build_memory_mb: int = 512
+    open_maps: int = 4
+    map_idle_minutes: int = 15
+    join_max_mb: int = 3000
     # Deprecated: road_rules says it (state_route=use for false).
     secondary_is_main: bool = True
 
@@ -836,6 +839,9 @@ def validate(file: File) -> list[str]:
     check(50 <= routing.max_snap_m <= 20000, "routing.max_snap_m must be 50-20000")
     check(1 <= routing.alternatives <= 36, "routing.alternatives must be 1-36")
     check(128 <= routing.build_memory_mb <= 65536, "routing.build_memory_mb must be 128-65536")
+    check(1 <= routing.open_maps <= 50, "routing.open_maps must be 1-50")
+    check(1 <= routing.map_idle_minutes <= 1440, "routing.map_idle_minutes must be 1-1440")
+    check(0 <= routing.join_max_mb <= 100000, "routing.join_max_mb must be 0-100000")
     check(routing.geocoder_url == "" or routing.geocoder_url.startswith("https://"),
           "routing.geocoder_url must be empty or an https:// address")
     providers = file.providers

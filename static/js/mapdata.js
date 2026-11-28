@@ -1,8 +1,10 @@
 // The Map data screen (/admin/map-data), owner only.
 //
 // Pick any US states (or the whole country) and any other countries, download their OpenStreetMap
-// extracts from Geofabrik, build one map from them, and switch the server to
-// it -- no shell, no restart. The work runs on the server one task at a time
+// extracts from Geofabrik, and build each into a map of its own (or several
+// into one joined map). Every built map is used: each route opens the one
+// that covers its points, and a trip across areas gets a joined map built for
+// it (app/routing/maps.py). No shell, no restart. The work runs on the server one task at a time
 // (app/routing/tasks.py); while it runs this screen asks for its output every
 // two seconds.
 const MapData = {
@@ -27,18 +29,13 @@ const MapData = {
       this.renderStates();
     } );
     Dom.onPress( Dom.get( "mapdata-download" ) , () => this.download() );
-    Dom.onPress( Dom.get( "mapdata-build" ) , () => this.build() );
+    Dom.onPress( Dom.get( "mapdata-build" ) , () => this.build( false ) );
+    Dom.onPress( Dom.get( "mapdata-join" ) , () => this.build( true ) );
     Dom.onPress( Dom.get( "mapdata-cancel" ) , () => this.cancel() );
     window.addEventListener( "nav" , () => {
       if ( Nav.current() === "map-data" ) this.load();
     } );
     await this.load();
-    // Start with the map in use ticked, so "Build" right away rebuilds it.
-    if ( this.data && this.picked.size === 0 ) {
-      this.data.loaded.areas.filter( ( slug ) => this.area( slug ) )
-        .forEach( ( slug ) => this.picked.add( slug ) );
-      this.renderStates();
-    }
   },
 
   async load() {
@@ -51,11 +48,11 @@ const MapData = {
     this.render();
   },
 
-  // While something is running (a task, or a map loading) ask again soon.
+  // While something is running or waiting, ask again soon.
   schedule() {
     window.clearTimeout( this.timer );
     const d = this.data;
-    const busy = d && ( ( d.task && d.task.state === "running" ) || d.loaded.switching || d.loaded.state === "loading" );
+    const busy = d && ( ( d.task && d.task.state === "running" ) || d.waiting.length > 0 );
     if ( busy ) this.timer = window.setTimeout( () => this.load() , 2000 );
     // The planner hears about a new map once it is in.
     if ( this.wasBusy && !busy && typeof Planner !== "undefined" && Planner.refreshSources ) Planner.refreshSources();
@@ -103,24 +100,24 @@ const MapData = {
     return Dom.el( "span" , { class: "badge text-bg-" + kind , text: text } );
   },
 
-  // --- the map in use ---------------------------------------------------------
+  // --- the maps built, in a line ---------------------------------------------
 
   renderLoaded() {
-    const l = this.data.loaded;
+    const graphs = this.data.graphs;
     const parts = [];
-    const states = { ready: "success" , loading: "info" , missing: "warning" , error: "danger" };
-    parts.push( Dom.el( "div" , { class: "d-flex flex-wrap align-items-center gap-2 mb-1" , children: [
-      Dom.el( "span" , { class: "fw-semibold" , text: this.areasLabel( l.areas ) } ),
-      this.badge( states[ l.state ] || "secondary" , I18n.get( "mapdata.state_" + l.state ) ),
-      l.switching ? this.badge( "info" , I18n.get( "mapdata.switching" ) ) : null,
-    ].filter( Boolean ) } ) );
-    if ( l.state === "ready" ) {
-      parts.push( Dom.el( "div" , { class: "small text-body-secondary" , text: Format.fill( "mapdata.loaded_detail" , {
-        nodes: l.nodes.toLocaleString(), segments: l.segments.toLocaleString(), built: this.when( l.built_at ),
+    if ( graphs.length === 0 ) {
+      parts.push( Dom.el( "div" , { class: "small" , text: I18n.get( "mapdata.loaded_missing" ) } ) );
+    } else {
+      const open = graphs.filter( ( g ) => g.open ).map( ( g ) => this.areasLabel( g.areas ) );
+      parts.push( Dom.el( "div" , { class: "fw-semibold" , text: Format.fill( "mapdata.maps_count" , {
+        areas: graphs.filter( ( g ) => g.kind === "area" ).length , joined: graphs.filter( ( g ) => g.kind === "joined" ).length,
       } ) } ) );
+      parts.push( Dom.el( "div" , { class: "small text-body-secondary" , text: open.length
+        ? Format.fill( "mapdata.open_now" , { maps: open.join( "; " ) } ) : I18n.get( "mapdata.open_none" ) } ) );
     }
-    if ( l.state === "missing" ) parts.push( Dom.el( "div" , { class: "small" , text: I18n.get( "mapdata.loaded_missing" ) } ) );
-    if ( l.error ) parts.push( Dom.el( "div" , { class: "small text-danger" , text: l.error } ) );
+    graphs.filter( ( g ) => g.error ).forEach( ( g ) => {
+      parts.push( Dom.el( "div" , { class: "small text-danger" , text: this.areasLabel( g.areas ) + ": " + g.error } ) );
+    } );
     Dom.swap( Dom.get( "mapdata-loaded" ) , ...parts );
   },
 
@@ -154,6 +151,15 @@ const MapData = {
       Dom.get( "mapdata-progress" ).style.width = percent + "%";
       Dom.get( "mapdata-progress-wrap" ).setAttribute( "aria-valuenow" , String( percent ) );
     }
+    // Tasks waiting their turn, each one can be taken off the queue.
+    const waiting = this.data.waiting.map( ( item ) => {
+      const drop = this.actionButton( "bi-x-lg" , "mapdata.unqueue" , "secondary" , () => this.cancel( item.id ) );
+      return Dom.el( "li" , { class: "list-group-item d-flex flex-wrap align-items-center gap-2 px-0" , children: [
+        Dom.el( "span" , { class: "me-auto" , text: item.title } ) , drop,
+      ] } );
+    } );
+    Dom.swap( Dom.get( "mapdata-waiting" ) , ...waiting );
+    Dom.show( Dom.get( "mapdata-waiting-wrap" ) , waiting.length > 0 );
   },
 
   // --- picking areas ----------------------------------------------------------
@@ -260,7 +266,6 @@ const MapData = {
 
   renderSummary() {
     const slugs = this.pickedSlugs();
-    const busy = this.data.task && this.data.task.state === "running";
     const toFetch = slugs.filter( ( slug ) => !this.area( slug ).downloaded );
     const total = slugs.reduce( ( sum , slug ) => sum + this.sizeOf( slug ) , 0 );
     const fetchBytes = toFetch.reduce( ( sum , slug ) => sum + this.sizeOf( slug ) , 0 );
@@ -280,8 +285,10 @@ const MapData = {
     const noBuild = Dom.get( "mapdata-no-build" );
     Dom.text( noBuild , I18n.get( "mapdata.no_osmium" ) );
     Dom.show( noBuild , !this.data.can_build );
-    Dom.get( "mapdata-download" ).disabled = busy || slugs.length === 0;
-    Dom.get( "mapdata-build" ).disabled = busy || slugs.length === 0 || !this.data.can_build;
+    // Busy is fine: a new task waits its turn.
+    Dom.get( "mapdata-download" ).disabled = slugs.length === 0;
+    Dom.get( "mapdata-build" ).disabled = slugs.length === 0 || !this.data.can_build;
+    Dom.get( "mapdata-join" ).disabled = slugs.length < 2 || !this.data.can_build;
   },
 
   // --- actions ----------------------------------------------------------------
@@ -302,36 +309,27 @@ const MapData = {
     const missing = slugs.filter( ( slug ) => !this.area( slug ).downloaded );
     if ( missing.length === 0 ) {
       if ( !( await Dom.confirm( I18n.get( "mapdata.confirm_fresh" ) ) ) ) return;
-      return this.run( { areas: slugs , download: "all" , build: false , activate: false } );
+      return this.run( { areas: slugs , download: "all" , build: false } );
     }
-    return this.run( { areas: slugs , download: "missing" , build: false , activate: false } );
+    return this.run( { areas: slugs , download: "missing" , build: false } );
   },
 
-  async build() {
+  // Each ticked area into a map of its own, or (join) all into one map.
+  async build( join ) {
     const slugs = this.pickedSlugs();
     if ( slugs.includes( "us" ) && !( await Dom.confirm( I18n.get( "mapdata.confirm_us" ) ) ) ) return;
-    return this.run( { areas: slugs , download: "missing" , build: true , activate: Dom.get( "mapdata-activate" ).checked } );
+    return this.run( { areas: slugs , download: "missing" , build: true , join: join } );
   },
 
-  async cancel() {
-    if ( !( await Dom.confirm( I18n.get( "mapdata.confirm_cancel" ) ) ) ) return;
+  // The running task, or (id) a waiting one off the queue.
+  async cancel( id ) {
+    if ( id === undefined && !( await Dom.confirm( I18n.get( "mapdata.confirm_cancel" ) ) ) ) return;
     try {
-      this.data = await Api.post( "/api/owner/mapdata/cancel" );
+      this.data = await Api.post( "/api/owner/mapdata/cancel" , id === undefined ? {} : { id: id } );
     } catch ( error ) {
       App.showError( error.message );
       return;
     }
-    this.render();
-  },
-
-  async activate( graph ) {
-    try {
-      this.data = await Api.post( "/api/owner/mapdata/activate" , { region: graph.region } );
-    } catch ( error ) {
-      App.showError( error.message );
-      return;
-    }
-    Dom.toast( Format.fill( "mapdata.switching_to" , { map: this.areasLabel( graph.areas ) } ) , "ok" );
     this.render();
   },
 
@@ -363,21 +361,22 @@ const MapData = {
     const busy = this.data.task && this.data.task.state === "running";
     const rows = this.data.graphs.map( ( graph ) => {
       const label = this.areasLabel( graph.areas );
-      const actions = [];
-      if ( graph.active ) actions.push( this.badge( "success" , I18n.get( "mapdata.in_use" ) ) );
-      else {
-        const use = this.actionButton( "bi-check2-circle" , "mapdata.use" , "primary" , () => this.activate( graph ) );
-        use.disabled = this.data.loaded.switching;
-        actions.push( use );
-        const del = this.actionButton( "bi-trash" , "mapdata.delete" , "danger" , () => this.remove( "map" , graph.region , label ) );
-        del.disabled = busy;
-        actions.push( del );
-      }
+      const del = this.actionButton( "bi-trash" , "mapdata.delete" , "danger" , () => this.remove( "map" , graph.region , label ) );
+      del.disabled = busy;
+      const badges = [
+        this.badge( graph.kind === "area" ? "secondary" : "info" , I18n.get( "mapdata.kind_" + graph.kind ) ),
+        graph.open ? this.badge( "success" , I18n.get( "mapdata.open_badge" ) ) : null,
+        graph.error ? this.badge( "danger" , I18n.get( "mapdata.broken_badge" ) ) : null,
+      ].filter( Boolean );
       return Dom.el( "tr" , { children: [
-        Dom.el( "td" , { text: label } ),
+        Dom.el( "td" , { children: [
+          Dom.el( "div" , { text: label } ),
+          Dom.el( "div" , { class: "d-flex flex-wrap gap-1 mt-1" , children: badges } ),
+          graph.error ? Dom.el( "div" , { class: "small text-danger" , text: graph.error } ) : null,
+        ].filter( Boolean ) } ),
         Dom.el( "td" , { class: "text-nowrap" , text: this.bytes( graph.file.bytes ) } ),
         Dom.el( "td" , { class: "text-nowrap" , text: this.when( graph.file.modified ) } ),
-        Dom.el( "td" , { children: [ Dom.el( "div" , { class: "d-flex flex-wrap gap-1" , children: actions } ) ] } ),
+        Dom.el( "td" , { children: [ Dom.el( "div" , { class: "d-flex flex-wrap gap-1" , children: [ del ] } ) ] } ),
       ] } );
     } );
     Dom.swap( table.querySelector( "tbody" ) , ...rows );
@@ -392,7 +391,7 @@ const MapData = {
     const all = [ this.data.us , ...this.data.areas , ...this.data.countries ].filter( ( a ) => a.downloaded );
     const rows = all.map( ( area ) => {
       const update = this.actionButton( "bi-arrow-repeat" , "mapdata.update" , "secondary" ,
-        () => this.run( { areas: [ area.slug ] , download: "all" , build: false , activate: false } ) );
+        () => this.run( { areas: [ area.slug ] , download: "all" , build: false } ) );
       const del = this.actionButton( "bi-trash" , "mapdata.delete" , "danger" , () => this.remove( "extract" , area.slug , area.name ) );
       update.disabled = busy;
       del.disabled = busy;

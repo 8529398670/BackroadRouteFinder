@@ -23,7 +23,7 @@ from app.routing.graph import Graph
 from app.routing.providers import ENGINES, OURS, ProviderError, base
 from app.routing.search import NoRoute
 from app.routing.snap import Snap
-from app.routing.summarize import Summary, join
+from app.routing.summarize import DECIMALS, Run, Summary, join
 
 MAX_ROUTES = 36
 _pool = concurrent.futures.ThreadPoolExecutor(max_workers=8, thread_name_prefix="provider")
@@ -183,13 +183,14 @@ def default_engines(access: Access) -> list[str]:
     return [engine_id for engine_id in ENGINES if access.usable(engine_id)]
 
 
-def plan_off_map(graph: Graph, points: list[Spot], options: costs.Options, sources: list[str], count: int,
+def plan_off_map(graph: Graph | None, points: list[Spot], options: costs.Options, sources: list[str], count: int,
                  access: Access) -> Plan:
     """A plan from the other engines alone, through the points as given, for
     a trip our map does not cover (a point with no road of ours near it).
     sources: the engines to ask; ours is left out. Each route is still laid on
     our map, so whatever of it our map does cover is scored as usual, and the
-    rest counts as backroad (off_map_meters)."""
+    rest counts as backroad (off_map_meters). graph None: no map at all, so
+    each route is taken as the engine gives it."""
     import time
 
     began = time.monotonic()
@@ -224,10 +225,10 @@ def _ask(points: list[tuple[float, float]], ask: base.Ask, sources: list[str], a
     return asked
 
 
-def _collect(graph: Graph, options: costs.Options, kind: str, asked: dict[str, concurrent.futures.Future],
+def _collect(graph: Graph | None, options: costs.Options, kind: str, asked: dict[str, concurrent.futures.Future],
              access: Access, out: Plan, choices: list[Choice]) -> None:
     """The engines' answers, each laid on our map and scored, into choices."""
-    rating = costs.rating(graph, options) if asked else None
+    rating = costs.rating(graph, options) if asked and graph is not None else None
     for source, future in asked.items():
         try:
             candidates = future.result(timeout=access.timeout + 5)
@@ -241,10 +242,20 @@ def _collect(graph: Graph, options: costs.Options, kind: str, asked: dict[str, c
             out.problems.append(Problem(source, f"failed: {error}"))
             continue
         for rank, candidate in enumerate(candidates):
-            summary, off_map = match.measure(graph, candidate.coords, candidate.seconds, rating)
+            if graph is None or rating is None:
+                summary, off_map = _unmeasured(candidate), candidate.meters
+            else:
+                summary, off_map = match.measure(graph, candidate.coords, candidate.seconds, rating)
             summary.meters = candidate.meters or summary.meters
             choices.append(Choice(source, kind, summary, score(summary, options.penalty),
                                   estimated=True, off_map_meters=off_map, rank=rank))
+
+
+def _unmeasured(candidate: base.Candidate) -> Summary:
+    """An engine's route with no map of ours to lay it on: its own time and
+    length, the whole line one backroad run."""
+    coords = [[round(lat, DECIMALS), round(lon, DECIMALS)] for lat, lon in candidate.coords]
+    return Summary(seconds=candidate.seconds, meters=candidate.meters, runs=[Run(main=False, coords=coords)])
 
 
 def _keep_best(out: Plan, choices: list[Choice], count: int) -> None:

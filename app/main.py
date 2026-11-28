@@ -33,7 +33,7 @@ from app.core.skill_origin import skill_origin
 from app.models import provider_keys
 from app.routes import build_routes
 from app.routing import files as map_files
-from app.routing.graph import Holder as GraphHolder
+from app.routing import maps as map_set
 from app.routing.tasks import Runner as MapTasks
 
 # How often config.yaml is checked for edits made outside the Settings screen.
@@ -139,11 +139,18 @@ def build_app(
     # Reported by /api/me, so ProjectPortal can tell an app behind its template.
     app.state.skill, app.state.skill_commit = skill_origin()
     app.state.live_reload = reload_watcher
-    # The road graph loads in the background; routes say so until it is ready.
-    app.state.graph = GraphHolder(map_files.graph_path(cfg))
-    app.state.graph.start()
-    # Downloads and builds started from the Map data screen.
+    # Every map built so far, each opened when a route first needs it
+    # (app/routing/maps.py), and the downloads and builds (Map data screen,
+    # and joined maps the planner asks for) that run one at a time.
+    routing = cfg.file.routing
+    app.state.maps = map_set.MapSet(map_files.mapdata_dir(cfg), cfg)
+    app.state.maps.configure(routing.open_maps, routing.map_idle_minutes)
+    app.state.maps.rescan()
     app.state.map_tasks = MapTasks()
+    # A downloaded area with no map of its own (one built only into a joined
+    # map, before maps were per area) gets one, in the background.
+    if map_set.can_build():
+        map_set.queue_area_builds(app.state.map_tasks, app.state.maps, cfg)
     return app
 
 

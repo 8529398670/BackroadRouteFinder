@@ -3,6 +3,8 @@ state, and each person's planner defaults. The router itself is app/routing/;
 this module only turns HTTP into calls to it and back."""
 from __future__ import annotations
 
+import json
+import math
 import time
 from typing import Annotated, ClassVar, Literal
 
@@ -17,8 +19,8 @@ from app.models import saved_routes
 from app.models.users import get_owner_id
 from app.routes.helpers import Refused, get_config, get_store
 from app.models import provider_keys
-from app.routing import classes, costs, geocode, loop, match, router, sources, steps
-from app.routing.graph import Holder
+from app.routing import classes, costs, geocode, loop, match, regions, router, sources, steps
+from app.routing import maps as map_set
 from app.routing.providers import ENGINES, OURS
 from app.routing.search import NoRoute
 from app.routing.snap import Snap
@@ -153,17 +155,65 @@ class PlannedRoute(Reply):
     rank: Annotated[int, Meta(description="Its place among its source's own answers: 0 the source's best, then its alternatives.")] = 0
 
 
-def _holder(request: Request) -> Holder:
-    return request.app.state.graph
+def _maps(request: Request) -> map_set.MapSet:
+    return request.app.state.maps
 
 
-def _ready_graph(request: Request):
-    holder = _holder(request)
-    if holder.state == "ready" and holder.graph is not None:
-        return holder.graph
-    if holder.state == "loading":
-        raise Refused(503, "the map is still loading; try again in a few seconds")
-    raise Refused(503, "the map has not been built yet: the owner can download and build one on the Map data screen")
+# A loop reaches about this far per minute of its radius (unit min).
+LOOP_METRES_PER_MINUTE = 1600.0
+
+
+def _route_points(body: "PlanRoute") -> tuple[list[tuple[float, float]], list[tuple[float, float]]]:
+    """The points a plan's map must have roads near, and the corners of the
+    area a loop may reach (which a map should hold too, if one does)."""
+    if body.follow is not None:
+        line = body.follow.coords
+        return [(p.lat, p.lon) for p in body.follow.trip] or [(line[0][0], line[0][1]), (line[-1][0], line[-1][1])], []
+    points = [(p.lat, p.lon) for p in body.waypoints] + [(p.lat, p.lon) for p in body.shape]
+    if body.keep is not None and body.keep.coords:
+        points += [(body.keep.coords[0][0], body.keep.coords[0][1]), (body.keep.coords[-1][0], body.keep.coords[-1][1])]
+    extent: list[tuple[float, float]] = []
+    if body.loop is not None:
+        spec = body.loop
+        points.insert(0, (spec.center_lat, spec.center_lon))
+        reach = spec.radius * (map_set.METRES_PER_DEGREE / 69.17 if spec.unit == "mi" else LOOP_METRES_PER_MINUTE)
+        dlat = reach / map_set.METRES_PER_DEGREE
+        dlon = dlat / max(0.1, math.cos(math.radians(spec.center_lat)))
+        extent = [(spec.center_lat + a * dlat, spec.center_lon + b * dlon) for a in (-1, 1) for b in (-1, 1)]
+    return points, extent
+
+
+def _no_map(request: Request, body: "PlanRoute", options: costs.Options, picked: list[str], count: int,
+            points: list[tuple[float, float]], max_snap: float) -> "PlanRouteReply":
+    """No one map has roads near every point. A trip whose points each lie on
+    some area's map gets a joined map of them queued; meanwhile (and when no
+    map covers a point at all) the other engines plan it, if the request lets
+    them (off_map=engines), else it is refused."""
+    maps = _maps(request)
+    routing = get_config(request).file.routing
+    building = ""
+    if points and routing.join_max_mb > 0 and map_set.can_build():
+        areas, _why = maps.join_for(points, max_snap, routing.join_max_mb)
+        if areas:
+            map_set.queue_join(request.app.state.map_tasks, maps, areas)
+            building = ", ".join(regions.name_of(a) for a in areas)
+    plain = body.follow is None and body.keep is None and body.loop is None
+    if body.off_map == "engines" and plain:
+        partial = maps.partial(points, max_snap)
+        reply = _plan_off_map(request, partial[1] if partial else None, body, options, picked, count)
+        reply.building = building
+        return reply
+    if building:
+        raise Refused(400, f"the points are on different maps: a joined map of {building} is being built for this trip; "
+                      "try again in a few minutes", field="waypoints", off_map=True, building=building)
+    if not maps.has_maps():
+        raise Refused(400, "no map has been built yet: the owner can download and build one on the Map data screen",
+                      field="waypoints", off_map=True)
+    for index, point in enumerate(points[:len(body.waypoints)] if plain else points):
+        if maps.partial([point], max_snap) is None:
+            raise Refused(400, f"point {index + 1} is not near a road on any map built so far", field="waypoints",
+                          index=index, off_map=True)
+    raise Refused(400, "the points are on different maps, and none holds them all", field="waypoints", off_map=True)
 
 
 # --- plan --------------------------------------------------------------------
@@ -245,6 +295,9 @@ class PlanRouteReply(Reply):
     road_factors: Annotated[dict[str, float], Meta(description="The avoid strengths the plan used; types left out counted the penalty.")]
     milliseconds: int
     off_map: Annotated[bool, Meta(description="Planned by the other engines alone, since a point is off our map (PlanRoute.off_map).")] = False
+    map: Annotated[str, Meta(description="The map it was planned on (empty with off_map).")] = ""
+    building: Annotated[str, Meta(description="With off_map: the areas a joined map is being built from for this trip, "
+                                  "named; our router plans it once that is ready.")] = ""
 
 
 def source_name(source: str) -> str:
@@ -291,7 +344,6 @@ def access_of(request: Request) -> sources.Access:
     "no road within routing.max_snap_m is refused with its index.",
 )
 def plan_route(request: Request, body: PlanRoute) -> PlanRouteReply:
-    graph = _ready_graph(request)
     cfg = get_config(request)
     options = costs.Options(penalty=body.penalty, rules=rules_of(request, body.road_rules, body.secondary_is_main, body.allow_unpaved),
                             factors=factors_of(request, body.road_factors))
@@ -299,6 +351,12 @@ def plan_route(request: Request, body: PlanRoute) -> PlanRouteReply:
     picked = list(dict.fromkeys(body.sources))
     max_snap = cfg.file.routing.max_snap_m
     count = body.alternatives or (1 if body.combine == "best" else sources.MAX_ROUTES)
+    _maps(request).configure(routing.open_maps, routing.map_idle_minutes)
+    points, extent = _route_points(body)
+    found = _maps(request).pick(points, max_snap, options, extent) if points else None
+    if found is None:
+        return _no_map(request, body, options, picked, count, points, max_snap)
+    graph = found[1]
     ring: list = []
     ring_sectors: list[int] = []
     plain = body.follow is None and body.keep is None and body.loop is None
@@ -342,7 +400,9 @@ def plan_route(request: Request, body: PlanRoute) -> PlanRouteReply:
                       off_map=True) from None
     except NoRoute as error:
         raise Refused(400, str(error)) from None
-    return _reply(result, shape_snaps, ring, ring_sectors, options, body)
+    reply = _reply(result, shape_snaps, ring, ring_sectors, options, body)
+    reply.map = found[0]
+    return reply
 
 
 def _plan_off_map(request: Request, graph, body: PlanRoute, options: costs.Options, picked: list[str], count: int) -> PlanRouteReply:
@@ -541,14 +601,23 @@ class RoadType(Reply):
     default_strength: Annotated[float | None, Meta(description="Its own avoid strength by default; null counts the penalty.")] = None
 
 
+class MapBrief(Reply):
+    api_name: ClassVar[str] = "MapBrief"
+    api_doc: ClassVar[str] = "A map built so far: each route uses the smallest one with roads near all its points."
+    name: str
+    areas: Annotated[list[str], Meta(description="The areas it holds (slugs): one for an area's own map, several for a joined map.")]
+    bbox: Annotated[list[float], Meta(description="[south, west, north, east].")]
+    open: Annotated[bool, Meta(description="Opened now (it opens when a route first needs it).")]
+
+
 class RoutingStatusReply(Reply):
-    state: Annotated[str, Meta(description="missing, loading, ready or error.")]
+    state: Annotated[str, Meta(description="ready once any map is built, else missing.")]
     error: str
-    region: str
+    region: Annotated[str, Meta(description="The map shown first: the last one a route used.")]
     built_at: str
     nodes: int
     segments: int
-    bbox: Annotated[list[float], Meta(description="[south, west, north, east] of the map, once loaded.")]
+    bbox: Annotated[list[float], Meta(description="[south, west, north, east] of the map shown first.")]
     place_search: Annotated[bool, Meta(description="Whether GET /api/geocode is available.")]
     default_penalty: float
     secondary_is_main: Annotated[bool, Meta(description="Deprecated: see road_types.")]
@@ -559,6 +628,8 @@ class RoutingStatusReply(Reply):
     road_types: Annotated[list[RoadType], Meta(description="The road types road_rules names, in the order to show them, with the server's defaults.")]
     restricted_on_map: Annotated[bool, Meta(description="Whether the loaded map holds restricted roads (one built before them leaves them out).")]
     sources: Annotated[list[SourceInfo], Meta(description="Our router and the other engines, in the order to show them.")]
+    maps: Annotated[list[MapBrief], Meta(description="Every map built so far.")] = msgspec.field(default_factory=list)
+    building: Annotated[list[str], Meta(description="Maps being built or waiting to be (their task titles).")] = msgspec.field(default_factory=list)
 
 
 def default_rules(request: Request) -> dict[str, str]:
@@ -585,20 +656,31 @@ def road_types(request: Request) -> list[RoadType]:
 @route(
     "GET /api/routing/status", summary="The router's state",
     tag="Planner",
-    description="Whether the map is loaded, what it covers, and the server's planner defaults.",
+    description="Which maps are built and what they cover, and the server's planner defaults.",
 )
 def routing_status(request: Request, body: NoInput) -> RoutingStatusReply:
-    holder = _holder(request)
+    maps = _maps(request)
     routing = get_config(request).file.routing
-    meta = holder.graph.meta if holder.graph is not None else {}
+    shown = maps.shown()
+    opened = set(maps.open_names())
+    runner = request.app.state.map_tasks
+    building = ([runner.task.title] if runner.busy() and runner.task is not None else []) + [t.title for t in runner.waiting]
+    meta: dict = {}
+    if shown is not None:
+        try:
+            meta = json.loads((shown.path / "meta.json").read_text())
+        except (OSError, ValueError):
+            meta = {}
     return RoutingStatusReply(
-        state=holder.state,
-        error=holder.error,
-        region=holder.region,
+        state="ready" if shown is not None else "missing",
+        error="; ".join(f"{name}: {why}" for name, why in maps.errors.items()),
+        region=shown.name if shown is not None else "",
         built_at=meta.get("built_at", ""),
         nodes=meta.get("nodes", 0),
         segments=meta.get("segments", 0),
         bbox=meta.get("bbox", []),
+        maps=[MapBrief(name=m.name, areas=m.areas, bbox=m.bbox, open=m.name in opened) for m in maps.maps.values()],
+        building=building,
         place_search=routing.geocoder_url != "",
         default_penalty=float(routing.default_penalty),
         secondary_is_main=default_rules(request)["state_route"] != costs.USE,
@@ -616,6 +698,9 @@ def routing_status(request: Request, body: NoInput) -> RoutingStatusReply:
 
 class Geocode(RequestType):
     q: Annotated[str, QUERY, Meta(min_length=2, max_length=200, description="An address or place name.", extra={"error": "type 2-200 characters"})] = ""
+    near: Annotated[str, QUERY, Meta(pattern=r"^$|^-?[0-9.]+,-?[0-9.]+,-?[0-9.]+,-?[0-9.]+$",
+                                     description="south,west,north,east of the map in view: places there come first.",
+                                     extra={"error": "near is south,west,north,east"})] = ""
 
 
 class Place(Reply):
@@ -632,7 +717,7 @@ class GeocodeReply(Reply):
 @route(
     "GET /api/geocode", summary="Search for a place",
     tag="Planner", errors=(404, 503),
-    description="Addresses and places matching q, within the map's area, best first. Asked of "
+    description="Addresses and places matching q, anywhere, those in the map in view (near) first. Asked of "
     "routing.geocoder_url by the server, at most once a second for everyone together; 404 while "
     "place search is off.",
 )
@@ -642,9 +727,12 @@ def search_places(request: Request, body: Geocode) -> GeocodeReply:
     base = get_config(request).file.routing.geocoder_url
     if not base:
         raise Refused(404, "place search is switched off")
-    graph = _ready_graph(request)
+    near = [float(v) for v in body.near.split(",")] if body.near else []
+    if not near:
+        shown = _maps(request).shown()
+        near = list(shown.bbox) if shown is not None else []
     try:
-        found = geocode.search(base, body.q, graph.meta["bbox"])
+        found = geocode.search(base, body.q, near)
     except geocode.GeocodeError as error:
         raise Refused(503, str(error)) from None
     return GeocodeReply(places=[Place(name=p.name, lat=p.lat, lon=p.lon) for p in found])

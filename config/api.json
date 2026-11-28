@@ -885,6 +885,39 @@
         ],
         "type": "object"
       },
+      "MapBrief": {
+        "description": "A map built so far: each route uses the smallest one with roads near all its points.",
+        "properties": {
+          "areas": {
+            "description": "The areas it holds (slugs): one for an area's own map, several for a joined map.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "bbox": {
+            "description": "[south, west, north, east].",
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "name": {
+            "type": "string"
+          },
+          "open": {
+            "description": "Opened now (it opens when a route first needs it).",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "areas",
+          "bbox",
+          "name",
+          "open"
+        ],
+        "type": "object"
+      },
       "MapFile": {
         "properties": {
           "bytes": {
@@ -903,71 +936,43 @@
       },
       "MapGraph": {
         "properties": {
-          "active": {
-            "type": "boolean"
-          },
           "areas": {
             "items": {
               "type": "string"
             },
             "type": "array"
+          },
+          "error": {
+            "description": "Why it would not open, if it would not.",
+            "type": "string"
           },
           "file": {
             "$ref": "#/components/schemas/MapFile"
           },
-          "region": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "active",
-          "areas",
-          "file",
-          "region"
-        ],
-        "type": "object"
-      },
-      "MapLoaded": {
-        "properties": {
-          "areas": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "built_at": {
-            "type": "string"
-          },
-          "error": {
+          "kind": {
+            "description": "area (one area's own map) or joined (several, for trips across them).",
             "type": "string"
           },
           "nodes": {
             "type": "integer"
+          },
+          "open": {
+            "description": "Opened now: a route used it lately.",
+            "type": "boolean"
           },
           "region": {
             "type": "string"
           },
           "segments": {
             "type": "integer"
-          },
-          "state": {
-            "description": "missing, loading, ready or error.",
-            "type": "string"
-          },
-          "switching": {
-            "description": "Another map is loading; this one answers until it is ready.",
-            "type": "boolean"
           }
         },
         "required": [
           "areas",
-          "built_at",
-          "error",
-          "nodes",
-          "region",
-          "segments",
-          "state",
-          "switching"
+          "file",
+          "kind",
+          "open",
+          "region"
         ],
         "type": "object"
       },
@@ -1010,6 +1015,21 @@
           "state",
           "step",
           "steps",
+          "title"
+        ],
+        "type": "object"
+      },
+      "MapTaskWaiting": {
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
           "title"
         ],
         "type": "object"
@@ -7442,7 +7462,7 @@
     },
     "/api/geocode": {
       "get": {
-        "description": "Addresses and places matching q, within the map's area, best first. Asked of routing.geocoder_url by the server, at most once a second for everyone together; 404 while place search is off.",
+        "description": "Addresses and places matching q, anywhere, those in the map in view (near) first. Asked of routing.geocoder_url by the server, at most once a second for everyone together; 404 while place search is off.",
         "operationId": "get_api_geocode",
         "parameters": [
           {
@@ -7452,6 +7472,15 @@
             "schema": {
               "maxLength": 200,
               "minLength": 2,
+              "type": "string"
+            }
+          },
+          {
+            "description": "south,west,north,east of the map in view: places there come first.",
+            "in": "query",
+            "name": "near",
+            "schema": {
+              "pattern": "^$|^-?[0-9.]+,-?[0-9.]+,-?[0-9.]+,-?[0-9.]+$",
               "type": "string"
             }
           }
@@ -9534,7 +9563,7 @@
     },
     "/api/owner/mapdata": {
       "get": {
-        "description": "The map the server routes on, the extracts downloaded and maps built so far, every US state and country that can be downloaded, and the download or build running now (with its output).",
+        "description": "The maps built so far (which are open now), the extracts downloaded, every US state and country that can be downloaded, and the download or build running now (with its output) and those waiting.",
         "operationId": "get_api_owner_mapdata",
         "responses": {
           "200": {
@@ -9572,9 +9601,6 @@
                       },
                       "type": "array"
                     },
-                    "loaded": {
-                      "$ref": "#/components/schemas/MapLoaded"
-                    },
                     "memory_bytes": {
                       "description": "This machine's memory, 0 when unknown.",
                       "type": "integer"
@@ -9591,6 +9617,13 @@
                     },
                     "us": {
                       "$ref": "#/components/schemas/MapArea"
+                    },
+                    "waiting": {
+                      "description": "Tasks queued behind the one running, in order.",
+                      "items": {
+                        "$ref": "#/components/schemas/MapTaskWaiting"
+                      },
+                      "type": "array"
                     }
                   },
                   "required": [
@@ -9600,10 +9633,10 @@
                     "disk_free_bytes",
                     "folder",
                     "graphs",
-                    "loaded",
                     "memory_bytes",
                     "task",
-                    "us"
+                    "us",
+                    "waiting"
                   ],
                   "type": "object"
                 }
@@ -9634,145 +9667,9 @@
       },
       "x-feature": "settings"
     },
-    "/api/owner/mapdata/activate": {
-      "post": {
-        "description": "Switches the server to a map built earlier, without a restart. The current one keeps answering until the new one has loaded. Remembered across restarts.",
-        "operationId": "post_api_owner_mapdata_activate",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "additionalProperties": false,
-                "properties": {
-                  "csrf_token": {
-                    "description": "From GET /api/me. Browser sessions only.",
-                    "type": "string"
-                  },
-                  "region": {
-                    "description": "A built map's name, as GET /api/owner/mapdata lists it.",
-                    "pattern": "^[a-z0-9][a-z0-9_+-]{0,127}$",
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "region"
-                ],
-                "type": "object"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "properties": {
-                    "areas": {
-                      "description": "The US states.",
-                      "items": {
-                        "$ref": "#/components/schemas/MapArea"
-                      },
-                      "type": "array"
-                    },
-                    "can_build": {
-                      "description": "Whether osmium is installed here, which building needs.",
-                      "type": "boolean"
-                    },
-                    "countries": {
-                      "description": "Every other country, by continent then name.",
-                      "items": {
-                        "$ref": "#/components/schemas/MapArea"
-                      },
-                      "type": "array"
-                    },
-                    "disk_free_bytes": {
-                      "type": "integer"
-                    },
-                    "folder": {
-                      "type": "string"
-                    },
-                    "graphs": {
-                      "items": {
-                        "$ref": "#/components/schemas/MapGraph"
-                      },
-                      "type": "array"
-                    },
-                    "loaded": {
-                      "$ref": "#/components/schemas/MapLoaded"
-                    },
-                    "memory_bytes": {
-                      "description": "This machine's memory, 0 when unknown.",
-                      "type": "integer"
-                    },
-                    "task": {
-                      "oneOf": [
-                        {
-                          "$ref": "#/components/schemas/MapTask"
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "us": {
-                      "$ref": "#/components/schemas/MapArea"
-                    }
-                  },
-                  "required": [
-                    "areas",
-                    "can_build",
-                    "countries",
-                    "disk_free_bytes",
-                    "folder",
-                    "graphs",
-                    "loaded",
-                    "memory_bytes",
-                    "task",
-                    "us"
-                  ],
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Success"
-          },
-          "400": {
-            "$ref": "#/components/responses/E400"
-          },
-          "403": {
-            "$ref": "#/components/responses/E403"
-          },
-          "404": {
-            "$ref": "#/components/responses/E404"
-          },
-          "409": {
-            "$ref": "#/components/responses/E409"
-          },
-          "429": {
-            "$ref": "#/components/responses/E429"
-          },
-          "503": {
-            "$ref": "#/components/responses/E503"
-          }
-        },
-        "security": [
-          {
-            "sessionCookie": []
-          }
-        ],
-        "summary": "Route on another map",
-        "tags": [
-          "Owner"
-        ],
-        "x-required-role": "owner"
-      },
-      "x-feature": "settings"
-    },
     "/api/owner/mapdata/cancel": {
       "post": {
-        "description": "Stops the download or build running now. A cut-off download leaves no file behind.",
+        "description": "Stops the download or build running now, or takes a waiting one off the queue (id). A cut-off download leaves no file behind.",
         "operationId": "post_api_owner_mapdata_cancel",
         "requestBody": {
           "content": {
@@ -9783,6 +9680,13 @@
                   "csrf_token": {
                     "description": "From GET /api/me. Browser sessions only.",
                     "type": "string"
+                  },
+                  "id": {
+                    "description": "A waiting task to take off the queue; left out, the one running is stopped.",
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
                   }
                 },
                 "type": "object"
@@ -9827,9 +9731,6 @@
                       },
                       "type": "array"
                     },
-                    "loaded": {
-                      "$ref": "#/components/schemas/MapLoaded"
-                    },
                     "memory_bytes": {
                       "description": "This machine's memory, 0 when unknown.",
                       "type": "integer"
@@ -9846,6 +9747,13 @@
                     },
                     "us": {
                       "$ref": "#/components/schemas/MapArea"
+                    },
+                    "waiting": {
+                      "description": "Tasks queued behind the one running, in order.",
+                      "items": {
+                        "$ref": "#/components/schemas/MapTaskWaiting"
+                      },
+                      "type": "array"
                     }
                   },
                   "required": [
@@ -9855,10 +9763,10 @@
                     "disk_free_bytes",
                     "folder",
                     "graphs",
-                    "loaded",
                     "memory_bytes",
                     "task",
-                    "us"
+                    "us",
+                    "waiting"
                   ],
                   "type": "object"
                 }
@@ -9900,7 +9808,7 @@
     },
     "/api/owner/mapdata/delete": {
       "post": {
-        "description": "Deletes a downloaded extract or a built map to free disk space. The map the server is routing on cannot be deleted.",
+        "description": "Deletes a downloaded extract or a built map to free disk space. A joined map is built again when a trip needs it; an area's own map at the server's next start while its extract is still downloaded.",
         "operationId": "post_api_owner_mapdata_delete",
         "requestBody": {
           "content": {
@@ -9969,9 +9877,6 @@
                       },
                       "type": "array"
                     },
-                    "loaded": {
-                      "$ref": "#/components/schemas/MapLoaded"
-                    },
                     "memory_bytes": {
                       "description": "This machine's memory, 0 when unknown.",
                       "type": "integer"
@@ -9988,6 +9893,13 @@
                     },
                     "us": {
                       "$ref": "#/components/schemas/MapArea"
+                    },
+                    "waiting": {
+                      "description": "Tasks queued behind the one running, in order.",
+                      "items": {
+                        "$ref": "#/components/schemas/MapTaskWaiting"
+                      },
+                      "type": "array"
                     }
                   },
                   "required": [
@@ -9997,10 +9909,10 @@
                     "disk_free_bytes",
                     "folder",
                     "graphs",
-                    "loaded",
                     "memory_bytes",
                     "task",
-                    "us"
+                    "us",
+                    "waiting"
                   ],
                   "type": "object"
                 }
@@ -10042,7 +9954,7 @@
     },
     "/api/owner/mapdata/run": {
       "post": {
-        "description": "Downloads the areas' extracts from Geofabrik (missing ones, all, or none), builds one map from them, and switches the server to it -- each step optional. Runs in the background; GET /api/owner/mapdata shows its progress. One task at a time.",
+        "description": "Downloads the areas' extracts from Geofabrik (missing ones, all, or none), then builds each into a map of its own -- or, with join, one map of them all. Every map built is used at once: each route opens the one that covers it. Runs in the background, after any task already running; GET /api/owner/mapdata shows its progress.",
         "operationId": "post_api_owner_mapdata_run",
         "requestBody": {
           "content": {
@@ -10050,11 +9962,6 @@
               "schema": {
                 "additionalProperties": false,
                 "properties": {
-                  "activate": {
-                    "default": true,
-                    "description": "Switch the server to the new map once it is built.",
-                    "type": "boolean"
-                  },
                   "areas": {
                     "items": {
                       "description": "An area's slug: a US state's (ohio, new-york), us, or a country's (jordan).",
@@ -10067,7 +9974,7 @@
                   },
                   "build": {
                     "default": true,
-                    "description": "Build one map from the areas after downloading.",
+                    "description": "Build a map of each area on its own after downloading (only those without one, or all with download=all), or with join one map of them all.",
                     "type": "boolean"
                   },
                   "csrf_token": {
@@ -10079,6 +9986,10 @@
                     "description": "Which extracts to fetch first: missing ones, all (fresh copies), or none.",
                     "pattern": "^(missing|all|none)$",
                     "type": "string"
+                  },
+                  "join": {
+                    "description": "Build one joined map of all the areas instead of one each.",
+                    "type": "boolean"
                   }
                 },
                 "required": [
@@ -10126,9 +10037,6 @@
                       },
                       "type": "array"
                     },
-                    "loaded": {
-                      "$ref": "#/components/schemas/MapLoaded"
-                    },
                     "memory_bytes": {
                       "description": "This machine's memory, 0 when unknown.",
                       "type": "integer"
@@ -10145,6 +10053,13 @@
                     },
                     "us": {
                       "$ref": "#/components/schemas/MapArea"
+                    },
+                    "waiting": {
+                      "description": "Tasks queued behind the one running, in order.",
+                      "items": {
+                        "$ref": "#/components/schemas/MapTaskWaiting"
+                      },
+                      "type": "array"
                     }
                   },
                   "required": [
@@ -10154,10 +10069,10 @@
                     "disk_free_bytes",
                     "folder",
                     "graphs",
-                    "loaded",
                     "memory_bytes",
                     "task",
-                    "us"
+                    "us",
+                    "waiting"
                   ],
                   "type": "object"
                 }
@@ -10174,9 +10089,6 @@
           "404": {
             "$ref": "#/components/responses/E404"
           },
-          "409": {
-            "$ref": "#/components/responses/E409"
-          },
           "429": {
             "$ref": "#/components/responses/E429"
           },
@@ -10189,7 +10101,7 @@
             "sessionCookie": []
           }
         ],
-        "summary": "Download and build a map",
+        "summary": "Download and build maps",
         "tags": [
           "Owner"
         ],
@@ -11998,6 +11910,14 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "building": {
+                      "description": "With off_map: the areas a joined map is being built from for this trip, named; our router plans it once that is ready.",
+                      "type": "string"
+                    },
+                    "map": {
+                      "description": "The map it was planned on (empty with off_map).",
+                      "type": "string"
+                    },
                     "milliseconds": {
                       "type": "integer"
                     },
@@ -12109,7 +12029,7 @@
     },
     "/api/routing/status": {
       "get": {
-        "description": "Whether the map is loaded, what it covers, and the server's planner defaults.",
+        "description": "Which maps are built and what they cover, and the server's planner defaults.",
         "operationId": "get_api_routing_status",
         "responses": {
           "200": {
@@ -12118,9 +12038,16 @@
                 "schema": {
                   "properties": {
                     "bbox": {
-                      "description": "[south, west, north, east] of the map, once loaded.",
+                      "description": "[south, west, north, east] of the map shown first.",
                       "items": {
                         "type": "number"
+                      },
+                      "type": "array"
+                    },
+                    "building": {
+                      "description": "Maps being built or waiting to be (their task titles).",
+                      "items": {
+                        "type": "string"
                       },
                       "type": "array"
                     },
@@ -12146,6 +12073,13 @@
                     "loop_unit": {
                       "type": "string"
                     },
+                    "maps": {
+                      "description": "Every map built so far.",
+                      "items": {
+                        "$ref": "#/components/schemas/MapBrief"
+                      },
+                      "type": "array"
+                    },
                     "nodes": {
                       "type": "integer"
                     },
@@ -12154,6 +12088,7 @@
                       "type": "boolean"
                     },
                     "region": {
+                      "description": "The map shown first: the last one a route used.",
                       "type": "string"
                     },
                     "restricted_on_map": {
@@ -12182,7 +12117,7 @@
                       "type": "array"
                     },
                     "state": {
-                      "description": "missing, loading, ready or error.",
+                      "description": "ready once any map is built, else missing.",
                       "type": "string"
                     }
                   },

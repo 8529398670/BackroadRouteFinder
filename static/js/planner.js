@@ -193,6 +193,29 @@ const Planner = {
 
   // --- the map's state ------------------------------------------------------
 
+  // A joined map is being built for the trip shown: ask now and then whether
+  // it is done, and plan the trip again on it once it is.
+  watchBuilding( result ) {
+    window.clearTimeout( this.buildTimer );
+    if ( !result || !result.building ) return;
+    const check = async () => {
+      if ( this.result !== result ) return;
+      try {
+        this.status = await Api.request( "/api/routing/status" );
+      } catch ( _error ) {
+        this.buildTimer = window.setTimeout( check , 20000 );
+        return;
+      }
+      if ( this.status.building.some( ( title ) => title.endsWith( result.building ) ) ) {
+        this.buildTimer = window.setTimeout( check , 20000 );
+        return;
+      }
+      this.cache.clear();
+      this.plan();
+    };
+    this.buildTimer = window.setTimeout( check , 20000 );
+  },
+
   showStatus() {
     const box = Dom.get( "plan-map-status" );
     const state = this.status ? this.status.state : "missing";
@@ -798,7 +821,13 @@ const Planner = {
     }
     let places;
     try {
-      places = ( await Api.request( "/api/geocode?q=" + encodeURIComponent( query ) ) ).places;
+      // Places in the map's view come first; the rest of the world still answers.
+      let near = "";
+      if ( RouteMap.map ) {
+        const view = RouteMap.map.getBounds();
+        near = "&near=" + [ view.getSouth() , view.getWest() , view.getNorth() , view.getEast() ].map( ( v ) => v.toFixed( 4 ) ).join( "," );
+      }
+      places = ( await Api.request( "/api/geocode?q=" + encodeURIComponent( query ) + near ) ).places;
     } catch ( error ) {
       if ( input.value.trim() !== query ) return;
       if ( recent.length ) Dom.swap( menu , ...this.recentRows( index , menu , recent ) );
@@ -1076,7 +1105,9 @@ const Planner = {
 
   async plan( fit ) {
     const turn = ++this.turn;
-    if ( !this.ready() || !this.status || this.status.state !== "ready" ) {
+    // With no map built yet, the other engines can still plan (off our map).
+    const mapsOk = this.status && ( this.status.state === "ready" || ( this.status.state === "missing" && this.options.off_map_engines !== false ) );
+    if ( !this.ready() || !mapsOk ) {
       this.showBusy( null );
       this.result = null;
       RouteMap.clearRoutes();
@@ -1903,7 +1934,9 @@ const Planner = {
     const problems = ( result.problems || [] ).map( ( problem ) => Dom.el( "div" , {
       text: Format.fill( "plan.problem" , { source: this.sourceLabel( problem.source , problem.source_name ) , message: problem.message } ),
     } ) );
-    if ( result.off_map ) problems.unshift( Dom.el( "div" , { class: "fw-semibold" , text: I18n.get( "plan.off_map_planned" ) } ) );
+    if ( result.off_map && !result.building ) problems.unshift( Dom.el( "div" , { class: "fw-semibold" , text: I18n.get( "plan.off_map_planned" ) } ) );
+    if ( result.building ) problems.unshift( Dom.el( "div" , { class: "fw-semibold" , text: Format.fill( "plan.building_join" , { areas: result.building } ) } ) );
+    this.watchBuilding( result );
     Dom.swap( Dom.get( "plan-problems" ) , ...problems );
     Dom.show( Dom.get( "plan-problems" ) , problems.length > 0 );
     this.renderAlternativesNote();
