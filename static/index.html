@@ -283,6 +283,11 @@
                 <div id="plan-body-sources">
                 <p class="small text-body-secondary" data-i18n="plan.sources_help"></p>
                 <div id="plan-sources" class="d-flex flex-column gap-1 mb-2"></div>
+                <div class="form-check form-switch border-top pt-2 mb-0">
+                  <input class="form-check-input" type="checkbox" role="switch" id="plan-off-map" />
+                  <label class="form-check-label" for="plan-off-map" data-i18n="plan.off_map_engines"></label>
+                  <div class="small text-body-secondary" data-i18n="plan.off_map_engines_help"></div>
+                </div>
                 </div>
               </div>
             </div>
@@ -1175,7 +1180,13 @@
                 <input class="form-check-input" type="checkbox" id="mapdata-us" />
                 <label class="form-check-label" for="mapdata-us"><span class="fw-semibold" data-i18n="mapdata.us"></span> <span id="mapdata-us-note" class="small text-body-secondary"></span></label>
               </div>
+              <h4 class="h6 mt-3 mb-2" data-i18n="mapdata.states_heading"></h4>
               <div id="mapdata-states" class="row row-cols-1 row-cols-sm-2 row-cols-lg-3 row-cols-xxl-4 g-1 mapdata-states"></div>
+              <p id="mapdata-states-none" class="small text-body-secondary mb-0" data-i18n="mapdata.filter_none" hidden></p>
+              <h4 class="h6 mt-3 mb-1" data-i18n="mapdata.countries_heading"></h4>
+              <p class="small text-body-secondary mb-2" data-i18n="mapdata.countries_help"></p>
+              <div id="mapdata-countries" class="accordion"></div>
+              <p id="mapdata-countries-none" class="small text-body-secondary mb-0" data-i18n="mapdata.filter_none" hidden></p>
               <div id="mapdata-warning" class="alert alert-warning small mt-3 mb-0" role="status" hidden></div>
               <div class="d-flex flex-wrap align-items-center gap-2 mt-3">
                 <span id="mapdata-summary" class="small text-body-secondary me-auto"></span>

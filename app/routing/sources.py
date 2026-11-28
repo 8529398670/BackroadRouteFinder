@@ -140,16 +140,7 @@ def plan(graph: Graph, points: list[tuple[float, float]], options: costs.Options
     on_road = [(s.lat, s.lon) for s in snapped]
     ask = base.Ask.from_rules(options.rules, backroads)
 
-    asked: dict[str, concurrent.futures.Future] = {}
-    for source in sources:
-        if source == OURS or source not in ENGINES:
-            continue
-        if not access.usable(source):
-            out.problems.append(Problem(source, access.why_not(source)))
-            continue
-        engine = ENGINES[source]
-        asked[source] = _pool.submit(base.cached_fetch, engine, on_road, ask,
-                                     access.keys.get(source, ""), access.urls.get(source, ""), access.timeout)
+    asked = _ask(on_road, ask, sources, access, out)
 
     choices: list[Choice] = []
     fastest: Choice | None = None
@@ -169,6 +160,73 @@ def plan(graph: Graph, points: list[tuple[float, float]], options: costs.Options
                 else:
                     choices.append(Choice(OURS, kind, planned.summary, score(planned.summary, options.penalty), rank=planned.rank))
 
+    _collect(graph, options, kind, asked, access, out, choices)
+    _keep_best(out, choices, count)
+    if fastest is not None:
+        out.routes.append(fastest)
+    out.milliseconds = int((time.monotonic() - began) * 1000)
+    return out
+
+
+@dataclass(frozen=True)
+class Spot:
+    """A point as it was asked for, with no road of ours under it (a plan
+    from the other engines alone: plan_off_map)."""
+    lat: float
+    lon: float
+    soft: bool = False
+
+
+def default_engines(access: Access) -> list[str]:
+    """The engines to ask off our map when the person picked none but ours:
+    every one they can use."""
+    return [engine_id for engine_id in ENGINES if access.usable(engine_id)]
+
+
+def plan_off_map(graph: Graph, points: list[Spot], options: costs.Options, sources: list[str], count: int,
+                 access: Access) -> Plan:
+    """A plan from the other engines alone, through the points as given, for
+    a trip our map does not cover (a point with no road of ours near it).
+    sources: the engines to ask; ours is left out. Each route is still laid on
+    our map, so whatever of it our map does cover is scored as usual, and the
+    rest counts as backroad (off_map_meters)."""
+    import time
+
+    began = time.monotonic()
+    backroads = options.penalty > 1
+    kind = "backroads" if backroads else "fastest"
+    out = Plan(snapped=list(points))
+    engines = [s for s in sources if s != OURS and s in ENGINES]
+    if not engines:
+        raise NoRoute("no other engine is picked or usable to plan off our map: tick one under Sources")
+    asked = _ask([(p.lat, p.lon) for p in points], base.Ask.from_rules(options.rules, backroads), engines, access, out)
+    choices: list[Choice] = []
+    _collect(graph, options, kind, asked, access, out, choices)
+    _keep_best(out, choices, count)
+    out.milliseconds = int((time.monotonic() - began) * 1000)
+    return out
+
+
+def _ask(points: list[tuple[float, float]], ask: base.Ask, sources: list[str], access: Access,
+         out: Plan) -> dict[str, concurrent.futures.Future]:
+    """Every other engine picked, asked in the background; one that cannot be
+    asked goes in out.problems."""
+    asked: dict[str, concurrent.futures.Future] = {}
+    for source in sources:
+        if source == OURS or source not in ENGINES:
+            continue
+        if not access.usable(source):
+            out.problems.append(Problem(source, access.why_not(source)))
+            continue
+        engine = ENGINES[source]
+        asked[source] = _pool.submit(base.cached_fetch, engine, points, ask,
+                                     access.keys.get(source, ""), access.urls.get(source, ""), access.timeout)
+    return asked
+
+
+def _collect(graph: Graph, options: costs.Options, kind: str, asked: dict[str, concurrent.futures.Future],
+             access: Access, out: Plan, choices: list[Choice]) -> None:
+    """The engines' answers, each laid on our map and scored, into choices."""
     rating = costs.rating(graph, options) if asked else None
     for source, future in asked.items():
         try:
@@ -188,6 +246,9 @@ def plan(graph: Graph, points: list[tuple[float, float]], options: costs.Options
             choices.append(Choice(source, kind, summary, score(summary, options.penalty),
                                   estimated=True, off_map_meters=off_map, rank=rank))
 
+
+def _keep_best(out: Plan, choices: list[Choice], count: int) -> None:
+    """The best count of the choices into out.routes, near-copies kept once."""
     if not choices:
         if out.problems:
             raise NoRoute("no source found a route: " + "; ".join(f"{ENGINES[p.source].name if p.source in ENGINES else 'our map'}: {p.message}" for p in out.problems))
@@ -203,7 +264,3 @@ def plan(graph: Graph, points: list[tuple[float, float]], options: costs.Options
             continue
         kept.append(choice)
     out.routes = kept[:max(1, min(count, MAX_ROUTES))]
-    if fastest is not None:
-        out.routes.append(fastest)
-    out.milliseconds = int((time.monotonic() - began) * 1000)
-    return out

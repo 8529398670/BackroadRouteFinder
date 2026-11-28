@@ -866,6 +866,10 @@
               }
             ]
           },
+          "group": {
+            "description": "A country's continent, as Geofabrik groups them; empty for a US state.",
+            "type": "string"
+          },
           "name": {
             "type": "string"
           },
@@ -1553,6 +1557,11 @@
               "min"
             ],
             "type": "string"
+          },
+          "off_map_engines": {
+            "default": true,
+            "description": "Off our map, plan with the other engines alone (PlanRoute.off_map=engines).",
+            "type": "boolean"
           },
           "penalty": {
             "default": 8.0,
@@ -9525,7 +9534,7 @@
     },
     "/api/owner/mapdata": {
       "get": {
-        "description": "The map the server routes on, the extracts downloaded and maps built so far, every state that can be downloaded, and the download or build running now (with its output).",
+        "description": "The map the server routes on, the extracts downloaded and maps built so far, every US state and country that can be downloaded, and the download or build running now (with its output).",
         "operationId": "get_api_owner_mapdata",
         "responses": {
           "200": {
@@ -9534,6 +9543,7 @@
                 "schema": {
                   "properties": {
                     "areas": {
+                      "description": "The US states.",
                       "items": {
                         "$ref": "#/components/schemas/MapArea"
                       },
@@ -9542,6 +9552,13 @@
                     "can_build": {
                       "description": "Whether osmium is installed here, which building needs.",
                       "type": "boolean"
+                    },
+                    "countries": {
+                      "description": "Every other country, by continent then name.",
+                      "items": {
+                        "$ref": "#/components/schemas/MapArea"
+                      },
+                      "type": "array"
                     },
                     "disk_free_bytes": {
                       "type": "integer"
@@ -9579,6 +9596,7 @@
                   "required": [
                     "areas",
                     "can_build",
+                    "countries",
                     "disk_free_bytes",
                     "folder",
                     "graphs",
@@ -9652,6 +9670,7 @@
                 "schema": {
                   "properties": {
                     "areas": {
+                      "description": "The US states.",
                       "items": {
                         "$ref": "#/components/schemas/MapArea"
                       },
@@ -9660,6 +9679,13 @@
                     "can_build": {
                       "description": "Whether osmium is installed here, which building needs.",
                       "type": "boolean"
+                    },
+                    "countries": {
+                      "description": "Every other country, by continent then name.",
+                      "items": {
+                        "$ref": "#/components/schemas/MapArea"
+                      },
+                      "type": "array"
                     },
                     "disk_free_bytes": {
                       "type": "integer"
@@ -9697,6 +9723,7 @@
                   "required": [
                     "areas",
                     "can_build",
+                    "countries",
                     "disk_free_bytes",
                     "folder",
                     "graphs",
@@ -9771,6 +9798,7 @@
                 "schema": {
                   "properties": {
                     "areas": {
+                      "description": "The US states.",
                       "items": {
                         "$ref": "#/components/schemas/MapArea"
                       },
@@ -9779,6 +9807,13 @@
                     "can_build": {
                       "description": "Whether osmium is installed here, which building needs.",
                       "type": "boolean"
+                    },
+                    "countries": {
+                      "description": "Every other country, by continent then name.",
+                      "items": {
+                        "$ref": "#/components/schemas/MapArea"
+                      },
+                      "type": "array"
                     },
                     "disk_free_bytes": {
                       "type": "integer"
@@ -9816,6 +9851,7 @@
                   "required": [
                     "areas",
                     "can_build",
+                    "countries",
                     "disk_free_bytes",
                     "folder",
                     "graphs",
@@ -9904,6 +9940,7 @@
                 "schema": {
                   "properties": {
                     "areas": {
+                      "description": "The US states.",
                       "items": {
                         "$ref": "#/components/schemas/MapArea"
                       },
@@ -9912,6 +9949,13 @@
                     "can_build": {
                       "description": "Whether osmium is installed here, which building needs.",
                       "type": "boolean"
+                    },
+                    "countries": {
+                      "description": "Every other country, by continent then name.",
+                      "items": {
+                        "$ref": "#/components/schemas/MapArea"
+                      },
+                      "type": "array"
                     },
                     "disk_free_bytes": {
                       "type": "integer"
@@ -9949,6 +9993,7 @@
                   "required": [
                     "areas",
                     "can_build",
+                    "countries",
                     "disk_free_bytes",
                     "folder",
                     "graphs",
@@ -10012,11 +10057,11 @@
                   },
                   "areas": {
                     "items": {
-                      "description": "A state's Geofabrik slug (ohio, new-york), or us.",
-                      "pattern": "^[a-z][a-z-]{1,40}$",
+                      "description": "An area's slug: a US state's (ohio, new-york), us, or a country's (jordan).",
+                      "pattern": "^[a-z][a-z-]{1,60}$",
                       "type": "string"
                     },
-                    "maxItems": 53,
+                    "maxItems": 248,
                     "minItems": 1,
                     "type": "array"
                   },
@@ -10052,6 +10097,7 @@
                 "schema": {
                   "properties": {
                     "areas": {
+                      "description": "The US states.",
                       "items": {
                         "$ref": "#/components/schemas/MapArea"
                       },
@@ -10060,6 +10106,13 @@
                     "can_build": {
                       "description": "Whether osmium is installed here, which building needs.",
                       "type": "boolean"
+                    },
+                    "countries": {
+                      "description": "Every other country, by continent then name.",
+                      "items": {
+                        "$ref": "#/components/schemas/MapArea"
+                      },
+                      "type": "array"
                     },
                     "disk_free_bytes": {
                       "type": "integer"
@@ -10097,6 +10150,7 @@
                   "required": [
                     "areas",
                     "can_build",
+                    "countries",
                     "disk_free_bytes",
                     "folder",
                     "graphs",
@@ -11287,6 +11341,10 @@
                       "null"
                     ]
                   },
+                  "off_map_engines": {
+                    "default": true,
+                    "type": "boolean"
+                  },
                   "penalty": {
                     "description": "How many times over a minute on a main road counts. 1 is the plain fastest route.",
                     "maximum": 100,
@@ -11849,6 +11907,15 @@
                       }
                     ]
                   },
+                  "off_map": {
+                    "default": "refuse",
+                    "description": "When a point (or nudge) has no road on our map near it: refuse (400), or engines -- plan the trip with the other engines alone, through the points as given (the picked ones, else every usable one). Only for a plain trip, not a loop, keep or follow.",
+                    "enum": [
+                      "refuse",
+                      "engines"
+                    ],
+                    "type": "string"
+                  },
                   "penalty": {
                     "default": 8.0,
                     "description": "How many times over a minute on a main road counts. 1 is the plain fastest route.",
@@ -11933,6 +12000,10 @@
                   "properties": {
                     "milliseconds": {
                       "type": "integer"
+                    },
+                    "off_map": {
+                      "description": "Planned by the other engines alone, since a point is off our map (PlanRoute.off_map).",
+                      "type": "boolean"
                     },
                     "problems": {
                       "items": {

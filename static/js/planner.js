@@ -42,6 +42,8 @@ const Planner = {
   MAX_SHAPE: 12,
   options: {
     backroads: true , penalty: 8 , road_rules: {} , road_factors: {} , compare_fastest: true , sources: [ "ours" ] , combine: "best" , alternatives: 5,
+    // A point off our map: plan with the other engines alone (PlanRoute.off_map).
+    off_map_engines: true,
     // edits: ring points dropped or moved, by sector (LoopSpec.edits).
     loop: { on: false , radius: 20 , unit: "mi" , start: "center" , direction: "cw" , points: 6 , reuse: 3 , edits: [] },
   },
@@ -141,6 +143,7 @@ const Planner = {
       radio.addEventListener( "change" , () => { if ( radio.checked ) this.setLoop( "direction" , radio.value ); } );
     } );
     Dom.get( "plan-compare" ).addEventListener( "change" , ( event ) => this.setOption( "compare_fastest" , event.target.checked ) );
+    Dom.get( "plan-off-map" ).addEventListener( "change" , ( event ) => this.setOption( "off_map_engines" , event.target.checked ) );
     Dom.get( "plan-penalty" ).addEventListener( "input" , ( event ) => this.setOption( "penalty" , Number( event.target.value ) , "penalty" ) );
     Dom.all( "#plan-presets [data-penalty]" ).forEach( ( button ) => {
       button.addEventListener( "click" , () => this.setOption( "penalty" , Number( button.getAttribute( "data-penalty" ) ) ) );
@@ -995,6 +998,7 @@ const Planner = {
       return Dom.el( "div" , { class: "form-check" , children: [ input , label , told ].filter( Boolean ) } );
     } );
     Dom.swap( Dom.get( "plan-sources" ) , ...rows );
+    Dom.get( "plan-off-map" ).checked = this.options.off_map_engines !== false;
     Dom.get( "plan-alternatives" ).value = String( this.options.alternatives || 1 );
     this.renderAlternativesNote();
   },
@@ -1041,7 +1045,7 @@ const Planner = {
     await Api.post( "/api/planner/prefs" , {
       backroads: options.backroads , penalty: options.penalty , road_rules: options.road_rules , road_factors: options.road_factors,
       compare_fastest: options.compare_fastest , sources: options.sources , combine: options.combine || "best",
-      alternatives: options.alternatives || 1,
+      alternatives: options.alternatives || 1, off_map_engines: options.off_map_engines !== false,
       loop_radius: options.loop.radius , loop_unit: options.loop.unit , loop_points: options.loop.points , loop_reuse: options.loop.reuse,
     } );
     Dom.toast( I18n.get( "plan.prefs_saved" ) , "ok" );
@@ -1103,6 +1107,7 @@ const Planner = {
       sources: sources,
       alternatives: options.alternatives || 1,
     };
+    if ( options.off_map_engines !== false ) body.off_map = "engines";
     if ( loop ) body.loop = this.loopSpec();
     this.lastBody = body;
     if ( this.shape.length ) body.shape = this.shape.map( ( point ) => ( { lat: point.lat , lon: point.lon , leg: point.leg } ) );
@@ -1144,7 +1149,12 @@ const Planner = {
       summary.classList.remove( "opacity-50" );
       this.showBusy( null );
       this.pendingNavigate = false;
-      App.showError( error.message );
+      // A point off our map, with the fallback switched off: offer it.
+      if ( error.payload && error.payload.off_map && options.off_map_engines === false ) {
+        Dom.toast( error.message , "error" , { text: I18n.get( "plan.off_map_try_engines" ) , run: () => this.setOption( "off_map_engines" , true ) } );
+      } else {
+        App.showError( error.message );
+      }
       return;
     } finally {
       if ( turn === this.turn ) summary.classList.remove( "opacity-50" );
@@ -1893,6 +1903,7 @@ const Planner = {
     const problems = ( result.problems || [] ).map( ( problem ) => Dom.el( "div" , {
       text: Format.fill( "plan.problem" , { source: this.sourceLabel( problem.source , problem.source_name ) , message: problem.message } ),
     } ) );
+    if ( result.off_map ) problems.unshift( Dom.el( "div" , { class: "fw-semibold" , text: I18n.get( "plan.off_map_planned" ) } ) );
     Dom.swap( Dom.get( "plan-problems" ) , ...problems );
     Dom.show( Dom.get( "plan-problems" ) , problems.length > 0 );
     this.renderAlternativesNote();

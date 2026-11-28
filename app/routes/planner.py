@@ -220,6 +220,10 @@ class PlanRoute(RequestType):
     keep: Annotated[Keep | None, Meta(description="Lock a route's ends and plan only its middle again (not with a loop).")] = None
     follow: Annotated[Follow | None, Meta(description="Drive this exact line instead of planning one (no loop, keep or nudges); "
                                           "waypoints are ignored.")] = None
+    off_map: Annotated[Literal["refuse", "engines"], Meta(
+        description="When a point (or nudge) has no road on our map near it: refuse (400), or engines -- plan the trip "
+        "with the other engines alone, through the points as given (the picked ones, else every usable one). Only for a "
+        "plain trip, not a loop, keep or follow.", extra={"error": "off_map must be refuse or engines"})] = "refuse"
 
 
 class Problem(Reply):
@@ -240,6 +244,7 @@ class PlanRouteReply(Reply):
     road_rules: Annotated[dict[str, str], Meta(description="The road rules the plan used, every type filled in.")]
     road_factors: Annotated[dict[str, float], Meta(description="The avoid strengths the plan used; types left out counted the penalty.")]
     milliseconds: int
+    off_map: Annotated[bool, Meta(description="Planned by the other engines alone, since a point is off our map (PlanRoute.off_map).")] = False
 
 
 def source_name(source: str) -> str:
@@ -296,7 +301,13 @@ def plan_route(request: Request, body: PlanRoute) -> PlanRouteReply:
     count = body.alternatives or (1 if body.combine == "best" else sources.MAX_ROUTES)
     ring: list = []
     ring_sectors: list[int] = []
-    shape_snaps = _snap_shape(graph, body.shape, max_snap, options)
+    plain = body.follow is None and body.keep is None and body.loop is None
+    try:
+        shape_snaps = _snap_shape(graph, body.shape, max_snap, options)
+    except Refused:
+        if body.off_map == "engines" and plain:
+            return _plan_off_map(request, graph, body, options, picked, count)
+        raise
     try:
         if body.follow is not None:
             result = _plan_followed(graph, body, options, max_snap)
@@ -325,9 +336,44 @@ def plan_route(request: Request, body: PlanRoute) -> PlanRouteReply:
             result = sources.plan(graph, [(s.lat, s.lon) for s in snapped], options, picked, count,
                                   body.compare_fastest, max_snap, access_of(request), snapped=snapped)
     except router.PointOffNetwork as off:
-        raise Refused(400, f"point {off.index + 1} is not near a road on the map ({off})", field="waypoints", index=off.index) from None
+        if body.off_map == "engines" and plain:
+            return _plan_off_map(request, graph, body, options, picked, count)
+        raise Refused(400, f"point {off.index + 1} is not near a road on the map ({off})", field="waypoints", index=off.index,
+                      off_map=True) from None
     except NoRoute as error:
         raise Refused(400, str(error)) from None
+    return _reply(result, shape_snaps, ring, ring_sectors, options, body)
+
+
+def _plan_off_map(request: Request, graph, body: PlanRoute, options: costs.Options, picked: list[str], count: int) -> PlanRouteReply:
+    """A trip our map does not cover, planned by the other engines alone
+    (PlanRoute.off_map): the points and nudges as given, in driving order."""
+    if not 2 <= len(body.waypoints) <= MAX_WAYPOINTS:
+        raise Refused(400, f"give 2-{MAX_WAYPOINTS} points", field="waypoints")
+    if len(body.waypoints) + len(body.shape) > MAX_POINTS:
+        raise Refused(400, f"a route drives through at most {MAX_POINTS} points, nudges included", field="shape")
+    points: list[sources.Spot] = []
+    nudges: list[tuple[int, sources.Spot]] = []
+    for index, waypoint in enumerate(body.waypoints):
+        points.append(sources.Spot(waypoint.lat, waypoint.lon))
+        for nudge in body.shape:
+            if nudge.leg == index:
+                at = sources.Spot(nudge.lat, nudge.lon, soft=True)
+                points.append(at)
+                nudges.append((nudge.leg, at))
+    access = access_of(request)
+    engines = [s for s in picked if s != OURS] or sources.default_engines(access)
+    try:
+        result = sources.plan_off_map(graph, points, options, engines, count, access)
+    except NoRoute as error:
+        raise Refused(400, f"off our map: {error}") from None
+    reply = _reply(result, nudges, [], [], options, body)
+    reply.off_map = True
+    return reply
+
+
+def _reply(result: sources.Plan, shape_snaps: list, ring: list, ring_sectors: list[int], options: costs.Options,
+           body: PlanRoute) -> PlanRouteReply:
     nudges = {id(at) for _, at in shape_snaps}
     # The stops between start and end, for the steps: not on a loop's ring
     # (its points are only there to steer it) or a locked route's middle.
@@ -388,7 +434,8 @@ def _snap_shape(graph, shape: list[ShapePoint], max_snap: float, options: costs.
     try:
         snaps = router.snap_all(graph, [(p.lat, p.lon) for p in shape], max_snap, options, soft=True)
     except router.PointOffNetwork as off:
-        raise Refused(400, f"nudge {off.index + 1} is not near a road on the map ({off})", field="shape", index=off.index) from None
+        raise Refused(400, f"nudge {off.index + 1} is not near a road on the map ({off})", field="shape", index=off.index,
+                      off_map=True) from None
     return [(p.leg, at) for p, at in zip(shape, snaps)]
 
 
@@ -621,6 +668,7 @@ class PlannerPrefs(Reply):
     sources: list[Source] = msgspec.field(default_factory=lambda: [OURS])
     combine: Combine = "best"
     alternatives: Alternatives = 5
+    off_map_engines: Annotated[bool, Meta(description="Off our map, plan with the other engines alone (PlanRoute.off_map=engines).")] = True
     loop_radius: LoopRadius = 20.0
     loop_unit: LoopUnit = "mi"
     loop_points: LoopPoints = 6
@@ -665,6 +713,7 @@ class SetPrefs(RequestType):
     sources: Annotated[list[Source], Meta(min_length=1, max_length=len(SOURCE_IDS), extra={"error": "pick at least one source"})] = msgspec.field(default_factory=lambda: [OURS])
     combine: Combine = "best"
     alternatives: Alternatives | None = None
+    off_map_engines: bool = True
     road_rules: RoadRules = msgspec.field(default_factory=dict)
     road_factors: RoadFactors | None = None
     loop_radius: LoopRadius | None = None
@@ -686,7 +735,7 @@ def set_prefs(request: Request, body: SetPrefs) -> PrefsReply:
                          road_rules=rules_of(request, body.road_rules, body.secondary_is_main, body.allow_unpaved),
                          road_factors=factors_of(request, body.road_factors), compare_fastest=body.compare_fastest,
                          sources=list(dict.fromkeys(body.sources)), combine=body.combine,
-                         alternatives=body.alternatives or defaults.alternatives,
+                         alternatives=body.alternatives or defaults.alternatives, off_map_engines=body.off_map_engines,
                          loop_radius=body.loop_radius if body.loop_radius is not None else defaults.loop_radius,
                          loop_unit=body.loop_unit or defaults.loop_unit,
                          loop_points=body.loop_points or defaults.loop_points,

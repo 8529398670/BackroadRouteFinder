@@ -1,6 +1,6 @@
 // The Map data screen (/admin/map-data), owner only.
 //
-// Pick any US states (or the whole country), download their OpenStreetMap
+// Pick any US states (or the whole country) and any other countries, download their OpenStreetMap
 // extracts from Geofabrik, build one map from them, and switch the server to
 // it -- no shell, no restart. The work runs on the server one task at a time
 // (app/routing/tasks.py); while it runs this screen asks for its output every
@@ -19,7 +19,7 @@ const MapData = {
       this.renderStates();
     } );
     Dom.onPress( Dom.get( "mapdata-select-downloaded" ) , () => {
-      this.picked = new Set( this.data.areas.filter( ( a ) => a.downloaded ).map( ( a ) => a.slug ) );
+      this.picked = new Set( [ ...this.data.areas , ...this.data.countries ].filter( ( a ) => a.downloaded ).map( ( a ) => a.slug ) );
       this.renderStates();
     } );
     Dom.onPress( Dom.get( "mapdata-select-none" ) , () => {
@@ -35,7 +35,7 @@ const MapData = {
     await this.load();
     // Start with the map in use ticked, so "Build" right away rebuilds it.
     if ( this.data && this.picked.size === 0 ) {
-      this.data.loaded.areas.filter( ( slug ) => slug === "us" || this.data.areas.some( ( a ) => a.slug === slug ) )
+      this.data.loaded.areas.filter( ( slug ) => this.area( slug ) )
         .forEach( ( slug ) => this.picked.add( slug ) );
       this.renderStates();
     }
@@ -84,9 +84,14 @@ const MapData = {
     return iso ? new Date( iso ).toLocaleString() : "";
   },
 
+  // Any area by its slug: the whole US, a state or a country.
+  area( slug ) {
+    if ( slug === "us" ) return this.data.us;
+    return this.data.areas.find( ( a ) => a.slug === slug ) || this.data.countries.find( ( a ) => a.slug === slug ) || null;
+  },
+
   areaName( slug ) {
-    if ( slug === "us" ) return this.data.us.name;
-    const area = this.data.areas.find( ( a ) => a.slug === slug );
+    const area = this.area( slug );
     return area ? area.name : slug;
   },
 
@@ -161,41 +166,102 @@ const MapData = {
     Dom.text( Dom.get( "mapdata-us-note" ) , Format.fill( "mapdata.approx" , { size: this.bytes( this.data.us.approx_mb * 1e6 ) } ) +
       ( this.data.us.downloaded ? " · " + I18n.get( "mapdata.downloaded" ) : "" ) );
     const filter = Dom.get( "mapdata-filter" ).value.trim().toLowerCase();
-    const items = this.data.areas.filter( ( a ) => !filter || a.name.toLowerCase().includes( filter ) ).map( ( area ) => {
-      const id = "mapdata-state-" + area.slug;
-      const input = Dom.el( "input" , { class: "form-check-input" , attrs: { type: "checkbox" , id: id } } );
-      input.checked = this.picked.has( area.slug );
-      input.disabled = usPicked;
-      input.addEventListener( "change" , () => {
-        if ( input.checked ) this.picked.add( area.slug ); else this.picked.delete( area.slug );
-        this.renderSummary();
-      } );
-      const size = area.downloaded ? this.bytes( area.downloaded.bytes ) : Format.fill( "mapdata.approx" , { size: this.bytes( area.approx_mb * 1e6 ) } );
-      const label = Dom.el( "label" , { class: "form-check-label" , attrs: { for: id } , children: [
-        Dom.el( "span" , { text: area.name + " " } ),
-        Dom.el( "span" , { class: "small text-body-secondary" , text: size } ),
-        area.downloaded ? Dom.el( "i" , { class: "bi bi-check-circle-fill text-success ms-1" , attrs: { title: I18n.get( "mapdata.downloaded" ) , "aria-label": I18n.get( "mapdata.downloaded" ) } } ) : null,
-      ].filter( Boolean ) } );
-      return Dom.el( "div" , { class: "col" , children: [ Dom.el( "div" , { class: "form-check mb-0" , children: [ input , label ] } ) ] } );
-    } );
+    const matches = ( a ) => !filter || a.name.toLowerCase().includes( filter ) || ( a.group || "" ).toLowerCase().includes( filter );
+    const items = this.data.areas.filter( matches ).map( ( area ) => this.areaBox( area , usPicked ) );
     Dom.swap( Dom.get( "mapdata-states" ) , ...items );
+    Dom.show( Dom.get( "mapdata-states-none" ) , items.length === 0 );
+    this.renderCountries( matches , filter !== "" );
     this.renderSummary();
   },
 
-  // What is picked: the slugs the server is sent (the whole US wins).
+  // One area's tick box, in a grid column.
+  areaBox( area , disabled ) {
+    const id = "mapdata-area-" + area.slug;
+    const input = Dom.el( "input" , { class: "form-check-input" , attrs: { type: "checkbox" , id: id } } );
+    input.checked = this.picked.has( area.slug );
+    input.disabled = Boolean( disabled );
+    input.addEventListener( "change" , () => {
+      if ( input.checked ) this.picked.add( area.slug ); else this.picked.delete( area.slug );
+      this.renderSummary();
+      this.renderGroupCounts();
+    } );
+    const size = area.downloaded ? this.bytes( area.downloaded.bytes ) : Format.fill( "mapdata.approx" , { size: this.bytes( area.approx_mb * 1e6 ) } );
+    const label = Dom.el( "label" , { class: "form-check-label" , attrs: { for: id } , children: [
+      Dom.el( "span" , { text: area.name + " " } ),
+      Dom.el( "span" , { class: "small text-body-secondary" , text: size } ),
+      area.downloaded ? Dom.el( "i" , { class: "bi bi-check-circle-fill text-success ms-1" , attrs: { title: I18n.get( "mapdata.downloaded" ) , "aria-label": I18n.get( "mapdata.downloaded" ) } } ) : null,
+    ].filter( Boolean ) } );
+    return Dom.el( "div" , { class: "col" , children: [ Dom.el( "div" , { class: "form-check mb-0" , children: [ input , label ] } ) ] } );
+  },
+
+  // Every other country, one collapsible section per continent. A filter
+  // opens the sections it matches in and hides the rest; without one, a
+  // section stays as it was left (open when something in it is ticked).
+  open: new Set(),
+
+  renderCountries( matches , filtering ) {
+    const groups = new Map();
+    this.data.countries.forEach( ( country ) => {
+      if ( !groups.has( country.group ) ) groups.set( country.group , [] );
+      groups.get( country.group ).push( country );
+    } );
+    const sections = [];
+    groups.forEach( ( list , group ) => {
+      const shown = list.filter( matches );
+      if ( filtering && shown.length === 0 ) return;
+      const id = "mapdata-group-" + group.toLowerCase().replace( /[^a-z]+/g , "-" );
+      const ticked = list.some( ( c ) => this.picked.has( c.slug ) );
+      const open = filtering || this.open.has( group ) || ticked;
+      const body = Dom.el( "div" , { class: "row row-cols-1 row-cols-sm-2 row-cols-lg-3 row-cols-xxl-4 g-1 mapdata-states" , children: shown.map( ( c ) => this.areaBox( c , false ) ) } );
+      const collapse = Dom.el( "div" , { class: "accordion-collapse collapse" + ( open ? " show" : "" ) , attrs: { id: id } , children: [
+        Dom.el( "div" , { class: "accordion-body p-2" , children: [ body ] } ),
+      ] } );
+      collapse.addEventListener( "shown.bs.collapse" , () => this.open.add( group ) );
+      collapse.addEventListener( "hidden.bs.collapse" , () => this.open.delete( group ) );
+      const button = Dom.el( "button" , {
+        class: "accordion-button py-2" + ( open ? "" : " collapsed" ),
+        attrs: { type: "button" , "data-bs-toggle": "collapse" , "data-bs-target": "#" + id , "aria-expanded": String( open ) , "aria-controls": id },
+        children: [
+          Dom.el( "span" , { class: "me-2" , text: group } ),
+          Dom.el( "span" , { class: "badge text-bg-primary me-2" , attrs: { "data-group-count": group } } ),
+          Dom.el( "span" , { class: "small text-body-secondary" , text: Format.fill( "mapdata.group_count" , { n: list.length } ) } ),
+        ],
+      } );
+      sections.push( Dom.el( "div" , { class: "accordion-item" , children: [ Dom.el( "h4" , { class: "accordion-header" , children: [ button ] } ) , collapse ] } ) );
+    } );
+    Dom.swap( Dom.get( "mapdata-countries" ) , ...sections );
+    Dom.show( Dom.get( "mapdata-countries-none" ) , sections.length === 0 );
+    this.renderGroupCounts();
+  },
+
+  // How many are ticked in each continent, on its header.
+  renderGroupCounts() {
+    Dom.all( "#mapdata-countries [data-group-count]" ).forEach( ( badge ) => {
+      const group = badge.getAttribute( "data-group-count" );
+      const n = this.data.countries.filter( ( c ) => c.group === group && this.picked.has( c.slug ) ).length;
+      Dom.text( badge , n ? Format.fill( "mapdata.group_ticked" , { n: n } ) : "" );
+      Dom.show( badge , n > 0 );
+    } );
+  },
+
+  // What is picked: the slugs the server is sent (the whole US wins over its
+  // states; countries go beside it).
   pickedSlugs() {
-    return this.picked.has( "us" ) ? [ "us" ] : [ ...this.picked ].filter( ( s ) => s !== "us" ).sort();
+    const countries = new Set( this.data.countries.map( ( c ) => c.slug ) );
+    const picked = [ ...this.picked ].filter( ( s ) => s !== "us" );
+    if ( this.picked.has( "us" ) ) return [ "us" , ...picked.filter( ( s ) => countries.has( s ) ) ].sort();
+    return picked.sort();
   },
 
   sizeOf( slug ) {
-    const area = slug === "us" ? this.data.us : this.data.areas.find( ( a ) => a.slug === slug );
+    const area = this.area( slug );
     return area.downloaded ? area.downloaded.bytes : area.approx_mb * 1e6;
   },
 
   renderSummary() {
     const slugs = this.pickedSlugs();
     const busy = this.data.task && this.data.task.state === "running";
-    const toFetch = slugs.filter( ( slug ) => !( slug === "us" ? this.data.us : this.data.areas.find( ( a ) => a.slug === slug ) ).downloaded );
+    const toFetch = slugs.filter( ( slug ) => !this.area( slug ).downloaded );
     const total = slugs.reduce( ( sum , slug ) => sum + this.sizeOf( slug ) , 0 );
     const fetchBytes = toFetch.reduce( ( sum , slug ) => sum + this.sizeOf( slug ) , 0 );
     Dom.text( Dom.get( "mapdata-summary" ) , slugs.length === 0 ? I18n.get( "mapdata.summary_none" ) : Format.fill( "mapdata.summary" , {
@@ -233,7 +299,7 @@ const MapData = {
 
   async download() {
     const slugs = this.pickedSlugs();
-    const missing = slugs.filter( ( slug ) => !( slug === "us" ? this.data.us : this.data.areas.find( ( a ) => a.slug === slug ) ).downloaded );
+    const missing = slugs.filter( ( slug ) => !this.area( slug ).downloaded );
     if ( missing.length === 0 ) {
       if ( !( await Dom.confirm( I18n.get( "mapdata.confirm_fresh" ) ) ) ) return;
       return this.run( { areas: slugs , download: "all" , build: false , activate: false } );
@@ -323,7 +389,7 @@ const MapData = {
     Dom.text( Dom.get( "mapdata-disk" ) , this.data.disk_free_bytes ? Format.fill( "mapdata.disk_free" , { free: this.bytes( this.data.disk_free_bytes ) } ) : "" );
     const table = Dom.get( "mapdata-extracts" );
     const busy = this.data.task && this.data.task.state === "running";
-    const all = [ this.data.us , ...this.data.areas ].filter( ( a ) => a.downloaded );
+    const all = [ this.data.us , ...this.data.areas , ...this.data.countries ].filter( ( a ) => a.downloaded );
     const rows = all.map( ( area ) => {
       const update = this.actionButton( "bi-arrow-repeat" , "mapdata.update" , "secondary" ,
         () => this.run( { areas: [ area.slug ] , download: "all" , build: false , activate: false } ) );

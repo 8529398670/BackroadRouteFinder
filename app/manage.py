@@ -185,10 +185,10 @@ def build_parser() -> argparse.ArgumentParser:
     commands.add_parser("paths", help="where this app keeps its state")
 
     p = commands.add_parser("fetch-osm", help="download the OpenStreetMap extract into <app dir>/mapdata/")
-    p.add_argument("--state", action="append", default=[], help="a US state's Geofabrik slug (ohio, new-york), or us for the whole country; repeatable")
+    p.add_argument("--state", action="append", default=[], help="a US state's Geofabrik slug (ohio, new-york), us for the whole country, or a country's (jordan); repeatable")
     p = commands.add_parser("build-graph", help="turn the extract into the router's graph")
     p.add_argument("--pbf", default="", help="an extract to build from instead of mapdata/<region>.osm.pbf")
-    p.add_argument("--state", action="append", default=[], help="build one map from these downloaded states (repeatable), named after them")
+    p.add_argument("--state", action="append", default=[], help="build one map from these downloaded areas: states or countries (repeatable), named after them")
     p.add_argument("--memory-mb", type=int, default=0, help="memory the build may use at once (default routing.build_memory_mb)")
     p = commands.add_parser("convert-graph", help="convert old single-file .npz maps to the on-disk format")
     p.add_argument("--npz", default="", help="one file; default every mapdata/*.npz")
@@ -616,7 +616,7 @@ def command_fetch_osm(cfg: config.Config, args: argparse.Namespace) -> None:
     jobs = []
     for slug in args.state:
         if not regions.valid(slug):
-            raise ManageError(f"unknown state {slug!r}: use a Geofabrik slug like ohio or new-york, or us")
+            raise ManageError(f"unknown area {slug!r}: use a US state's Geofabrik slug like ohio or new-york, us, or a country's like jordan")
         jobs.append((regions.url_of(slug), files.pbf_for(cfg, slug)))
     if not jobs:
         jobs.append((cfg.file.routing.pbf_url, files.pbf_path(cfg)))
@@ -636,9 +636,9 @@ def command_build_graph(cfg: config.Config, args: argparse.Namespace) -> None:
     if args.state:
         for slug in args.state:
             if not regions.valid(slug):
-                raise ManageError(f"unknown state {slug!r}")
+                raise ManageError(f"unknown area {slug!r}")
         region = regions.region_name(args.state)
-        slugs = [regions.US] if region == regions.US else sorted(set(args.state))
+        slugs = regions.normalized(args.state)
         sources = [files.pbf_for(cfg, slug) for slug in slugs]
         out = files.graph_for(cfg, region)
     else:

@@ -1,5 +1,5 @@
 """The owner's Map data screen: download OpenStreetMap extracts for any US
-states (or the whole country), build a map from them, and switch the server
+states (or the whole country) and any other country, build a map from them, and switch the server
 to it without a restart.
 
 Downloads and builds run as `manage fetch-osm` / `manage build-graph` in a
@@ -26,8 +26,9 @@ from app.routing import files, regions
 from app.routing.graph import Holder
 from app.routing.tasks import Runner
 
-Slug = Annotated[str, Meta(pattern="^[a-z][a-z-]{1,40}$", description="A state's Geofabrik slug (ohio, new-york), or us.")]
-Slugs = Annotated[list[Slug], Meta(min_length=1, max_length=len(regions.STATES) + 1, extra={"error": "pick at least one state"})]
+Slug = Annotated[str, Meta(pattern="^[a-z][a-z-]{1,60}$", description="An area's slug: a US state's (ohio, new-york), us, or a country's (jordan).")]
+Slugs = Annotated[list[Slug], Meta(min_length=1, max_length=len(regions.STATES) + len(regions.COUNTRIES) + 1,
+                                   extra={"error": "pick at least one area"})]
 
 
 class FileInfo(Reply):
@@ -42,6 +43,7 @@ class AreaInfo(Reply):
     name: str
     approx_mb: Annotated[int, Meta(description="Roughly how big its download is.")]
     downloaded: FileInfo | None
+    group: Annotated[str, Meta(description="A country's continent, as Geofabrik groups them; empty for a US state.")] = ""
 
 
 class GraphInfo(Reply):
@@ -78,8 +80,9 @@ class Loaded(Reply):
 
 class MapDataReply(Reply):
     loaded: Loaded
-    areas: list[AreaInfo]
+    areas: Annotated[list[AreaInfo], Meta(description="The US states.")]
     us: AreaInfo
+    countries: Annotated[list[AreaInfo], Meta(description="Every other country, by continent then name.")]
     graphs: list[GraphInfo]
     task: TaskInfo | None
     can_build: Annotated[bool, Meta(description="Whether osmium is installed here, which building needs.")]
@@ -147,6 +150,10 @@ def _reply(request: Request) -> MapDataReply:
     areas = [AreaInfo(slug=slug, name=name, approx_mb=mb, downloaded=_file(files.pbf_for(cfg, slug)))
              for slug, (name, mb) in regions.STATES.items()]
     us = AreaInfo(slug=regions.US, name=regions.US_NAME, approx_mb=regions.US_MB, downloaded=_file(files.pbf_for(cfg, regions.US)))
+    order = list(regions.GROUPS)
+    countries = [AreaInfo(slug=c.slug, name=c.name, approx_mb=c.mb, downloaded=_file(files.pbf_for(cfg, c.slug)),
+                          group=regions.GROUPS.get(c.group, c.group))
+                 for c in sorted(regions.COUNTRIES.values(), key=lambda c: (order.index(c.group) if c.group in order else 99, c.name))]
     graphs = []
     if folder.is_dir():
         for path in sorted(folder.glob("*" + files.GRAPH_SUFFIX)):
@@ -164,7 +171,7 @@ def _reply(request: Request) -> MapDataReply:
         free = shutil.disk_usage(folder if folder.is_dir() else cfg.app_dir).free
     except OSError:
         free = 0
-    return MapDataReply(loaded=loaded, areas=areas, us=us, graphs=graphs, task=task_info, can_build=_can_build(),
+    return MapDataReply(loaded=loaded, areas=areas, us=us, countries=countries, graphs=graphs, task=task_info, can_build=_can_build(),
                         folder=str(folder), memory_bytes=_memory(), disk_free_bytes=free)
 
 
@@ -172,7 +179,7 @@ def _reply(request: Request) -> MapDataReply:
     "GET /api/owner/mapdata", summary="Map data",
     tag="Owner", role=OWNER, feature="settings",
     description="The map the server routes on, the extracts downloaded and maps built so far, every "
-    "state that can be downloaded, and the download or build running now (with its output).",
+    "US state and country that can be downloaded, and the download or build running now (with its output).",
 )
 def get_mapdata(request: Request, body: NoInput) -> MapDataReply:
     return _reply(request)
@@ -209,7 +216,7 @@ def run_task(request: Request, body: RunMapTask) -> MapDataReply:
     if bad:
         raise Refused(400, f"unknown area: {', '.join(bad)}", field="areas")
     region = regions.region_name(body.areas)
-    slugs = [regions.US] if region == regions.US else sorted(set(body.areas))
+    slugs = regions.normalized(body.areas)
     fetch = [s for s in slugs if body.download == "all" or (body.download == "missing" and not files.pbf_for(cfg, s).is_file())]
     if not body.build and not fetch:
         raise Refused(400, "nothing to do: every extract is already downloaded")

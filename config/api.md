@@ -2075,7 +2075,7 @@ Text, as `text/event-stream`.
 
 Map data
 
-The map the server routes on, the extracts downloaded and maps built so far, every state that can be downloaded, and the download or build running now (with its output).
+The map the server routes on, the extracts downloaded and maps built so far, every US state and country that can be downloaded, and the download or build running now (with its output).
 
 |  |  |
 |---|---|
@@ -2086,8 +2086,9 @@ The map the server routes on, the extracts downloaded and maps built so far, eve
 
 | Field | Type | Required | Limits | Description |
 |---|---|---|---|---|
-| `areas` | array of [`MapArea`](#maparea) | yes |  |  |
+| `areas` | array of [`MapArea`](#maparea) | yes |  | The US states. |
 | `can_build` | boolean | yes |  | Whether osmium is installed here, which building needs. |
+| `countries` | array of [`MapArea`](#maparea) | yes |  | Every other country, by continent then name. |
 | `disk_free_bytes` | integer | yes |  |  |
 | `folder` | string | yes |  |  |
 | `graphs` | array of [`MapGraph`](#mapgraph) | yes |  |  |
@@ -2118,8 +2119,9 @@ Switches the server to a map built earlier, without a restart. The current one k
 
 | Field | Type | Required | Limits | Description |
 |---|---|---|---|---|
-| `areas` | array of [`MapArea`](#maparea) | yes |  |  |
+| `areas` | array of [`MapArea`](#maparea) | yes |  | The US states. |
 | `can_build` | boolean | yes |  | Whether osmium is installed here, which building needs. |
+| `countries` | array of [`MapArea`](#maparea) | yes |  | Every other country, by continent then name. |
 | `disk_free_bytes` | integer | yes |  |  |
 | `folder` | string | yes |  |  |
 | `graphs` | array of [`MapGraph`](#mapgraph) | yes |  |  |
@@ -2149,8 +2151,9 @@ Stops the download or build running now. A cut-off download leaves no file behin
 
 | Field | Type | Required | Limits | Description |
 |---|---|---|---|---|
-| `areas` | array of [`MapArea`](#maparea) | yes |  |  |
+| `areas` | array of [`MapArea`](#maparea) | yes |  | The US states. |
 | `can_build` | boolean | yes |  | Whether osmium is installed here, which building needs. |
+| `countries` | array of [`MapArea`](#maparea) | yes |  | Every other country, by continent then name. |
 | `disk_free_bytes` | integer | yes |  |  |
 | `folder` | string | yes |  |  |
 | `graphs` | array of [`MapGraph`](#mapgraph) | yes |  |  |
@@ -2182,8 +2185,9 @@ Deletes a downloaded extract or a built map to free disk space. The map the serv
 
 | Field | Type | Required | Limits | Description |
 |---|---|---|---|---|
-| `areas` | array of [`MapArea`](#maparea) | yes |  |  |
+| `areas` | array of [`MapArea`](#maparea) | yes |  | The US states. |
 | `can_build` | boolean | yes |  | Whether osmium is installed here, which building needs. |
+| `countries` | array of [`MapArea`](#maparea) | yes |  | Every other country, by continent then name. |
 | `disk_free_bytes` | integer | yes |  |  |
 | `folder` | string | yes |  |  |
 | `graphs` | array of [`MapGraph`](#mapgraph) | yes |  |  |
@@ -2217,8 +2221,9 @@ Downloads the areas' extracts from Geofabrik (missing ones, all, or none), build
 
 | Field | Type | Required | Limits | Description |
 |---|---|---|---|---|
-| `areas` | array of [`MapArea`](#maparea) | yes |  |  |
+| `areas` | array of [`MapArea`](#maparea) | yes |  | The US states. |
 | `can_build` | boolean | yes |  | Whether osmium is installed here, which building needs. |
+| `countries` | array of [`MapArea`](#maparea) | yes |  | Every other country, by continent then name. |
 | `disk_free_bytes` | integer | yes |  |  |
 | `folder` | string | yes |  |  |
 | `graphs` | array of [`MapGraph`](#mapgraph) | yes |  |  |
@@ -2692,6 +2697,7 @@ Save how the planner opens for you. Send the whole set; a loop setting or road_f
 | `loop_radius` | number or null | no | 0.5 to 200 |  |
 | `loop_reuse` | number or null | no | 1 to 10 |  |
 | `loop_unit` | string or null | no | one of `mi`, `min` |  |
+| `off_map_engines` | boolean | no | default `true` |  |
 | `penalty` | number | yes | 1 to 100 | How many times over a minute on a main road counts. 1 is the plain fastest route. |
 | `road_factors` | map of number or null | no |  | Avoid strengths of their own, by road type: how many times over a minute on that type counts when its rule is avoid (unpaved: 2 makes gravel count double however high the penalty). Types left out count the penalty. Left out altogether: the defaults in GET /api/routing/status. |
 | `road_rules` | map of string | no |  | What to do with each road type: use it, avoid it (each minute on it counts penalty times over), or never (only when there is no other way). Categories: interstate, us_highway, state_route, county_road, local, service, track; and any road that is unpaved or restricted (private, permit or farm access). Types left out take the defaults in GET /api/routing/status. |
@@ -2728,6 +2734,7 @@ The route through the waypoints that keeps time on main roads down: each minute 
 | `follow` | [`Follow`](#follow) or null | no |  | Drive this exact line instead of planning one (no loop, keep or nudges); waypoints are ignored. |
 | `keep` | [`Keep`](#keep) or null | no |  | Lock a route's ends and plan only its middle again (not with a loop). |
 | `loop` | [`Loop`](#loop) or null | no |  | Plan a loop round a center instead of a trip through the waypoints. |
+| `off_map` | string | no | one of `refuse`, `engines`; default `refuse` | When a point (or nudge) has no road on our map near it: refuse (400), or engines -- plan the trip with the other engines alone, through the points as given (the picked ones, else every usable one). Only for a plain trip, not a loop, keep or follow. |
 | `penalty` | number | no | 1 to 100; default `8` | How many times over a minute on a main road counts. 1 is the plain fastest route. |
 | `road_factors` | map of number or null | no |  | Avoid strengths of their own, by road type: how many times over a minute on that type counts when its rule is avoid (unpaved: 2 makes gravel count double however high the penalty). Types left out count the penalty. Left out altogether: the defaults in GET /api/routing/status. |
 | `road_rules` | map of string | no |  | What to do with each road type: use it, avoid it (each minute on it counts penalty times over), or never (only when there is no other way). Categories: interstate, us_highway, state_route, county_road, local, service, track; and any road that is unpaved or restricted (private, permit or farm access). Types left out take the defaults in GET /api/routing/status. |
@@ -2741,6 +2748,7 @@ The route through the waypoints that keeps time on main roads down: each minute 
 | Field | Type | Required | Limits | Description |
 |---|---|---|---|---|
 | `milliseconds` | integer | yes |  |  |
+| `off_map` | boolean | no |  | Planned by the other engines alone, since a point is off our map (PlanRoute.off_map). |
 | `problems` | array of [`SourceProblem`](#sourceproblem) | yes |  |  |
 | `ring` | array of [`Point`](#point) | yes |  | With a loop: the ring's points, in driving order. |
 | `ring_sectors` | array of integer | yes |  | With a loop: each ring point's sector, for LoopSpec.edits. |
@@ -3347,6 +3355,7 @@ The shapes the routes above refer to by name.
 |---|---|---|---|---|
 | `approx_mb` | integer | yes |  | Roughly how big its download is. |
 | `downloaded` | [`MapFile`](#mapfile) or null | yes |  |  |
+| `group` | string | no |  | A country's continent, as Geofabrik groups them; empty for a US state. |
 | `name` | string | yes |  |  |
 | `slug` | string | yes |  |  |
 
@@ -3518,6 +3527,7 @@ The shapes the routes above refer to by name.
 | `loop_radius` | number | no | 0.5 to 200; default `20` |  |
 | `loop_reuse` | number | no | 1 to 10; default `3` |  |
 | `loop_unit` | string | no | one of `mi`, `min`; default `mi` |  |
+| `off_map_engines` | boolean | no | default `true` | Off our map, plan with the other engines alone (PlanRoute.off_map=engines). |
 | `penalty` | number | no | 1 to 100; default `8` | How many times over a minute on a main road counts. 1 is the plain fastest route. |
 | `road_factors` | map of number | no |  | Avoid strengths of their own, by road type: how many times over a minute on that type counts when its rule is avoid (unpaved: 2 makes gravel count double however high the penalty). Types left out count the penalty. Left out altogether: the defaults in GET /api/routing/status. |
 | `road_rules` | map of string | no |  | What to do with each road type: use it, avoid it (each minute on it counts penalty times over), or never (only when there is no other way). Categories: interstate, us_highway, state_route, county_road, local, service, track; and any road that is unpaved or restricted (private, permit or farm access). Types left out take the defaults in GET /api/routing/status. |
