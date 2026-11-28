@@ -54,8 +54,41 @@ const Viewer = {
       Format.distance( route.meters ),
       Format.duration( route.seconds ),
     ].filter( Boolean ).join( " · " ) );
+    this.renderSteps();
     if ( Navigate.active ) this.showDriving( true );
     else this.showDriving( false );
+  },
+
+  // The route's turn-by-turn steps, in Navigate's own words and icons. A
+  // step shows where it is on the map when tapped.
+  renderSteps() {
+    const steps = this.trip.route.steps || [];
+    let stop = 0;
+    const items = steps.map( ( step ) => {
+      const text = step.type === "waypoint" ? Format.fill( "navigate.waypoint" , { n: ++stop } ) : Navigate.instruction( step );
+      return Dom.el( "li" , { class: "list-group-item p-0" , children: [ Dom.el( "button" , {
+        class: "list-group-item list-group-item-action border-0 d-flex align-items-center gap-3",
+        attrs: { type: "button" },
+        children: [
+          Dom.el( "i" , { class: "bi " + Navigate.icon( step ) + " fs-4" , attrs: { "aria-hidden": "true" } } ),
+          Dom.el( "span" , { class: "me-auto text-start" , text: text } ),
+          step.meters > 0 ? Dom.el( "span" , { class: "small text-body-secondary text-nowrap" , text: Format.distance( step.meters ) } ) : null,
+        ].filter( Boolean ),
+        on: { click: () => this.showStep( step ) },
+      } ) ] } );
+    } );
+    Dom.swap( Dom.get( "pv-steps" ) , ...items );
+  },
+
+  showStep( step ) {
+    if ( !this.map ) return;
+    if ( !this.stepMark ) {
+      this.stepMark = L.circleMarker( [ step.lat , step.lon ] , { radius: 9 , weight: 3 , color: "#0d6efd" , fillColor: "#ffffff" , fillOpacity: 1 , interactive: false } ).addTo( this.map );
+    } else {
+      this.stepMark.setLatLng( [ step.lat , step.lon ] );
+    }
+    this.map.setView( [ step.lat , step.lon ] , Math.max( this.map.getZoom() , 16 ) );
+    Dom.get( "pv-map" ).scrollIntoView( { block: "nearest" , behavior: "smooth" } );
   },
 
   showDriving( driving ) {
