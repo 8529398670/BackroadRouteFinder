@@ -316,7 +316,7 @@ routes:
   shared_banner: "Shared by {owner}: view only. Save it to keep your own copy."
   share_public: "Anyone with the link can view and navigate it, no sign-in needed"
   share_public_help: "Saves the route as it is planned now, and makes a separate /v/ link for people without an account. They see the map and can navigate it, nothing else."
-  share_public_help_on: "The public link: {url} Turning it off stops that link; turning it on again makes a new one."
+  share_public_help_on: "The public link: {url} Saving updates it to the route as planned now, with the routes offered alongside it. Turning it off stops that link; turning it on again makes a new one."
   share_public_failed: "Could not plan the route to share it."
   shared_heading: "Shared with me"
   shared_empty: "Nobody has shared a route with you yet."

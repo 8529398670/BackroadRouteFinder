@@ -23,8 +23,8 @@ const Viewer = {
     Dom.show( Dom.get( "nav-auto" ).closest( ".form-check" ) , false );
     Dom.show( Dom.get( "nav-stop" ) , false );
     Navigate.host = { drive: () => {} , leave: () => {} };
-    // Its own trip slot: a reload mid-drive carries on where it was, and
-    // never picks up a trip from the signed-in app (or another link).
+    // Its own trip slot, so it never picks up (or overwrites) a trip from
+    // the signed-in app or another link.
     Navigate.STORAGE = "navigate-public-" + token;
     Navigate.init();
 
@@ -39,7 +39,9 @@ const Viewer = {
     }
     document.title = reply.name + " – " + I18n.get( "app.title" );
     Dom.show( Dom.get( "pv-status" ) , false );
-    if ( Navigate.active ) Navigate.show();
-    else Navigate.start( Object.assign( {} , reply.trip , { title: reply.name || reply.trip.title } ) );
+    // Always the copy just read, never one kept from an earlier visit: the
+    // owner may have saved the link again since (a newer route, its other
+    // routes). Where the driver is comes from GPS either way.
+    Navigate.start( Object.assign( {} , reply.trip , { title: reply.name || reply.trip.title } ) );
   },
 };

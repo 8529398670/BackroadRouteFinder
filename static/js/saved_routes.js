@@ -177,9 +177,10 @@ const SavedRoutes = {
       fields: fields,
       save: async ( values ) => {
         const body = { users: values.users || [] , public: Boolean( values.public ) };
-        // Turning the public link on: the route as planned goes with it, so
-        // the link never needs the server to plan anything.
-        if ( body.public && !current.public ) body.trip = await this.tripFor( route );
+        // The public link carries the route as planned (and the routes
+        // offered with it), so it never needs the server to plan anything.
+        // Saving again refreshes that copy; the link stays the same.
+        if ( body.public ) body.trip = await this.tripFor( route );
         saved = await Api.post( "/api/saved-routes/" + route.id + "/share" , body );
       },
     } );
