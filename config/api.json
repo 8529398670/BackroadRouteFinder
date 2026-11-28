@@ -1687,6 +1687,49 @@
         ],
         "type": "object"
       },
+      "PublicRoute": {
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "owner_name": {
+            "description": "Who shared it.",
+            "type": "string"
+          },
+          "trip": {
+            "$ref": "#/components/schemas/PublicTrip"
+          }
+        },
+        "required": [
+          "name",
+          "owner_name",
+          "trip"
+        ],
+        "type": "object"
+      },
+      "PublicTrip": {
+        "description": "What a public link shows: the route as planned when it was shared (its line and turn-by-turn steps) and the stops it passes. Never its options, and never planned again.",
+        "properties": {
+          "route": {
+            "$ref": "#/components/schemas/TripRoute"
+          },
+          "stops": {
+            "items": {
+              "$ref": "#/components/schemas/Point"
+            },
+            "maxItems": 25,
+            "type": "array"
+          },
+          "title": {
+            "maxLength": 200,
+            "type": "string"
+          }
+        },
+        "required": [
+          "route"
+        ],
+        "type": "object"
+      },
       "RecentPlace": {
         "properties": {
           "lat": {
@@ -2370,6 +2413,14 @@
             "description": "Anyone signed in who has the link (/r/<token>) may view it.",
             "type": "boolean"
           },
+          "public": {
+            "description": "Anyone at all, signed in or not, may view it at /v/<public_token>.",
+            "type": "boolean"
+          },
+          "public_token": {
+            "description": "Its public link is /v/<public_token>; empty while that is off.",
+            "type": "string"
+          },
           "users": {
             "description": "The people (user ids, from GET /api/team) it is shared with by name.",
             "items": {
@@ -2755,6 +2806,36 @@
           "mode",
           "name",
           "second"
+        ],
+        "type": "object"
+      },
+      "TripRoute": {
+        "description": "A planned route's line and steps, as POST /api/route answered them.",
+        "properties": {
+          "meters": {
+            "type": "number"
+          },
+          "runs": {
+            "items": {
+              "$ref": "#/components/schemas/Run"
+            },
+            "maxItems": 5000,
+            "minItems": 1,
+            "type": "array"
+          },
+          "seconds": {
+            "type": "number"
+          },
+          "steps": {
+            "items": {
+              "$ref": "#/components/schemas/Step"
+            },
+            "maxItems": 5000,
+            "type": "array"
+          }
+        },
+        "required": [
+          "runs"
         ],
         "type": "object"
       },
@@ -11709,6 +11790,53 @@
         ]
       }
     },
+    "/api/public-routes/{token}": {
+      "get": {
+        "description": "The route behind a public link (/v/<token>), for anyone, signed in or not: its name, who shared it, and the route as planned when it was shared. Nothing else about it (no options), and nothing is planned. A link that was turned off, or a deleted route, answers 404.",
+        "operationId": "get_api_public_routes_token",
+        "parameters": [
+          {
+            "description": "The token from the route's link, /r/<token>.",
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicRoute"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "$ref": "#/components/responses/E503"
+          }
+        },
+        "security": [],
+        "summary": "A route by its public link",
+        "tags": [
+          "Saved routes"
+        ]
+      }
+    },
     "/api/ready": {
       "get": {
         "operationId": "get_api_ready",
@@ -12657,7 +12785,7 @@
     },
     "/api/saved-routes/{route_id}/share": {
       "post": {
-        "description": "Set who may view one of your routes: anyone signed in with its link, and/or people by name. Send link false and no users to make it private again.",
+        "description": "Set who may view one of your routes: anyone signed in with its link, and/or people by name, and/or anyone at all with its public link (send the route as planned in trip). Send link false, no users and public false to make it private again.",
         "operationId": "post_api_saved_routes_route_id_share",
         "parameters": [
           {
@@ -12683,6 +12811,24 @@
                   "link": {
                     "description": "Let anyone signed in who has the link view it.",
                     "type": "boolean"
+                  },
+                  "public": {
+                    "description": "Let anyone at all view it, with no sign-in, at /v/<public_token>: the map and navigation only. Needs trip when it is turned on. Left out: unchanged. Turning it off and on again makes a new link.",
+                    "type": [
+                      "boolean",
+                      "null"
+                    ]
+                  },
+                  "trip": {
+                    "description": "The route as planned now, for the public link to show. Sent while public is on, it replaces the snapshot and keeps the link.",
+                    "oneOf": [
+                      {
+                        "$ref": "#/components/schemas/PublicTrip"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   },
                   "users": {
                     "description": "User ids to share it with by name (GET /api/team). Replaces the list; ids of people who cannot sign in, and your own, are left out.",

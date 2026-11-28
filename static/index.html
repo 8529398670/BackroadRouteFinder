@@ -105,6 +105,27 @@
         <span class="visually-hidden" data-i18n="ui.loading"></span>
       </div>
 
+      <!-- A shared route's public link, /v/<token> (viewer.js): anyone, signed
+           in or not, sees the route and can navigate it; nothing else. The
+           Navigate screen (#navigate-panel) is moved in here to drive it. -->
+      <section id="public-view" class="d-flex flex-column gap-3" hidden>
+        <p id="pv-status" class="alert alert-info mb-0" role="status" data-i18n="viewer.loading"></p>
+        <div id="pv-overview" hidden>
+          <div class="row g-2 align-items-center mb-2">
+            <div class="col-12 col-md">
+              <h2 id="pv-name" class="h4 mb-0 text-truncate"></h2>
+              <div id="pv-meta" class="small text-body-secondary"></div>
+            </div>
+            <div class="col-12 col-md-auto">
+              <button id="pv-navigate" type="button" class="btn btn-success w-100"><i class="bi bi-sign-turn-right" aria-hidden="true"></i> <span data-i18n="viewer.navigate"></span></button>
+            </div>
+          </div>
+          <section class="card plan-map-card">
+            <div id="pv-map" class="plan-map" data-i18n-attr="aria-label:viewer.map_label" role="application"></div>
+          </section>
+        </div>
+      </section>
+
       <section id="signed-out" class="card" hidden>
         <div class="card-body">
           <h2 class="h4 card-title" data-i18n="signed_out.heading"></h2>
@@ -157,7 +178,7 @@
           <p id="plan-map-status" class="alert alert-warning mb-0" role="status" hidden></p>
           <!-- Someone else's route, opened from its link (planner.js renderLink). -->
           <p id="plan-shared" class="alert alert-info small py-2 mb-2" role="status" hidden></p>
-          <div class="btn-toolbar flex-nowrap flex-lg-wrap gap-1 gap-sm-2 mb-2 plan-toolbar" role="toolbar" data-i18n-attr="aria-label:plan.options_heading">
+          <div class="btn-toolbar flex-wrap gap-1 gap-sm-2 mb-2 plan-toolbar" role="toolbar" data-i18n-attr="aria-label:plan.options_heading">
             <!-- Below lg the four menus live in one panel (#plan-settings); planner.js
                  moves each menu's body between its dropdown and the panel. -->
             <button class="btn btn-outline-secondary d-lg-none plan-settings-button" type="button" data-bs-toggle="offcanvas" data-bs-target="#plan-settings" aria-controls="plan-settings" data-i18n-attr="title:plan.settings_button">
@@ -314,6 +335,26 @@
             <!-- Locking part of the route, and taking nudges and locks away (planner.js). -->
             <button id="plan-lock" type="button" class="btn btn-outline-secondary" aria-pressed="false" data-i18n-attr="title:plan.lock_point" disabled><i class="bi bi-plus-lg" aria-hidden="true"></i> <span class="d-none d-sm-inline" data-i18n="plan.lock_point"></span></button>
             <button id="plan-reset-shape" type="button" class="btn btn-outline-danger" data-i18n-attr="title:plan.reset_shape" hidden><i class="bi bi-x-circle" aria-hidden="true"></i> <span class="d-none d-sm-inline" data-i18n="plan.reset_shape"></span></button>
+            <!-- What to do with the route on screen (planner.js): shown once there is one. -->
+            <div id="plan-actions" class="d-flex gap-1 gap-sm-2" hidden>
+              <button id="plan-navigate" type="button" class="btn btn-success" data-i18n-attr="title:plan.navigate"><i class="bi bi-sign-turn-right" aria-hidden="true"></i> <span class="d-none d-sm-inline" data-i18n="plan.navigate"></span></button>
+              <button id="plan-save" type="button" class="btn btn-primary" data-write data-i18n-attr="title:plan.save"><i class="bi bi-bookmark-plus" aria-hidden="true"></i> <span class="d-none d-sm-inline" data-i18n="plan.save"></span></button>
+              <button id="plan-share" type="button" class="btn btn-outline-secondary" data-write data-i18n-attr="title:routes.share" hidden><i class="bi bi-share" aria-hidden="true"></i> <span class="d-none d-sm-inline" data-i18n="routes.share"></span></button>
+              <div class="dropdown">
+                <button id="plan-export" type="button" class="btn btn-outline-secondary dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false" data-i18n-attr="title:plan.export"><i class="bi bi-download" aria-hidden="true"></i> <span class="d-none d-sm-inline" data-i18n="plan.export"></span></button>
+                <ul class="dropdown-menu dropdown-menu-end" id="plan-export-menu">
+                  <li><button type="button" class="dropdown-item" data-export="gpx"><span data-i18n="plan.export_gpx"></span><small class="d-block text-body-secondary" data-i18n="plan.export_gpx_hint"></small></button></li>
+                  <li><button type="button" class="dropdown-item" data-export="gpx_route"><span data-i18n="plan.export_gpx_route"></span><small class="d-block text-body-secondary" data-i18n="plan.export_gpx_route_hint"></small></button></li>
+                  <li><button type="button" class="dropdown-item" data-export="tcx"><span data-i18n="plan.export_tcx"></span><small class="d-block text-body-secondary" data-i18n="plan.export_tcx_hint"></small></button></li>
+                  <li><button type="button" class="dropdown-item" data-export="itn"><span data-i18n="plan.export_itn"></span><small class="d-block text-body-secondary" data-i18n="plan.export_itn_hint"></small></button></li>
+                  <li><button type="button" class="dropdown-item" data-export="kml"><span data-i18n="plan.export_kml"></span><small class="d-block text-body-secondary" data-i18n="plan.export_kml_hint"></small></button></li>
+                  <li><button type="button" class="dropdown-item" data-export="geojson"><span data-i18n="plan.export_geojson"></span><small class="d-block text-body-secondary" data-i18n="plan.export_geojson_hint"></small></button></li>
+                  <li><button type="button" class="dropdown-item" data-export="csv"><span data-i18n="plan.export_csv"></span><small class="d-block text-body-secondary" data-i18n="plan.export_csv_hint"></small></button></li>
+                  <li><hr class="dropdown-divider" /></li>
+                  <li><button type="button" class="dropdown-item" data-export="google"><i class="bi bi-box-arrow-up-right me-1" aria-hidden="true"></i><span data-i18n="plan.export_google"></span><small class="d-block text-body-secondary" data-i18n="plan.export_google_hint"></small></button></li>
+                </ul>
+              </div>
+            </div>
             <div class="btn-group ms-auto" role="group" data-i18n-attr="aria-label:plan.history_label">
               <button id="plan-undo" type="button" class="btn btn-outline-secondary" data-i18n-attr="title:plan.undo_button,aria-label:plan.undo_button" disabled><i class="bi bi-arrow-counterclockwise" aria-hidden="true"></i></button>
               <button id="plan-redo" type="button" class="btn btn-outline-secondary" data-i18n-attr="title:plan.redo_button,aria-label:plan.redo_button" disabled><i class="bi bi-arrow-clockwise" aria-hidden="true"></i></button>
@@ -372,25 +413,6 @@
                     <summary class="small fw-semibold" data-i18n="plan.via_heading"></summary>
                     <ol id="plan-via" class="list-group list-group-flush list-group-numbered small mt-2"></ol>
                   </details>
-                  <div class="d-flex flex-wrap gap-2 mt-3">
-                    <button id="plan-navigate" type="button" class="btn btn-sm btn-success"><i class="bi bi-sign-turn-right" aria-hidden="true"></i> <span data-i18n="plan.navigate"></span></button>
-                    <button id="plan-save" type="button" class="btn btn-sm btn-primary" data-write><i class="bi bi-bookmark-plus" aria-hidden="true"></i> <span data-i18n="plan.save"></span></button>
-                    <button id="plan-share" type="button" class="btn btn-sm btn-outline-secondary" data-write hidden><i class="bi bi-share" aria-hidden="true"></i> <span data-i18n="routes.share"></span></button>
-                    <div class="dropdown">
-                      <button id="plan-export" type="button" class="btn btn-sm btn-outline-secondary dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false"><i class="bi bi-download" aria-hidden="true"></i> <span data-i18n="plan.export"></span></button>
-                      <ul class="dropdown-menu" id="plan-export-menu">
-                        <li><button type="button" class="dropdown-item" data-export="gpx"><span data-i18n="plan.export_gpx"></span><small class="d-block text-body-secondary" data-i18n="plan.export_gpx_hint"></small></button></li>
-                        <li><button type="button" class="dropdown-item" data-export="gpx_route"><span data-i18n="plan.export_gpx_route"></span><small class="d-block text-body-secondary" data-i18n="plan.export_gpx_route_hint"></small></button></li>
-                        <li><button type="button" class="dropdown-item" data-export="tcx"><span data-i18n="plan.export_tcx"></span><small class="d-block text-body-secondary" data-i18n="plan.export_tcx_hint"></small></button></li>
-                        <li><button type="button" class="dropdown-item" data-export="itn"><span data-i18n="plan.export_itn"></span><small class="d-block text-body-secondary" data-i18n="plan.export_itn_hint"></small></button></li>
-                        <li><button type="button" class="dropdown-item" data-export="kml"><span data-i18n="plan.export_kml"></span><small class="d-block text-body-secondary" data-i18n="plan.export_kml_hint"></small></button></li>
-                        <li><button type="button" class="dropdown-item" data-export="geojson"><span data-i18n="plan.export_geojson"></span><small class="d-block text-body-secondary" data-i18n="plan.export_geojson_hint"></small></button></li>
-                        <li><button type="button" class="dropdown-item" data-export="csv"><span data-i18n="plan.export_csv"></span><small class="d-block text-body-secondary" data-i18n="plan.export_csv_hint"></small></button></li>
-                        <li><hr class="dropdown-divider" /></li>
-                        <li><button type="button" class="dropdown-item" data-export="google"><i class="bi bi-box-arrow-up-right me-1" aria-hidden="true"></i><span data-i18n="plan.export_google"></span><small class="d-block text-body-secondary" data-i18n="plan.export_google_hint"></small></button></li>
-                      </ul>
-                    </div>
-                  </div>
                 </div>
               </section>
             </div>
@@ -1421,6 +1443,7 @@
   <script src="/js/export.js"></script>
   <script src="/js/planner.js"></script>
   <script src="/js/navigate.js"></script>
+  <script src="/js/viewer.js"></script>
   <script src="/js/providers.js"></script>
   <script src="/js/mapdata.js"></script>
   <script src="/js/zip.js"></script>

@@ -221,7 +221,8 @@ class StaticServer:
         return response
 
     async def serve_route_link(self, request: Request) -> Response:
-        """A shared route's link, /r/<token>: the ordinary app page, which
+        """A shared route's link, /r/<token> (or its public link, /v/<token>,
+        which shows it to anyone, no sign-in): the ordinary app page, which
         reads the token from its path and opens the route in the planner (if
         the person signed in may see it; app/routes/saved_routes.py). Like a
         login link, the token stays out of caches and Referer headers."""

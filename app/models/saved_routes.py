@@ -13,6 +13,14 @@ can let anyone signed in who has the link view it, and/or name the people who
 may (they also see it under "Shared with me"). Only the owner changes it.
 Viewing re-plans it from the points and options, like opening your own.
 
+A public link (/v/<public_token>) is for people with no account at all. It
+needs nothing planned on the server: turning it on stores a snapshot of the
+route as planned (its line and turn-by-turn steps, the "trip"), and the link
+shows only that -- the map and navigation, nothing else. Turning it off drops
+the token and the snapshot, so turning it on again makes a new link and the
+old one stops working. Saved routes are never re-planned in place (only
+renamed), so the snapshot stays true to the route.
+
 The planner defaults (backroads on or off, the penalty, the two toggles) and
 the recent places (the stop boxes' quick picks) live
 on the user's own record, the way keyboard shortcuts do, so they follow the
@@ -64,6 +72,8 @@ class SavedRoute:
     token: str = ""
     share_link: bool = False
     share_users: list[int] = field(default_factory=list)
+    public_token: str = ""
+    public_trip: dict[str, Any] | None = None
 
     def can_view(self, user_id: int) -> bool:
         """Its owner, anyone signed in when the link is on, or someone it was
@@ -88,6 +98,8 @@ def _from_record(key: int, record: Record) -> SavedRoute:
         token=record.get("token", ""),
         share_link=bool(share.get("link", False)),
         share_users=[int(user_id) for user_id in share.get("users", [])],
+        public_token=(record.get("public") or {}).get("token", ""),
+        public_trip=(record.get("public") or {}).get("trip"),
     )
 
 
@@ -212,6 +224,33 @@ def set_share(store: Store, owner_id: int, route_id: int, link: bool, user_ids: 
         record["share"] = {"link": bool(link), "users": people}
 
     return _mutate(store, owner_id, route_id, change)
+
+
+def set_public(store: Store, owner_id: int, route_id: int, on: bool, trip: dict[str, Any] | None) -> SavedRoute:
+    """Turn the public link on (with this snapshot) or off. Already on with a
+    new trip: the snapshot is replaced and the link kept."""
+    def change(record: Record) -> None:
+        if not on:
+            record.pop("public", None)
+            return
+        current = record.get("public") or {}
+        record["public"] = {"token": current.get("token") or url_token(TOKEN_BYTES), "trip": trip if trip is not None else current.get("trip")}
+
+    return _mutate(store, owner_id, route_id, change)
+
+
+def find_public(store: Store, token: str) -> SavedRoute:
+    """The route behind a public link, for anyone. NotFound when there is no
+    such link, it was turned off, or the route was deleted."""
+    if token:
+        for key, record in store.all(BUCKET_SAVED_ROUTES):
+            stored = (record.get("public") or {}).get("token", "")
+            if stored and constant_time_equal(stored, token):
+                route = _from_record(key, record)
+                if route.deleted_at is None and route.public_trip:
+                    return route
+                break
+    raise NotFound("no such route, or its public link is off")
 
 
 def find_by_token(store: Store, token: str, viewer_id: int) -> SavedRoute:

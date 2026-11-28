@@ -131,8 +131,13 @@ const SavedRoutes = {
     return window.location.origin + Planner.linkPath( token );
   },
 
-  async copyLink( token ) {
-    const url = this.linkUrl( token );
+  // The public link: anyone, no sign-in (viewer.js).
+  publicUrl( token ) {
+    return window.location.origin + "/v/" + encodeURIComponent( token );
+  },
+
+  async copyLink( token , url ) {
+    url = url || this.linkUrl( token );
     try {
       await navigator.clipboard.writeText( url );
       Dom.toast( I18n.get( "routes.link_copied" ) , "ok" );
@@ -160,20 +165,57 @@ const SavedRoutes = {
     } ];
     if ( people.length ) fields.push( { name: "users" , type: "checks" , label: I18n.get( "routes.share_people" ) , options: people , value: current.users } );
     else fields[ 0 ].help += " " + I18n.get( "routes.share_nobody" );
+    fields.push( {
+      name: "public" , type: "checkbox" , label: I18n.get( "routes.share_public" ) , value: Boolean( current.public ),
+      help: current.public_token ? Format.fill( "routes.share_public_help_on" , { url: this.publicUrl( current.public_token ) } ) : I18n.get( "routes.share_public_help" ),
+    } );
     let saved = null;
     const answer = await Dom.form( {
       title: Format.fill( "routes.share_title" , { name: route.name || "" } ),
       submit: I18n.get( "routes.share_save" ),
       fields: fields,
       save: async ( values ) => {
-        saved = await Api.post( "/api/saved-routes/" + route.id + "/share" , { link: values.link , users: values.users || [] } );
+        const body = { link: values.link , users: values.users || [] , public: Boolean( values.public ) };
+        // Turning the public link on: the route as planned goes with it, so
+        // the link never needs the server to plan anything.
+        if ( body.public && !current.public ) body.trip = await this.tripFor( route );
+        saved = await Api.post( "/api/saved-routes/" + route.id + "/share" , body );
       },
     } );
     if ( answer === null || !saved ) return null;
-    if ( saved.share.link || saved.share.users.length ) await this.copyLink( saved.token );
+    if ( saved.share.public ) await this.copyLink( saved.token , this.publicUrl( saved.share.public_token ) );
+    else if ( saved.share.link || saved.share.users.length ) await this.copyLink( saved.token );
     else Dom.toast( I18n.get( "routes.shared_private" ) , "ok" );
     await this.refresh();
     return saved;
+  },
+
+  // What a public link shows (PublicTrip): the route on the planner when
+  // that is this one, unchanged; otherwise it is planned once, here, the
+  // way opening it would.
+  async tripFor( route ) {
+    const round = ( value ) => Math.round( value * 1e5 ) / 1e5;
+    const pack = ( title , planned , stops ) => ( {
+      title: title || "",
+      route: {
+        runs: planned.runs.map( ( run ) => ( { main: Boolean( run.main ) , coords: run.coords.map( ( point ) => [ round( point[ 0 ] ) , round( point[ 1 ] ) ] ) } ) ),
+        steps: ( planned.steps || [] ).map( ( step ) => Object.assign( {} , step , { lat: round( step.lat ) , lon: round( step.lon ) } ) ),
+        seconds: planned.seconds || 0,
+        meters: planned.meters || 0,
+      },
+      stops: ( stops || [] ).map( ( stop ) => ( { lat: round( stop.lat ) , lon: round( stop.lon ) } ) ),
+    } );
+    const onScreen = Planner.link && Planner.link.id === route.id ? Planner.navigation() : null;
+    if ( onScreen ) return pack( route.name || onScreen.title , onScreen.route , onScreen.stops );
+    const full = route.waypoints ? route : await Api.request( "/api/saved-routes/" + route.id );
+    const result = await Api.post( "/api/route" , Planner.bodyFor( full ) );
+    const choices = ( result.routes || [] ).filter( ( choice ) => !choice.compare );
+    const pick = full.options.pick;
+    const chosen = ( pick && choices.find( ( choice ) => choice.source === pick.source && ( choice.rank || 0 ) === pick.rank ) ) || choices[ 0 ];
+    if ( !chosen ) throw new Error( I18n.get( "routes.share_public_failed" ) );
+    const shape = result.shape || [];
+    const stops = ( result.snapped || [] ).filter( ( point , index ) => !shape[ index ] );
+    return pack( full.name , chosen , stops );
   },
 
   sharedRow( shared ) {

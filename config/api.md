@@ -2767,6 +2767,7 @@ Which maps are built and what they cover, and the server's planner defaults.
 
 | Method | Path | Summary | Who may call |
 |---|---|---|---|
+| GET | [`/api/public-routes/{token}`](#get-apipublic-routestoken) | A route by its public link | anyone |
 | GET | [`/api/saved-routes`](#get-apisaved-routes) | Your saved routes | browser session or API key, anyone signed in |
 | POST | [`/api/saved-routes`](#post-apisaved-routes) | Save a route | browser session or API key, anyone signed in |
 | GET | [`/api/saved-routes/{route_id}`](#get-apisaved-routesroute_id) | One saved route | browser session or API key, anyone signed in |
@@ -2776,6 +2777,27 @@ Which maps are built and what they cover, and the server's planner defaults.
 | POST | [`/api/saved-routes/{route_id}/share`](#post-apisaved-routesroute_idshare) | Share a saved route | browser session or API key, anyone signed in |
 | GET | [`/api/shared-routes`](#get-apishared-routes) | Routes shared with you | browser session or API key, anyone signed in |
 | GET | [`/api/shared-routes/{token}`](#get-apishared-routestoken) | A route by its link | browser session or API key, anyone signed in |
+
+### GET /api/public-routes/{token}
+
+A route by its public link
+
+The route behind a public link (/v/<token>), for anyone, signed in or not: its name, who shared it, and the route as planned when it was shared. Nothing else about it (no options), and nothing is planned. A link that was turned off, or a deleted route, answers 404.
+
+|  |  |
+|---|---|
+| Who may call | anyone |
+| Errors | 400, 404, 429, 503 |
+
+**Parameters**
+
+| Name | In | Type | Required | Limits | Description |
+|---|---|---|---|---|---|
+| `token` | path | string | yes | at most 64 characters | The token from the route's link, /r/<token>. |
+
+**Reply 200**: Success
+
+[`PublicRoute`](#publicroute).
 
 ### GET /api/saved-routes
 
@@ -2938,7 +2960,7 @@ Bring back a saved route deleted in the last 10 minutes.
 
 Share a saved route
 
-Set who may view one of your routes: anyone signed in with its link, and/or people by name. Send link false and no users to make it private again.
+Set who may view one of your routes: anyone signed in with its link, and/or people by name, and/or anyone at all with its public link (send the route as planned in trip). Send link false, no users and public false to make it private again.
 
 |  |  |
 |---|---|
@@ -2957,6 +2979,8 @@ Set who may view one of your routes: anyone signed in with its link, and/or peop
 |---|---|---|---|---|
 | `csrf_token` | string | no |  | From GET /api/me. Browser sessions only. |
 | `link` | boolean | no |  | Let anyone signed in who has the link view it. |
+| `public` | boolean or null | no |  | Let anyone at all view it, with no sign-in, at /v/<public_token>: the map and navigation only. Needs trip when it is turned on. Left out: unchanged. Turning it off and on again makes a new link. |
+| `trip` | [`PublicTrip`](#publictrip) or null | no |  | The route as planned now, for the public link to show. Sent while public is on, it replaces the snapshot and keeps the link. |
 | `users` | array of integer | no |  | User ids to share it with by name (GET /api/team). Replaces the list; ids of people who cannot sign in, and your own, are left out. |
 
 **Reply 200**: Success
@@ -3536,6 +3560,22 @@ The shapes the routes above refer to by name.
 | `compressed` | integer | yes |  |  |
 | `deleted` | integer | yes |  |  |
 
+### PublicRoute
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `name` | string | yes |  |  |
+| `owner_name` | string | yes |  | Who shared it. |
+| `trip` | [`PublicTrip`](#publictrip) | yes |  |  |
+
+### PublicTrip
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `route` | [`TripRoute`](#triproute) | yes |  |  |
+| `stops` | array of [`Point`](#point) | no |  |  |
+| `title` | string | no | at most 200 characters |  |
+
 ### RecentPlace
 
 | Field | Type | Required | Limits | Description |
@@ -3709,6 +3749,8 @@ The shapes the routes above refer to by name.
 | Field | Type | Required | Limits | Description |
 |---|---|---|---|---|
 | `link` | boolean | no |  | Anyone signed in who has the link (/r/<token>) may view it. |
+| `public` | boolean | no |  | Anyone at all, signed in or not, may view it at /v/<public_token>. |
+| `public_token` | string | no |  | Its public link is /v/<public_token>; empty while that is off. |
 | `users` | array of integer | no |  | The people (user ids, from GET /api/team) it is shared with by name. |
 
 ### SharedEngine
@@ -3810,6 +3852,15 @@ One of these:
 | `overrides` | map of string | no |  | Worked-out colors replaced by name: text, accent, accentFg, accentText, second, secondFg, secondText, link, navLink, background, surface, nested, chrome, bar (the bar across the top), barText, info, infoBorder, border, rowOdd and rowEven (alternating table rows), and for each button variant V (Secondary, Success, Danger, Warning, Info, Light, Dark) btnV, btnVFg and btnVText. Leaving one out puts the readable color back. |
 | `second` | string | yes |  | Says where you are: active nav item, headings, info. |
 | `surface` | string | no |  | Cards. Left out: the mode's own. |
+
+### TripRoute
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `meters` | number | no |  |  |
+| `runs` | array of [`Run`](#run) | yes |  |  |
+| `seconds` | number | no |  |  |
+| `steps` | array of [`Step`](#step) | no |  |  |
 
 ### User
 

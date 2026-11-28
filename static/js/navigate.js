@@ -50,6 +50,9 @@ const Navigate = {
   arrived: false,
   active: false,
   wake: null,
+  // The public view (viewer.js) when it is driving: { drive(), leave() }.
+  // There is no planner or router behind it, so no rerouting.
+  host: null,
 
   init() {
     this.map = null;
@@ -89,6 +92,11 @@ const Navigate = {
   start( trip ) {
     this.load( trip );
     this.save();
+    if ( this.host ) {
+      this.host.drive();
+      this.show();
+      return;
+    }
     Nav.go( Nav.pathOf( "navigate" ) );
   },
 
@@ -134,7 +142,8 @@ const Navigate = {
     if ( window.speechSynthesis ) window.speechSynthesis.cancel();
     this.release();
     this.render();
-    Nav.go( Nav.pathOf( "routes" ) );
+    if ( this.host ) this.host.leave();
+    else Nav.go( Nav.pathOf( "routes" ) );
   },
 
   // The route's own steps, or (a route planned before steps existed) just
@@ -180,7 +189,8 @@ const Navigate = {
   show() {
     this.render();
     if ( !this.active ) {
-      Nav.go( Nav.pathOf( "routes" ) );
+      if ( this.host ) this.host.leave();
+      else Nav.go( Nav.pathOf( "routes" ) );
       return;
     }
     this.ensureMap();
@@ -502,6 +512,11 @@ const Navigate = {
   },
 
   offRoute( fix ) {
+    if ( this.host ) {
+      Dom.text( Dom.get( "nav-off-text" ) , I18n.get( "viewer.off_route" ) );
+      Dom.show( Dom.get( "nav-off-route" ) , true );
+      return;
+    }
     const auto = Dom.get( "nav-auto" ).checked;
     Dom.text( Dom.get( "nav-off-text" ) , I18n.get( auto ? "navigate.off_route_auto" : "navigate.off_route" ) );
     Dom.show( Dom.get( "nav-off-route" ) , true );
@@ -513,7 +528,7 @@ const Navigate = {
   // not wait out REROUTE_MS.
   async reroute( now , fix ) {
     fix = fix || Gps.last;
-    if ( !fix || this.rerouting || !this.trip ) return;
+    if ( !fix || this.rerouting || !this.trip || this.host ) return;
     if ( !now && Date.now() - this.lastReroute < this.REROUTE_MS ) return;
     this.lastReroute = Date.now();
     this.rerouting = true;

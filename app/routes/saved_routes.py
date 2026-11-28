@@ -7,12 +7,12 @@ import msgspec
 from msgspec import Meta
 from starlette.requests import Request
 
-from app.apidocs import PATH, Reply, route
+from app.apidocs import PATH, PUBLIC, Reply, route
 from app.apidocs import Request as RequestType
 from app.core.security import actor_from
 from app.models import saved_routes, users
 from app.routes.helpers import DateTime, Page, Paged, Refused, cut_page, get_store
-from app.routes.planner import MAX_POINTS, MAX_SHAPE, MAX_WAYPOINTS, OURS, Alternatives, Keep, Point, ShapePoint, Combine, Follow, LegacySecondary, LegacyUnpaved, LoopSpec, Penalty, RoadFactors, RoadRules, Source
+from app.routes.planner import MAX_POINTS, MAX_SHAPE, MAX_WAYPOINTS, OURS, Alternatives, Keep, Point, ShapePoint, Combine, Follow, LegacySecondary, LegacyUnpaved, LoopSpec, Penalty, RoadFactors, RoadRules, Run, Source, Step
 from app.routing import costs
 
 RouteName = Annotated[str, Meta(min_length=1, max_length=saved_routes.NAME_MAX, extra={"error": f"name must be 1-{saved_routes.NAME_MAX} characters"})]
@@ -70,6 +70,8 @@ class ShareSettings(Reply):
     api_doc: ClassVar[str] = "Who may view a route besides its owner."
     link: Annotated[bool, Meta(description="Anyone signed in who has the link (/r/<token>) may view it.")] = False
     users: Annotated[list[int], Meta(description="The people (user ids, from GET /api/team) it is shared with by name.")] = msgspec.field(default_factory=list)
+    public: Annotated[bool, Meta(description="Anyone at all, signed in or not, may view it at /v/<public_token>.")] = False
+    public_token: Annotated[str, Meta(description="Its public link is /v/<public_token>; empty while that is off.")] = ""
 
 
 class SavedRoute(Reply):
@@ -95,7 +97,8 @@ def _reply(route: saved_routes.SavedRoute, owner: bool = True) -> SavedRoute:
         created_at=route.created_at,
         updated_at=route.updated_at,
         token=route.token,
-        share=ShareSettings(link=route.share_link, users=route.share_users) if owner else None,
+        share=ShareSettings(link=route.share_link, users=route.share_users, public=bool(route.public_token),
+                            public_token=route.public_token) if owner else None,
     )
 
 
@@ -231,9 +234,36 @@ def restore_saved_route(request: Request, body: RouteIDAction) -> SavedRoute:
 
 # --- sharing ---------------------------------------------------------------------
 
+MAX_TRIP_STEPS = 5000
+MAX_TRIP_RUNS = 5000
+
+
+class TripRoute(Reply):
+    api_name: ClassVar[str] = "TripRoute"
+    api_doc: ClassVar[str] = "A planned route's line and steps, as POST /api/route answered them."
+    runs: Annotated[list[Run], Meta(min_length=1, max_length=MAX_TRIP_RUNS)]
+    steps: Annotated[list[Step], Meta(max_length=MAX_TRIP_STEPS)] = msgspec.field(default_factory=list)
+    seconds: float = 0
+    meters: float = 0
+
+
+class PublicTrip(Reply):
+    api_name: ClassVar[str] = "PublicTrip"
+    api_doc: ClassVar[str] = ("What a public link shows: the route as planned when it was shared (its line and turn-by-turn steps) "
+                              "and the stops it passes. Never its options, and never planned again.")
+    route: TripRoute
+    title: Annotated[str, Meta(max_length=200)] = ""
+    stops: Annotated[list[Point], Meta(max_length=MAX_POINTS)] = msgspec.field(default_factory=list)
+
+
 class ShareRoute(RequestType):
     route_id: RouteID
     link: Annotated[bool, Meta(description="Let anyone signed in who has the link view it.")] = False
+    public: Annotated[bool | None, Meta(description="Let anyone at all view it, with no sign-in, at /v/<public_token>: the map and "
+                                        "navigation only. Needs trip when it is turned on. Left out: unchanged. "
+                                        "Turning it off and on again makes a new link.")] = None
+    trip: Annotated[PublicTrip | None, Meta(description="The route as planned now, for the public link to show. "
+                                            "Sent while public is on, it replaces the snapshot and keeps the link.")] = None
     users: Annotated[list[int], Meta(max_length=saved_routes.MAX_SHARED_USERS, description="User ids to share it with by name (GET /api/team). "
                                      "Replaces the list; ids of people who cannot sign in, and your own, are left out.",
                                      extra={"error": f"at most {saved_routes.MAX_SHARED_USERS} people"})] = msgspec.field(default_factory=list)
@@ -241,15 +271,23 @@ class ShareRoute(RequestType):
 
 @route(
     "POST /api/saved-routes/{route_id}/share", summary="Share a saved route",
-    tag="Saved routes", errors=(404,),
-    description="Set who may view one of your routes: anyone signed in with its link, and/or people by name. "
-                "Send link false and no users to make it private again.",
+    tag="Saved routes", errors=(400, 404),
+    description="Set who may view one of your routes: anyone signed in with its link, and/or people by name, "
+                "and/or anyone at all with its public link (send the route as planned in trip). "
+                "Send link false, no users and public false to make it private again.",
 )
 def share_saved_route(request: Request, body: ShareRoute) -> SavedRoute:
     store = get_store(request)
     people = [user_id for user_id in dict.fromkeys(body.users) if _can_share_with(store, user_id)]
+    owner = _owner(request)
     try:
-        return _reply(saved_routes.set_share(store, _owner(request), body.route_id, body.link, people))
+        if body.public is not None or body.trip is not None:
+            public = body.public if body.public is not None else bool(saved_routes.get(store, owner, body.route_id).public_token)
+            if public and body.trip is None and not saved_routes.get(store, owner, body.route_id).public_trip:
+                raise Refused(400, "a public link needs the route as planned (trip)")
+            trip = msgspec.to_builtins(body.trip) if body.trip is not None else None
+            saved_routes.set_public(store, owner, body.route_id, public, trip)
+        return _reply(saved_routes.set_share(store, owner, body.route_id, body.link, people))
     except saved_routes.NotFound as error:
         raise Refused(404, str(error)) from None
 
@@ -309,3 +347,29 @@ def get_shared_route(request: Request, body: TokenPath) -> SharedRoute:
         raise Refused(404, str(error)) from None
     mine = route.owner_id == me
     return SharedRoute(route=_reply(route, owner=mine), owner_name=_owner_name(store, route.owner_id), mine=mine)
+
+
+# --- public links (no sign-in) ------------------------------------------------------
+
+class PublicRoute(Reply):
+    api_name: ClassVar[str] = "PublicRoute"
+    name: str
+    owner_name: Annotated[str, Meta(description="Who shared it.")]
+    trip: PublicTrip
+
+
+@route(
+    "GET /api/public-routes/{token}", summary="A route by its public link",
+    tag="Saved routes", errors=(404,), access=PUBLIC,
+    description="The route behind a public link (/v/<token>), for anyone, signed in or not: its name, who shared it, "
+                "and the route as planned when it was shared. Nothing else about it (no options), and nothing is planned. "
+                "A link that was turned off, or a deleted route, answers 404.",
+)
+def get_public_route(request: Request, body: TokenPath) -> PublicRoute:
+    store = get_store(request)
+    try:
+        route = saved_routes.find_public(store, body.token)
+    except saved_routes.NotFound as error:
+        raise Refused(404, str(error)) from None
+    return PublicRoute(name=route.name, owner_name=_owner_name(store, route.owner_id),
+                       trip=msgspec.convert(route.public_trip, PublicTrip))

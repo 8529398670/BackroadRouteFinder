@@ -44,6 +44,13 @@ const App = {
     this.currentUser = me.authenticated ? me : null;
     Dom.show( Dom.get( "main" ) , true );
 
+    // A shared route's public link shows that route alone, signed in or not.
+    const publicToken = Viewer.tokenInPath();
+    if ( publicToken ) {
+      await Viewer.init( publicToken );
+      return;
+    }
+
     if ( this.loginCredential() !== "" ) {
       this.renderLoginConfirm( me );
       return;

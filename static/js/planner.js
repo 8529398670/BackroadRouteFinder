@@ -158,7 +158,7 @@ const Planner = {
     Dom.onPress( Dom.get( "plan-save" ) , () => this.saveRoute() );
     Dom.onPress( Dom.get( "plan-share" ) , async () => {
       if ( !this.link ) return;
-      const updated = await SavedRoutes.share( { id: this.link.id , token: this.link.token , share: this.link.share } );
+      const updated = await SavedRoutes.share( { id: this.link.id , name: this.link.name , token: this.link.token , share: this.link.share } );
       if ( updated && this.link && this.link.token === updated.token ) this.link.share = updated.share;
     } );
     Dom.all( "#plan-export-menu [data-export]" ).forEach( ( item ) => {
@@ -576,7 +576,7 @@ const Planner = {
 
   linkOf( saved , shared ) {
     const mine = shared ? Boolean( shared.mine ) : true;
-    return { token: saved.token , id: saved.id , mine: mine , owner_name: shared ? shared.owner_name : "" , share: saved.share || null };
+    return { token: saved.token , id: saved.id , name: saved.name || "" , mine: mine , owner_name: shared ? shared.owner_name : "" , share: saved.share || null };
   },
 
   linkPath( token ) {
@@ -1113,6 +1113,7 @@ const Planner = {
       RouteMap.clearRoutes();
       this.renderShapeTools();
       Dom.show( Dom.get( "plan-result" ) , false );
+      Dom.show( Dom.get( "plan-actions" ) , false );
       if ( fit ) RouteMap.fitTo( [] , this.points() );
       return;
     }
@@ -1123,6 +1124,7 @@ const Planner = {
       this.result = null;
       RouteMap.clearRoutes();
       Dom.show( Dom.get( "plan-result" ) , false );
+      Dom.show( Dom.get( "plan-actions" ) , false );
       App.showError( I18n.get( "plan.sources_need_one" ) );
       return;
     }
@@ -1972,6 +1974,7 @@ const Planner = {
     Dom.swap( Dom.get( "plan-via" ) , ...via );
     this.renderShapeTools();
     Dom.show( Dom.get( "plan-result" ) , true );
+    Dom.show( Dom.get( "plan-actions" ) , true );
   },
 
   // --- save and export -------------------------------------------------------------
