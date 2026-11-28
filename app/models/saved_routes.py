@@ -9,9 +9,11 @@ it for RESTORE_WINDOW (the toast's Undo). After that it is removed for good
 the next time the owner's list is read.
 
 Sharing: every route has a random token, its link (/r/<token>). Its owner
-can let anyone signed in who has the link view it, and/or name the people who
-may (they also see it under "Shared with me"). Only the owner changes it.
-Viewing re-plans it from the points and options, like opening your own.
+can name the people who may view it (they also see it under "Shared with
+me"), and the link opens it for them. Only the owner changes it. Viewing
+re-plans it from the points and options, like opening your own. (A route
+once could be opened by anyone signed in with the link; that option is gone,
+and an old record's "link" is ignored.)
 
 A public link (/v/<public_token>) is for people with no account at all. It
 needs nothing planned on the server: turning it on stores a snapshot of the
@@ -70,17 +72,16 @@ class SavedRoute:
     updated_at: str
     deleted_at: str | None = None
     token: str = ""
-    share_link: bool = False
     share_users: list[int] = field(default_factory=list)
     public_token: str = ""
     public_trip: dict[str, Any] | None = None
 
     def can_view(self, user_id: int) -> bool:
-        """Its owner, anyone signed in when the link is on, or someone it was
-        shared with by name. Never once it is deleted."""
+        """Its owner, or someone it was shared with by name. Never once it is
+        deleted."""
         if self.deleted_at is not None:
             return False
-        return user_id == self.owner_id or self.share_link or user_id in self.share_users
+        return user_id == self.owner_id or user_id in self.share_users
 
 
 def _from_record(key: int, record: Record) -> SavedRoute:
@@ -96,7 +97,6 @@ def _from_record(key: int, record: Record) -> SavedRoute:
         updated_at=record.get("updated_at", record.get("created_at", "")),
         deleted_at=record.get("deleted_at"),
         token=record.get("token", ""),
-        share_link=bool(share.get("link", False)),
         share_users=[int(user_id) for user_id in share.get("users", [])],
         public_token=(record.get("public") or {}).get("token", ""),
         public_trip=(record.get("public") or {}).get("trip"),
@@ -134,7 +134,7 @@ def create(store: Store, owner_id: int, name: str, waypoints: list[dict], option
         "created_at": now,
         "updated_at": now,
         "token": url_token(TOKEN_BYTES),
-        "share": {"link": False, "users": []},
+        "share": {"users": []},
     }
     store.put(BUCKET_SAVED_ROUTES, key, record)
     return _from_record(key, record)
@@ -213,7 +213,7 @@ def restore(store: Store, owner_id: int, route_id: int) -> SavedRoute:
 
 # --- sharing -------------------------------------------------------------------
 
-def set_share(store: Store, owner_id: int, route_id: int, link: bool, user_ids: list[int]) -> SavedRoute:
+def set_share(store: Store, owner_id: int, route_id: int, user_ids: list[int]) -> SavedRoute:
     """Who may view it besides its owner. user_ids should already be people
     who can sign in; the owner is left out."""
     people = list(dict.fromkeys(user_id for user_id in user_ids if user_id != owner_id))[:MAX_SHARED_USERS]
@@ -221,7 +221,7 @@ def set_share(store: Store, owner_id: int, route_id: int, link: bool, user_ids: 
     def change(record: Record) -> None:
         if not record.get("token"):
             record["token"] = url_token(TOKEN_BYTES)
-        record["share"] = {"link": bool(link), "users": people}
+        record["share"] = {"users": people}
 
     return _mutate(store, owner_id, route_id, change)
 

@@ -106,35 +106,10 @@
       </div>
 
       <!-- A shared route's public link, /v/<token> (viewer.js): anyone, signed
-           in or not, sees the route and can navigate it; nothing else. The
-           Navigate screen (#navigate-panel) is moved in here to drive it. -->
+           in or not, gets the Navigate screen (#navigate-panel, moved in here)
+           driving that route, and nothing else. -->
       <section id="public-view" class="d-flex flex-column gap-3" hidden>
         <p id="pv-status" class="alert alert-info mb-0" role="status" data-i18n="viewer.loading"></p>
-        <div id="pv-overview" hidden>
-          <div class="row g-2 align-items-center mb-2">
-            <div class="col-12 col-md">
-              <h2 id="pv-name" class="h4 mb-0 text-truncate"></h2>
-              <div id="pv-meta" class="small text-body-secondary"></div>
-            </div>
-            <div class="col-12 col-md-auto">
-              <button id="pv-navigate" type="button" class="btn btn-success w-100"><i class="bi bi-sign-turn-right" aria-hidden="true"></i> <span data-i18n="viewer.navigate"></span></button>
-            </div>
-          </div>
-          <div class="row g-3">
-            <div class="col-12 col-lg-8">
-              <section class="card plan-map-card">
-                <div id="pv-map" class="plan-map" data-i18n-attr="aria-label:viewer.map_label" role="application"></div>
-              </section>
-            </div>
-            <!-- The turn-by-turn steps; tapping one shows it on the map. -->
-            <div class="col-12 col-lg-4">
-              <section class="card pv-steps-card">
-                <h3 class="card-header h6 mb-0" data-i18n="navigate.steps"></h3>
-                <ol id="pv-steps" class="list-group list-group-flush pv-steps"></ol>
-              </section>
-            </div>
-          </div>
-        </div>
       </section>
 
       <section id="signed-out" class="card" hidden>

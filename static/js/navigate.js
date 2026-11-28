@@ -232,6 +232,12 @@ const Navigate = {
     const main = styles.getPropertyValue( "--plan-main" ).trim() || "#dc3545";
     this.routeLayer.clearLayers();
     this.pinLayer.clearLayers();
+    // A shared route's public link brings the other routes it was offered
+    // with: faint and dashed behind the one being driven, as the planner shows them.
+    const fastest = styles.getPropertyValue( "--plan-fastest" ).trim() || "#6c757d";
+    ( this.trip.others || [] ).forEach( ( other ) => other.runs.forEach( ( run ) => {
+      this.routeLayer.addLayer( L.polyline( run.coords , { color: fastest , weight: 4 , opacity: 0.6 , dashArray: "6 8" , interactive: false } ) );
+    } ) );
     this.trip.route.runs.forEach( ( run ) => this.routeLayer.addLayer( L.polyline( run.coords , { color: "#ffffff" , weight: 11 , opacity: 0.9 , interactive: false } ) ) );
     this.trip.route.runs.forEach( ( run ) => this.routeLayer.addLayer( L.polyline( run.coords , { color: run.main ? main : back , weight: 7 , opacity: 0.95 , interactive: false } ) ) );
     const pins = this.steps.filter( ( step ) => step.type === "waypoint" || step.type === "arrive" );

@@ -147,8 +147,9 @@ const SavedRoutes = {
     }
   },
 
-  // Who may view a route: anyone signed in with the link, and/or people by
-  // name. Saving copies the link. Answers the route as saved, or null.
+  // Who may view a route: anyone at all with its public link (no sign-in,
+  // map and navigation only), and/or people by name. Saving copies the
+  // link. Answers the route as saved, or null.
   async share( route ) {
     const me = App.currentUser ? App.currentUser.id : 0;
     let team = [];
@@ -158,24 +159,24 @@ const SavedRoutes = {
       offset = page.next;
     }
     const people = team.filter( ( member ) => member.id !== me ).map( ( member ) => ( { value: member.id , label: member.display_name } ) );
-    const current = route.share || { link: false , users: [] };
+    const current = route.share || { users: [] };
     const fields = [ {
-      name: "link" , type: "checkbox" , label: I18n.get( "routes.share_link" ) , value: current.link,
-      help: Format.fill( "routes.share_link_help" , { url: this.linkUrl( route.token ) } ),
-    } ];
-    if ( people.length ) fields.push( { name: "users" , type: "checks" , label: I18n.get( "routes.share_people" ) , options: people , value: current.users } );
-    else fields[ 0 ].help += " " + I18n.get( "routes.share_nobody" );
-    fields.push( {
       name: "public" , type: "checkbox" , label: I18n.get( "routes.share_public" ) , value: Boolean( current.public ),
       help: current.public_token ? Format.fill( "routes.share_public_help_on" , { url: this.publicUrl( current.public_token ) } ) : I18n.get( "routes.share_public_help" ),
-    } );
+    } ];
+    if ( people.length ) {
+      fields.push( {
+        name: "users" , type: "checks" , label: I18n.get( "routes.share_people" ) , options: people , value: current.users || [],
+        help: I18n.get( "routes.share_people_help" ),
+      } );
+    }
     let saved = null;
     const answer = await Dom.form( {
       title: Format.fill( "routes.share_title" , { name: route.name || "" } ),
       submit: I18n.get( "routes.share_save" ),
       fields: fields,
       save: async ( values ) => {
-        const body = { link: values.link , users: values.users || [] , public: Boolean( values.public ) };
+        const body = { users: values.users || [] , public: Boolean( values.public ) };
         // Turning the public link on: the route as planned goes with it, so
         // the link never needs the server to plan anything.
         if ( body.public && !current.public ) body.trip = await this.tripFor( route );
@@ -184,7 +185,7 @@ const SavedRoutes = {
     } );
     if ( answer === null || !saved ) return null;
     if ( saved.share.public ) await this.copyLink( saved.token , this.publicUrl( saved.share.public_token ) );
-    else if ( saved.share.link || saved.share.users.length ) await this.copyLink( saved.token );
+    else if ( saved.share.users.length ) await this.copyLink( saved.token );
     else Dom.toast( I18n.get( "routes.shared_private" ) , "ok" );
     await this.refresh();
     return saved;
@@ -195,7 +196,17 @@ const SavedRoutes = {
   // way opening it would.
   async tripFor( route ) {
     const round = ( value ) => Math.round( value * 1e5 ) / 1e5;
-    const pack = ( title , planned , stops ) => ( {
+    // The other routes only show faintly, so a point every ~15 m is plenty
+    // (and keeps the snapshot small).
+    const thin = ( coords ) => {
+      const out = [];
+      coords.forEach( ( point , index ) => {
+        const last = out[ out.length - 1 ];
+        if ( !last || index === coords.length - 1 || Geo.metres( last[ 0 ] , last[ 1 ] , point[ 0 ] , point[ 1 ] ) >= 15 ) out.push( [ round( point[ 0 ] ) , round( point[ 1 ] ) ] );
+      } );
+      return out;
+    };
+    const pack = ( title , planned , stops , others ) => ( {
       title: title || "",
       route: {
         runs: planned.runs.map( ( run ) => ( { main: Boolean( run.main ) , coords: run.coords.map( ( point ) => [ round( point[ 0 ] ) , round( point[ 1 ] ) ] ) } ) ),
@@ -204,9 +215,12 @@ const SavedRoutes = {
         meters: planned.meters || 0,
       },
       stops: ( stops || [] ).map( ( stop ) => ( { lat: round( stop.lat ) , lon: round( stop.lon ) } ) ),
+      others: ( others || [] ).filter( ( other ) => other.runs && other.runs.length ).slice( 0 , 40 ).map( ( other ) => ( {
+        runs: other.runs.map( ( run ) => ( { main: Boolean( run.main ) , coords: thin( run.coords ) } ) ),
+      } ) ),
     } );
     const onScreen = Planner.link && Planner.link.id === route.id ? Planner.navigation() : null;
-    if ( onScreen ) return pack( route.name || onScreen.title , onScreen.route , onScreen.stops );
+    if ( onScreen ) return pack( route.name || onScreen.title , onScreen.route , onScreen.stops , Planner.otherRoutes() );
     const full = route.waypoints ? route : await Api.request( "/api/saved-routes/" + route.id );
     const result = await Api.post( "/api/route" , Planner.bodyFor( full ) );
     const choices = ( result.routes || [] ).filter( ( choice ) => !choice.compare );
@@ -215,7 +229,7 @@ const SavedRoutes = {
     if ( !chosen ) throw new Error( I18n.get( "routes.share_public_failed" ) );
     const shape = result.shape || [];
     const stops = ( result.snapped || [] ).filter( ( point , index ) => !shape[ index ] );
-    return pack( full.name , chosen , stops );
+    return pack( full.name , chosen , stops , ( result.routes || [] ).filter( ( other ) => other !== chosen ) );
   },
 
   sharedRow( shared ) {
@@ -357,7 +371,8 @@ const SavedRoutes = {
         class: "btn btn-sm btn-outline-secondary",
         attrs: { type: "button" },
         children: [ Dom.el( "i" , { class: "bi bi-link-45deg" , attrs: { "aria-hidden": "true" } } ) , Dom.el( "span" , { class: "ms-1" , text: I18n.get( "routes.copy_link" ) } ) ],
-        on: { click: () => this.copyLink( route.token ) },
+        // The public link when it is on; otherwise the one named people use.
+        on: { click: () => this.copyLink( route.token , route.share && route.share.public ? this.publicUrl( route.share.public_token ) : null ) },
       } ),
       Dom.el( "button" , {
         class: "btn btn-sm btn-outline-danger",
@@ -366,9 +381,9 @@ const SavedRoutes = {
         on: { click: () => this.remove( route ) },
       } ),
     ] );
-    const share = route.share || { link: false , users: [] };
+    const share = route.share || { users: [] };
     const badges = [
-      share.link ? Dom.badge( I18n.get( "routes.shared_badge_link" ) , "info" ) : null,
+      share.public ? Dom.badge( I18n.get( "routes.shared_badge_public" ) , "info" ) : null,
       share.users.length ? Dom.badge( Format.fill( "routes.shared_badge_people" , { n: share.users.length } ) , "info" ) : null,
     ].filter( Boolean );
     tbody.appendChild( Dom.el( "tr" , { children: [

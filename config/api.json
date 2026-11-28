@@ -1410,6 +1410,23 @@
         ],
         "type": "object"
       },
+      "OtherRoute": {
+        "description": "Another route the planner offered, drawn faintly behind the one driven: its line only.",
+        "properties": {
+          "runs": {
+            "items": {
+              "$ref": "#/components/schemas/Run"
+            },
+            "maxItems": 5000,
+            "minItems": 1,
+            "type": "array"
+          }
+        },
+        "required": [
+          "runs"
+        ],
+        "type": "object"
+      },
       "Place": {
         "properties": {
           "lat": {
@@ -1710,6 +1727,14 @@
       "PublicTrip": {
         "description": "What a public link shows: the route as planned when it was shared (its line and turn-by-turn steps) and the stops it passes. Never its options, and never planned again.",
         "properties": {
+          "others": {
+            "description": "The other routes offered with it, to show beside it.",
+            "items": {
+              "$ref": "#/components/schemas/OtherRoute"
+            },
+            "maxItems": 40,
+            "type": "array"
+          },
           "route": {
             "$ref": "#/components/schemas/TripRoute"
           },
@@ -2409,10 +2434,6 @@
       "ShareSettings": {
         "description": "Who may view a route besides its owner.",
         "properties": {
-          "link": {
-            "description": "Anyone signed in who has the link (/r/<token>) may view it.",
-            "type": "boolean"
-          },
           "public": {
             "description": "Anyone at all, signed in or not, may view it at /v/<public_token>.",
             "type": "boolean"
@@ -12785,7 +12806,7 @@
     },
     "/api/saved-routes/{route_id}/share": {
       "post": {
-        "description": "Set who may view one of your routes: anyone signed in with its link, and/or people by name, and/or anyone at all with its public link (send the route as planned in trip). Send link false, no users and public false to make it private again.",
+        "description": "Set who may view one of your routes: people by name (they open it with its link, /r/<token>, or from Shared with me), and/or anyone at all, no sign-in, with its public link (send the route as planned in trip). Send no users and public false to make it private again.",
         "operationId": "post_api_saved_routes_route_id_share",
         "parameters": [
           {
@@ -12807,10 +12828,6 @@
                   "csrf_token": {
                     "description": "From GET /api/me. Browser sessions only.",
                     "type": "string"
-                  },
-                  "link": {
-                    "description": "Let anyone signed in who has the link view it.",
-                    "type": "boolean"
                   },
                   "public": {
                     "description": "Let anyone at all view it, with no sign-in, at /v/<public_token>: the map and navigation only. Needs trip when it is turned on. Left out: unchanged. Turning it off and on again makes a new link.",
@@ -12978,7 +12995,7 @@
     },
     "/api/shared-routes/{token}": {
       "get": {
-        "description": "The route behind a link, if it is yours or shared with you (by link or by name), to plan it again. A route not shared with you answers 404, the same as no route.",
+        "description": "The route behind a link, if it is yours or shared with you by name, to plan it again. A route not shared with you answers 404, the same as no route.",
         "operationId": "get_api_shared_routes_token",
         "parameters": [
           {

@@ -879,9 +879,3 @@ body { padding-left: env(safe-area-inset-left); padding-right: env(safe-area-ins
   .nav-next-distance { font-size: 2.25rem; }
 }
 
-/* The public view's step list (viewer.js): beside the map from lg up, as
-   tall as it and scrolling; under it on a phone, at its full length. */
-@media (min-width: 992px) {
-  .pv-steps-card { height: 62vh; min-height: 320px; display: flex; flex-direction: column; }
-  .pv-steps { overflow-y: auto; }
-}

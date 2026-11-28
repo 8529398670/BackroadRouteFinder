@@ -1413,6 +1413,14 @@ const Planner = {
     };
   },
 
+  // The routes on the map besides the chosen one (the alternatives, the
+  // fastest for comparison), as draw() shows them faintly behind it.
+  otherRoutes() {
+    const chosen = this.chosen();
+    if ( !chosen || !this.result ) return [];
+    return [ ...this.poolRoutes() , ...this.result.routes.filter( ( route ) => route !== chosen ) ];
+  },
+
   // The chosen route as one line of [lat, lon] pairs.
   routeLine() {
     const route = this.chosen();

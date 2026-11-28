@@ -306,24 +306,22 @@ routes:
   rename: "Rename"
   rename_title: "Rename route"
   share_title: "Share “{name}”"
-  share_link: "Anyone signed in with the link can view it"
-  share_link_help: "The link: {url}"
-  share_people: "Share with people"
-  share_nobody: "Nobody else has an account yet. Turn on the link, or add people first."
+  share_people: "Share with people who have an account"
+  share_people_help: "They find it under Shared with me, and can plan with it like their own."
   share_save: "Save and copy link"
   shared_private: "Only you can see it now."
   link_copied: "Link copied."
   link_copy_failed: "Copy this link: {url}"
   link_gone: "That route isn't shared with you, or it was deleted."
   shared_banner: "Shared by {owner}: view only. Save it to keep your own copy."
-  share_public: "Anyone with the public link can view and navigate it, no sign-in needed"
+  share_public: "Anyone with the link can view and navigate it, no sign-in needed"
   share_public_help: "Saves the route as it is planned now, and makes a separate /v/ link for people without an account. They see the map and can navigate it, nothing else."
   share_public_help_on: "The public link: {url} Turning it off stops that link; turning it on again makes a new one."
   share_public_failed: "Could not plan the route to share it."
   shared_heading: "Shared with me"
   shared_empty: "Nobody has shared a route with you yet."
   col_owner: "Shared by"
-  shared_badge_link: "Link"
+  shared_badge_public: "Public link"
   shared_badge_people: "{n} people"
   # Exporting every saved route as a zip, and loading one back.
   export: "Export zip"
@@ -414,13 +412,9 @@ gps:
 # has no name.
 # The public view of a shared route (/v/<token>, viewer.js): anyone, no sign-in.
 viewer:
-  shared_by: "Shared by {owner}"
-  navigate: "Navigate"
-  map_label: "Map of the shared route."
   loading: "Loading the route…"
   gone: "This link was turned off, or the route was deleted."
   off_route: "Off the route. Head back to the line to carry on."
-  back: "Back to the route"
 
 navigate:
   heading: "Navigate"

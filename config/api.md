@@ -2960,7 +2960,7 @@ Bring back a saved route deleted in the last 10 minutes.
 
 Share a saved route
 
-Set who may view one of your routes: anyone signed in with its link, and/or people by name, and/or anyone at all with its public link (send the route as planned in trip). Send link false, no users and public false to make it private again.
+Set who may view one of your routes: people by name (they open it with its link, /r/<token>, or from Shared with me), and/or anyone at all, no sign-in, with its public link (send the route as planned in trip). Send no users and public false to make it private again.
 
 |  |  |
 |---|---|
@@ -2978,7 +2978,6 @@ Set who may view one of your routes: anyone signed in with its link, and/or peop
 | Field | Type | Required | Limits | Description |
 |---|---|---|---|---|
 | `csrf_token` | string | no |  | From GET /api/me. Browser sessions only. |
-| `link` | boolean | no |  | Let anyone signed in who has the link view it. |
 | `public` | boolean or null | no |  | Let anyone at all view it, with no sign-in, at /v/<public_token>: the map and navigation only. Needs trip when it is turned on. Left out: unchanged. Turning it off and on again makes a new link. |
 | `trip` | [`PublicTrip`](#publictrip) or null | no |  | The route as planned now, for the public link to show. Sent while public is on, it replaces the snapshot and keeps the link. |
 | `users` | array of integer | no |  | User ids to share it with by name (GET /api/team). Replaces the list; ids of people who cannot sign in, and your own, are left out. |
@@ -3017,7 +3016,7 @@ Other people's routes they shared with you by name, most recently changed first,
 
 A route by its link
 
-The route behind a link, if it is yours or shared with you (by link or by name), to plan it again. A route not shared with you answers 404, the same as no route.
+The route behind a link, if it is yours or shared with you by name, to plan it again. A route not shared with you answers 404, the same as no route.
 
 |  |  |
 |---|---|
@@ -3487,6 +3486,12 @@ The shapes the routes above refer to by name.
 | `role` | string | yes | one of `admin`, `user`, `viewer` |  |
 | `user_id` | integer | yes |  |  |
 
+### OtherRoute
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `runs` | array of [`Run`](#run) | yes |  |  |
+
 ### Place
 
 | Field | Type | Required | Limits | Description |
@@ -3572,6 +3577,7 @@ The shapes the routes above refer to by name.
 
 | Field | Type | Required | Limits | Description |
 |---|---|---|---|---|
+| `others` | array of [`OtherRoute`](#otherroute) | no |  | The other routes offered with it, to show beside it. |
 | `route` | [`TripRoute`](#triproute) | yes |  |  |
 | `stops` | array of [`Point`](#point) | no |  |  |
 | `title` | string | no | at most 200 characters |  |
@@ -3748,7 +3754,6 @@ The shapes the routes above refer to by name.
 
 | Field | Type | Required | Limits | Description |
 |---|---|---|---|---|
-| `link` | boolean | no |  | Anyone signed in who has the link (/r/<token>) may view it. |
 | `public` | boolean | no |  | Anyone at all, signed in or not, may view it at /v/<public_token>. |
 | `public_token` | string | no |  | Its public link is /v/<public_token>; empty while that is off. |
 | `users` | array of integer | no |  | The people (user ids, from GET /api/team) it is shared with by name. |

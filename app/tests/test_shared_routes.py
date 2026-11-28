@@ -1,5 +1,6 @@
 """Sharing a saved route (card: share a route within the app, as a view-only
-link or with other people): its link, who may view it, "Shared with me"."""
+link or with other people): its link, who may view it, "Shared with me",
+and the public link."""
 from __future__ import annotations
 
 from app.core.db import BUCKET_SAVED_ROUTES
@@ -13,6 +14,7 @@ TRIP = {
                         {"type": "arrive", "modifier": "", "road": "", "lat": 40.2, "lon": -83.2, "along_m": 100, "meters": 0, "seconds": 0}],
               "seconds": 60, "meters": 100},
     "stops": [{"lat": 40.2, "lon": -83.2}],
+    "others": [{"runs": [{"main": True, "coords": [[40.0, -83.0], [40.2, -83.0], [40.2, -83.2]]}]}],
 }
 POINTS = [{"lat": 40.0, "lon": -83.0, "label": "A"}, {"lat": 40.2, "lon": -83.2, "label": "B"}]
 
@@ -40,27 +42,25 @@ class SharedRoutesTest(SharingCase):
         status, reply = self.call("GET", f"/api/saved-routes/{self.route.id}", cookie=self.owner_cookie)
         self.assertEqual(status, 200)
         self.assertEqual(reply["token"], self.route.token)
-        self.assertEqual(reply["share"], {"link": False, "users": [], "public": False, "public_token": ""})
+        self.assertEqual(reply["share"], {"users": [], "public": False, "public_token": ""})
         self.assertEqual(self.by_link(self.user_cookie)[0], 404)
         status, reply = self.by_link(self.owner_cookie)
         self.assertEqual((status, reply["mine"], reply["owner_name"]), (200, True, "Owner"))
 
-    def test_link_lets_anyone_signed_in_view(self) -> None:
-        status, reply = self.share({"link": True})
-        self.assertEqual((status, reply["share"]["link"]), (200, True), reply)
+    def test_the_signed_in_link_option_is_gone(self) -> None:
+        # Sharing "with anyone signed in who has the link" no longer exists:
+        # the field is refused, and an old record that had it on is ignored.
+        status, _ = self.share({"link": True})
+        self.assertEqual(status, 400)
+
+        def old_link(record: dict) -> None:
+            record["share"] = {"link": True, "users": []}
+
+        self.store.update_value(BUCKET_SAVED_ROUTES, self.route.id, old_link)
         for cookie in (self.user_cookie, self.third_cookie):
-            status, reply = self.by_link(cookie)
-            self.assertEqual(status, 200, reply)
-            self.assertFalse(reply["mine"])
-            self.assertEqual(reply["route"]["name"], "To the lake")
-            self.assertIsNone(reply["route"]["share"])  # only the owner is told who else sees it
-        # Not signed in: nothing.
+            self.assertEqual(self.by_link(cookie)[0], 404)
         self.assertEqual(self.by_link("")[0], 401)
-        # A link only: not listed under "Shared with me".
-        self.assertEqual(self.call("GET", "/api/shared-routes", cookie=self.user_cookie)[1]["routes"], [])
-        # Private again.
-        self.share({"link": False})
-        self.assertEqual(self.by_link(self.user_cookie)[0], 404)
+        self.assertEqual(self.by_link(self.owner_cookie)[0], 200)
 
     def test_shared_by_name(self) -> None:
         status, reply = self.share({"users": [self.user.id, self.owner.id, 9999]})
@@ -73,7 +73,7 @@ class SharedRoutesTest(SharingCase):
         self.assertEqual(self.call("GET", "/api/shared-routes", cookie=self.third_cookie)[1]["routes"], [])
 
     def test_only_the_owner_shares(self) -> None:
-        status, _ = self.share({"link": True}, cookie=self.user_cookie)
+        status, _ = self.share({"users": [self.user.id]}, cookie=self.user_cookie)
         self.assertEqual(status, 404)
         self.assertEqual(self.by_link(self.user_cookie)[0], 404)
 
@@ -83,11 +83,11 @@ class SharedRoutesTest(SharingCase):
         self.share({"users": [viewer.id]})
         self.assertEqual(self.by_link(cookie)[0], 200)
         mine = saved_routes.create(self.store, viewer.id, "Mine", POINTS, {}, {})
-        status, _ = self.share({"link": True}, cookie=cookie, route_id=mine.id)
+        status, _ = self.share({"users": [self.user.id]}, cookie=cookie, route_id=mine.id)
         self.assertEqual(status, 403)
 
     def test_deleted_route_link_is_gone(self) -> None:
-        self.share({"link": True})
+        self.share({"users": [self.user.id]})
         saved_routes.delete(self.store, self.owner.id, self.route.id)
         self.assertEqual(self.by_link(self.user_cookie)[0], 404)
         self.assertEqual(self.by_link(self.owner_cookie)[0], 404)
@@ -129,7 +129,8 @@ class PublicLinkTest(SharingCase):
         self.assertEqual((reply["name"], reply["owner_name"]), ("To the lake", "Owner"))
         self.assertEqual(reply["trip"]["route"]["runs"], TRIP["route"]["runs"])
         self.assertEqual(len(reply["trip"]["route"]["steps"]), 2)
-        # The signed-in link stays off, and anonymous people still get nothing else.
+        self.assertEqual(reply["trip"]["others"], TRIP["others"])
+        # Anonymous people still get nothing else.
         self.assertEqual(self.by_link("")[0], 401)
         self.assertEqual(self.call("GET", f"/api/saved-routes/{self.route.id}")[0], 401)
         self.assertEqual(self.call("POST", "/api/route", body={"waypoints": POINTS})[0], 401)
@@ -137,7 +138,7 @@ class PublicLinkTest(SharingCase):
     def test_turning_it_off_and_on_again_makes_a_new_link(self) -> None:
         first = self.share({"public": True, "trip": TRIP})[1]["share"]["public_token"]
         # Saving the other settings with public left out keeps it.
-        self.assertEqual(self.share({"link": True})[1]["share"]["public_token"], first)
+        self.assertEqual(self.share({"users": [self.user.id]})[1]["share"]["public_token"], first)
         self.assertEqual(self.public(first)[0], 200)
         reply = self.share({"public": False})[1]
         self.assertEqual((reply["share"]["public"], reply["share"]["public_token"]), (False, ""))
