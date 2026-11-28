@@ -14,7 +14,6 @@
 
 app:
   title: "Backroad Route Finder"
-  tagline: "Get there on the backroads."
 
 # The sidebar, one entry per signed-in screen. menu labels the header's
 # button that opens/collapses it.

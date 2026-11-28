@@ -377,7 +377,7 @@ const Theme = {
     else root.removeAttribute( "data-bs-theme" );
     const colors = this.colors( theme );
     Object.keys( this.vars ).forEach( ( field ) => root.style.setProperty( this.vars[ field ] , colors[ field ] ) );
-    // The quieter words on the bar (the tagline).
+    // The quieter words on the bar.
     root.style.setProperty( "--app-bar-muted" , this.muted( colors.barText , colors.bar ) );
     const style = this.buttonStyle( theme );
     Object.keys( style ).forEach( ( name ) => root.style.setProperty( name , style[ name ] ) );

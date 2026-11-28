@@ -39,10 +39,14 @@
       </button>
       <!-- The app's name is the way home, from any screen. -->
       <a href="/" class="navbar-brand fw-semibold me-auto" data-i18n="app.title"></a>
-      <span class="navbar-text small d-none d-md-inline" data-i18n="app.tagline"></span>
       <div id="app-nav" class="d-flex align-items-center gap-2" hidden>
         <!-- The app's own top-level links go here. Your account is in the
-             sidebar, not up here. -->
+             sidebar, not up here. Undo and redo live on the bar so they never
+             crowd the planner's toolbar rows (planner.js renderHistory). -->
+        <div class="btn-group" role="group" data-i18n-attr="aria-label:plan.history_label">
+          <button id="plan-undo" type="button" class="btn btn-link app-icon-button" data-i18n-attr="title:plan.undo_button,aria-label:plan.undo_button" disabled><i class="bi bi-arrow-counterclockwise" aria-hidden="true"></i></button>
+          <button id="plan-redo" type="button" class="btn btn-link app-icon-button" data-i18n-attr="title:plan.redo_button,aria-label:plan.redo_button" disabled><i class="bi bi-arrow-clockwise" aria-hidden="true"></i></button>
+        </div>
       </div>
     </div>
   </nav>
@@ -345,10 +349,6 @@
                   <li><button type="button" class="dropdown-item" data-export="google"><i class="bi bi-box-arrow-up-right me-1" aria-hidden="true"></i><span data-i18n="plan.export_google"></span><small class="d-block text-body-secondary" data-i18n="plan.export_google_hint"></small></button></li>
                 </ul>
               </div>
-            </div>
-            <div class="btn-group ms-auto" role="group" data-i18n-attr="aria-label:plan.history_label">
-              <button id="plan-undo" type="button" class="btn btn-outline-secondary" data-i18n-attr="title:plan.undo_button,aria-label:plan.undo_button" disabled><i class="bi bi-arrow-counterclockwise" aria-hidden="true"></i></button>
-              <button id="plan-redo" type="button" class="btn btn-outline-secondary" data-i18n-attr="title:plan.redo_button,aria-label:plan.redo_button" disabled><i class="bi bi-arrow-clockwise" aria-hidden="true"></i></button>
             </div>
           </div>
           <!-- The route settings on a phone: the toolbar's four menus as one panel. -->
