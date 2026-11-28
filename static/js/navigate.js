@@ -211,11 +211,7 @@ const Navigate = {
       zoomControl: true , attributionControl: true,
       rotate: true , bearing: 0 , rotateControl: false , touchRotate: false , shiftKeyRotate: false,
     } );
-    L.tileLayer( "https://tile.openstreetmap.org/{z}/{x}/{y}.png" , {
-      maxZoom: 19,
-      referrerPolicy: "strict-origin-when-cross-origin",
-      attribution: I18n.get( "plan.map_attribution" ),
-    } ).addTo( this.map );
+    Basemap.add( this.map );
     this.routeLayer = L.layerGroup().addTo( this.map );
     this.doneLayer = L.layerGroup().addTo( this.map );
     this.pinLayer = L.layerGroup().addTo( this.map );

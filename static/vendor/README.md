@@ -38,6 +38,7 @@ Commit what lands here. It is part of the app, not a build artifact.
 | `qrcode.js` | qrcode-generator 1.4.4 (MIT), for the two-factor setup screen |
 | `marked/marked.min.js` | marked 15.0.12 (MIT): Markdown to HTML for the /docs pages |
 | `dompurify/purify.min.js` | DOMPurify 3.2.6: sanitises that HTML before it touches the page |
+| `maplibre/maplibre-gl-csp.js`, `maplibre/maplibre-gl-csp-worker.js`, `maplibre/maplibre-gl.css` | MapLibre GL JS 5.24.1 (BSD-3, `maplibre/LICENSE.txt`), the CSP build (its worker is a file, not a blob): draws the English-labels map (static/js/basemap.js), loaded only when that is on. `sourceMappingURL` lines removed |
 | `leaflet.js`, `leaflet.css` | Leaflet 1.9.4 (BSD-2): the maps |
 | `leaflet-rotate.js` | leaflet-rotate 0.6.2 (MIT): turns the Navigate map for heading-up |
 
@@ -54,4 +55,8 @@ misc/vendor.sh https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js qrc
 misc/vendor.sh https://cdn.jsdelivr.net/npm/marked@15.0.12/marked.min.js marked/marked.min.js
 misc/vendor.sh https://cdn.jsdelivr.net/npm/dompurify@3.2.6/dist/purify.min.js dompurify/purify.min.js
 misc/vendor.sh https://cdn.jsdelivr.net/npm/leaflet-rotate@0.6.2/dist/leaflet-rotate.js
+misc/vendor.sh https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.1/dist/maplibre-gl-csp.js maplibre/maplibre-gl-csp.js
+misc/vendor.sh https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.1/dist/maplibre-gl-csp-worker.js maplibre/maplibre-gl-csp-worker.js
+misc/vendor.sh https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.1/dist/maplibre-gl.css maplibre/maplibre-gl.css
+misc/vendor.sh https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.1/dist/LICENSE.txt maplibre/LICENSE.txt
 ```

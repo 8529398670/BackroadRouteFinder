@@ -22,14 +22,7 @@ const RouteMap = {
   init( elementId , handlers ) {
     // rotateControl: leaflet-rotate (loaded for Navigate) would add a compass button here.
     this.map = L.map( elementId , { zoomControl: true , attributionControl: true , rotateControl: false } );
-    L.tileLayer( "https://tile.openstreetmap.org/{z}/{x}/{y}.png" , {
-      maxZoom: 19,
-      // The app's own pages send no Referer off-site (Referrer-Policy:
-      // same-origin), but OpenStreetMap's tile servers block requests that
-      // carry none. The tiles alone send the site's origin, never a path.
-      referrerPolicy: "strict-origin-when-cross-origin",
-      attribution: I18n.get( "plan.map_attribution" ),
-    } ).addTo( this.map );
+    Basemap.add( this.map );
     this.ring = L.layerGroup().addTo( this.map );
     this.lines = L.layerGroup().addTo( this.map );
     this.edit = L.layerGroup().addTo( this.map );

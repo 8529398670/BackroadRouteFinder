@@ -1595,6 +1595,15 @@
             ],
             "type": "string"
           },
+          "map_labels": {
+            "default": "local",
+            "description": "local: names as OpenStreetMap's map prints them; english: Latin/English names above the local ones, and place search in English.",
+            "enum": [
+              "local",
+              "english"
+            ],
+            "type": "string"
+          },
           "off_map_engines": {
             "default": true,
             "description": "Off our map, plan with the other engines alone (PlanRoute.off_map=engines).",
@@ -7585,6 +7594,15 @@
               "pattern": "^$|^-?[0-9.]+,-?[0-9.]+,-?[0-9.]+,-?[0-9.]+$",
               "type": "string"
             }
+          },
+          {
+            "description": "Names in this language where known (e.g. en); empty: the local names.",
+            "in": "query",
+            "name": "lang",
+            "schema": {
+              "pattern": "^$|^[a-z]{2}$",
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -11021,6 +11039,92 @@
       },
       "x-feature": "settings"
     },
+    "/api/planner/map-labels": {
+      "post": {
+        "description": "Saves map_labels alone; the rest of your planner defaults stay as they are (the server's where you have saved none).",
+        "operationId": "post_api_planner_map_labels",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "csrf_token": {
+                    "description": "From GET /api/me. Browser sessions only.",
+                    "type": "string"
+                  },
+                  "map_labels": {
+                    "description": "local: names as OpenStreetMap's map prints them; english: Latin/English names above the local ones, and place search in English.",
+                    "enum": [
+                      "local",
+                      "english"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "map_labels"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "prefs": {
+                      "$ref": "#/components/schemas/PlannerPrefs"
+                    },
+                    "saved": {
+                      "description": "False while these are the server's defaults, not your own.",
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "prefs",
+                    "saved"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "$ref": "#/components/responses/E503"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "Change your map's labels",
+        "tags": [
+          "Planner"
+        ]
+      }
+    },
     "/api/planner/places": {
       "get": {
         "description": "Places you picked from search and the stops of routes you saved or opened, newest first: the stop boxes offer them before a search.",
@@ -11349,6 +11453,17 @@
                     "enum": [
                       "mi",
                       "min"
+                    ],
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "map_labels": {
+                    "description": "local: names as OpenStreetMap's map prints them; english: Latin/English names above the local ones, and place search in English.",
+                    "enum": [
+                      "local",
+                      "english"
                     ],
                     "type": [
                       "string",

@@ -41,10 +41,11 @@ _last_call = 0.0
 _cache: OrderedDict[tuple, tuple[float, list[Place]]] = OrderedDict()
 
 
-def search(base_url: str, query: str, bbox: list[float], limit: int = 6) -> list[Place]:
-    """bbox is [south, west, north, east]: places there first (empty: none)."""
+def search(base_url: str, query: str, bbox: list[float], limit: int = 6, lang: str = "") -> list[Place]:
+    """bbox is [south, west, north, east]: places there first (empty: none).
+    lang (e.g. "en"): names in that language where Nominatim knows them."""
     global _last_call
-    key = (base_url, query.strip().lower(), tuple(round(v, 3) for v in bbox), limit)
+    key = (base_url, query.strip().lower(), tuple(round(v, 3) for v in bbox), limit, lang)
     with _lock:
         hit = _cache.get(key)
         if hit and time.time() - hit[0] < CACHE_SECONDS:
@@ -55,6 +56,8 @@ def search(base_url: str, query: str, bbox: list[float], limit: int = 6) -> list
             time.sleep(wait)
         _last_call = time.monotonic()
         fields: dict[str, object] = {"q": query.strip(), "format": "jsonv2", "limit": limit, "addressdetails": 0}
+        if lang:
+            fields["accept-language"] = lang
         if len(bbox) == 4:
             # Places in view come first; the rest of the world still answers.
             south, west, north, east = bbox

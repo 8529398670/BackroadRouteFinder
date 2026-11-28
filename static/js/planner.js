@@ -144,6 +144,7 @@ const Planner = {
     } );
     Dom.get( "plan-compare" ).addEventListener( "change" , ( event ) => this.setOption( "compare_fastest" , event.target.checked ) );
     Dom.get( "plan-off-map" ).addEventListener( "change" , ( event ) => this.setOption( "off_map_engines" , event.target.checked ) );
+    Dom.get( "plan-map-labels" ).addEventListener( "change" , ( event ) => this.setMapLabels( event.target.checked ? "english" : "local" ) );
     Dom.get( "plan-penalty" ).addEventListener( "input" , ( event ) => this.setOption( "penalty" , Number( event.target.value ) , "penalty" ) );
     Dom.all( "#plan-presets [data-penalty]" ).forEach( ( button ) => {
       button.addEventListener( "click" , () => this.setOption( "penalty" , Number( button.getAttribute( "data-penalty" ) ) ) );
@@ -173,6 +174,9 @@ const Planner = {
     this.status = status;
     this.places = places.places;
     this.options = this.copyOptions( this.fromPrefs( prefs.prefs ) );
+    this.mapLabels = prefs.prefs.map_labels || "local";
+    Dom.get( "plan-map-labels" ).checked = this.mapLabels === "english";
+    Basemap.set( this.mapLabels );
     this.showStatus();
     RouteMap.showArea( status.bbox );
     this.renderStops();
@@ -766,6 +770,43 @@ const Planner = {
     return places.map( ( place ) => this.placeRow( index , menu , place , true ) );
   },
 
+  // "32.438563, 35.806514" (a Google Maps paste), "32.4385N 35.8065E",
+  // "32.4°, -97.1°" -> { lat, lon }, or null for anything else. Latitude
+  // comes first; a pair whose first number cannot be a latitude is swapped.
+  parseCoords( text ) {
+    const part = "([-+]?\\d{1,3}(?:\\.\\d+)?)\\s*°?\\s*([NSEWnsew])?";
+    const match = text.trim().match( new RegExp( "^" + part + "\\s*[,;\\s]\\s*" + part + "$" ) );
+    if ( !match ) return null;
+    const value = ( number , letter ) => {
+      const v = Number( number );
+      return letter && "SWsw".includes( letter ) ? -Math.abs( v ) : v;
+    };
+    let lat = value( match[ 1 ] , match[ 2 ] );
+    let lon = value( match[ 3 ] , match[ 4 ] );
+    const firstIsLon = ( match[ 2 ] && "EWew".includes( match[ 2 ] ) ) || ( match[ 4 ] && "NSns".includes( match[ 4 ] ) );
+    if ( firstIsLon || ( Math.abs( lat ) > 90 && Math.abs( lon ) <= 90 ) ) [ lat , lon ] = [ lon , lat ];
+    if ( !Number.isFinite( lat ) || !Number.isFinite( lon ) || Math.abs( lat ) > 90 || Math.abs( lon ) > 180 ) return null;
+    return { lat: lat , lon: lon };
+  },
+
+  // The one row a typed coordinate pair gets: the stop goes exactly there.
+  coordsRow( index , menu , point ) {
+    return Dom.el( "button" , {
+      class: "list-group-item list-group-item-action small",
+      attrs: { type: "button" , role: "option" },
+      children: [
+        Dom.el( "i" , { class: "bi bi-geo-alt text-primary me-2" , attrs: { "aria-hidden": "true" } } ),
+        Dom.el( "span" , { text: Format.fill( "plan.go_to_coords" , { lat: point.lat.toFixed( 5 ) , lon: point.lon.toFixed( 5 ) } ) } ),
+      ],
+      on: { click: () => {
+        Dom.show( menu , false );
+        const stop = this.pointStop( point.lat , point.lon );
+        this.setStop( index , stop , true );
+        this.rememberPlaces( [ stop ] );
+      } },
+    } );
+  },
+
   // An empty box: the recent places, and a way to clear them.
   showRecent( index , input , menu ) {
     if ( !this.places.length ) {
@@ -795,6 +836,12 @@ const Planner = {
       this.showRecent( index , input , menu );
       return;
     }
+    const point = this.parseCoords( query );
+    if ( point ) {
+      Dom.swap( menu , this.coordsRow( index , menu , point ) );
+      Dom.show( menu , true );
+      return;
+    }
     const recent = this.recentRows( index , menu , this.recentMatching( query ) );
     const searching = query.length >= 2 && !( this.status && !this.status.place_search );
     if ( !searching ) {
@@ -811,7 +858,7 @@ const Planner = {
 
   async search( index , input , menu ) {
     const query = input.value.trim();
-    if ( query.length < 2 ) return;
+    if ( query.length < 2 || this.parseCoords( query ) ) return;
     const recent = this.recentMatching( query );
     if ( this.status && !this.status.place_search ) {
       Dom.swap( menu , ...this.recentRows( index , menu , recent ) ,
@@ -827,7 +874,8 @@ const Planner = {
         const view = RouteMap.map.getBounds();
         near = "&near=" + [ view.getSouth() , view.getWest() , view.getNorth() , view.getEast() ].map( ( v ) => v.toFixed( 4 ) ).join( "," );
       }
-      places = ( await Api.request( "/api/geocode?q=" + encodeURIComponent( query ) + near ) ).places;
+      const lang = this.mapLabels === "english" ? "&lang=en" : "";
+      places = ( await Api.request( "/api/geocode?q=" + encodeURIComponent( query ) + near + lang ) ).places;
     } catch ( error ) {
       if ( input.value.trim() !== query ) return;
       if ( recent.length ) Dom.swap( menu , ...this.recentRows( index , menu , recent ) );
@@ -1069,6 +1117,17 @@ const Planner = {
     Dom.show( note , lines.length > 0 );
   },
 
+  // Not part of a plan's options (undo leaves it alone): saved at once.
+  async setMapLabels( labels ) {
+    this.mapLabels = labels;
+    Basemap.set( labels );
+    try {
+      await Api.post( "/api/planner/map-labels" , { map_labels: labels } );
+    } catch ( error ) {
+      App.showError( error.message );
+    }
+  },
+
   async savePrefs() {
     const options = this.options;
     await Api.post( "/api/planner/prefs" , {
@@ -1076,6 +1135,7 @@ const Planner = {
       compare_fastest: options.compare_fastest , sources: options.sources , combine: options.combine || "best",
       alternatives: options.alternatives || 1, off_map_engines: options.off_map_engines !== false,
       loop_radius: options.loop.radius , loop_unit: options.loop.unit , loop_points: options.loop.points , loop_reuse: options.loop.reuse,
+      map_labels: this.mapLabels || "local",
     } );
     Dom.toast( I18n.get( "plan.prefs_saved" ) , "ok" );
   },

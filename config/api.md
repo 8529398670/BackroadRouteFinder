@@ -2526,6 +2526,7 @@ Can the server do real work
 | Method | Path | Summary | Who may call |
 |---|---|---|---|
 | GET | [`/api/geocode`](#get-apigeocode) | Search for a place | browser session or API key, anyone signed in |
+| POST | [`/api/planner/map-labels`](#post-apiplannermap-labels) | Change your map's labels | browser session or API key, anyone signed in |
 | GET | [`/api/planner/places`](#get-apiplannerplaces) | Your recent places | browser session or API key, anyone signed in |
 | POST | [`/api/planner/places`](#post-apiplannerplaces) | Remember recent places | browser session or API key, anyone signed in |
 | POST | [`/api/planner/places/clear`](#post-apiplannerplacesclear) | Forget your recent places | browser session or API key, anyone signed in |
@@ -2551,12 +2552,38 @@ Addresses and places matching q, anywhere, those in the map in view (near) first
 |---|---|---|---|---|---|
 | `q` | query | string | no | 2 to 200 characters | An address or place name. |
 | `near` | query | string | no |  | south,west,north,east of the map in view: places there come first. |
+| `lang` | query | string | no |  | Names in this language where known (e.g. en); empty: the local names. |
 
 **Reply 200**: Success
 
 | Field | Type | Required | Limits | Description |
 |---|---|---|---|---|
 | `places` | array of [`Place`](#place) | yes |  |  |
+
+### POST /api/planner/map-labels
+
+Change your map's labels
+
+Saves map_labels alone; the rest of your planner defaults stay as they are (the server's where you have saved none).
+
+|  |  |
+|---|---|
+| Who may call | browser session or API key, anyone signed in |
+| Errors | 400, 401, 403, 429, 503 |
+
+**Request body**
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `csrf_token` | string | no |  | From GET /api/me. Browser sessions only. |
+| `map_labels` | string | yes | one of `local`, `english` | local: names as OpenStreetMap's map prints them; english: Latin/English names above the local ones, and place search in English. |
+
+**Reply 200**: Success
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `prefs` | [`PlannerPrefs`](#plannerprefs) | yes |  |  |
+| `saved` | boolean | yes |  | False while these are the server's defaults, not your own. |
 
 ### GET /api/planner/places
 
@@ -2665,6 +2692,7 @@ Save how the planner opens for you. Send the whole set; a loop setting or road_f
 | `loop_radius` | number or null | no | 0.5 to 200 |  |
 | `loop_reuse` | number or null | no | 1 to 10 |  |
 | `loop_unit` | string or null | no | one of `mi`, `min` |  |
+| `map_labels` | string or null | no | one of `local`, `english` | local: names as OpenStreetMap's map prints them; english: Latin/English names above the local ones, and place search in English. |
 | `off_map_engines` | boolean | no | default `true` |  |
 | `penalty` | number | yes | 1 to 100 | How many times over a minute on a main road counts. 1 is the plain fastest route. |
 | `road_factors` | map of number or null | no |  | Avoid strengths of their own, by road type: how many times over a minute on that type counts when its rule is avoid (unpaved: 2 makes gravel count double however high the penalty). Types left out count the penalty. Left out altogether: the defaults in GET /api/routing/status. |
@@ -3535,6 +3563,7 @@ The shapes the routes above refer to by name.
 | `loop_radius` | number | no | 0.5 to 200; default `20` |  |
 | `loop_reuse` | number | no | 1 to 10; default `3` |  |
 | `loop_unit` | string | no | one of `mi`, `min`; default `mi` |  |
+| `map_labels` | string | no | one of `local`, `english`; default `local` | local: names as OpenStreetMap's map prints them; english: Latin/English names above the local ones, and place search in English. |
 | `off_map_engines` | boolean | no | default `true` | Off our map, plan with the other engines alone (PlanRoute.off_map=engines). |
 | `penalty` | number | no | 1 to 100; default `8` | How many times over a minute on a main road counts. 1 is the plain fastest route. |
 | `road_factors` | map of number | no |  | Avoid strengths of their own, by road type: how many times over a minute on that type counts when its rule is avoid (unpaved: 2 makes gravel count double however high the penalty). Types left out count the penalty. Left out altogether: the defaults in GET /api/routing/status. |

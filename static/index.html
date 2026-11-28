@@ -268,6 +268,11 @@
                   <label class="form-check-label" for="plan-compare" data-i18n="plan.compare_fastest"></label>
                 </div>
                 <button id="plan-save-prefs" type="button" class="btn btn-sm btn-link px-0" data-i18n="plan.save_prefs"></button>
+                <div class="form-check form-switch border-top pt-2 mt-2 mb-0">
+                  <input class="form-check-input" type="checkbox" role="switch" id="plan-map-labels" />
+                  <label class="form-check-label" for="plan-map-labels" data-i18n="plan.map_labels_english"></label>
+                  <div class="small text-body-secondary" data-i18n="plan.map_labels_help"></div>
+                </div>
                 </div>
                 <div class="col-12 col-lg-6">
                 <!-- One row per road type, built by planner.js from GET /api/routing/status. -->
@@ -1425,6 +1430,7 @@
   <script src="/vendor/leaflet-rotate.js"></script>
   <script src="/js/format.js"></script>
   <script src="/js/gps.js"></script>
+  <script src="/js/basemap.js"></script>
   <script src="/js/map.js"></script>
   <script src="/js/export.js"></script>
   <script src="/js/planner.js"></script>

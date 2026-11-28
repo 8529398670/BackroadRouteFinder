@@ -43,11 +43,13 @@ CONTENT_SECURITY_POLICY = "; ".join(
         "default-src 'self'",
         "script-src 'self'",
         "style-src 'self'",
-        # Map tiles come from OpenStreetMap's tile servers (static/js/map.js);
-        # nothing else of theirs runs here, and they get no cookies.
-        "img-src 'self' data: https://tile.openstreetmap.org",
+        # Map tiles come from OpenStreetMap's tile servers, or with English
+        # labels on, OpenFreeMap's vector tiles, style, fonts and sprites,
+        # fetched by MapLibre (static/js/basemap.js). Nothing of theirs runs
+        # here (MapLibre and its worker are vendored), and they get no cookies.
+        "img-src 'self' data: blob: https://tile.openstreetmap.org https://tiles.openfreemap.org",
         "font-src 'self'",
-        "connect-src 'self'",
+        "connect-src 'self' https://tiles.openfreemap.org",
         "object-src 'none'",
         "base-uri 'self'",
         "form-action 'self'",

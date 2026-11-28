@@ -701,6 +701,8 @@ class Geocode(RequestType):
     near: Annotated[str, QUERY, Meta(pattern=r"^$|^-?[0-9.]+,-?[0-9.]+,-?[0-9.]+,-?[0-9.]+$",
                                      description="south,west,north,east of the map in view: places there come first.",
                                      extra={"error": "near is south,west,north,east"})] = ""
+    lang: Annotated[str, QUERY, Meta(pattern=r"^$|^[a-z]{2}$", description="Names in this language where known (e.g. en); empty: the local names.",
+                                     extra={"error": "lang is a two-letter language code"})] = ""
 
 
 class Place(Reply):
@@ -732,7 +734,7 @@ def search_places(request: Request, body: Geocode) -> GeocodeReply:
         shown = _maps(request).shown()
         near = list(shown.bbox) if shown is not None else []
     try:
-        found = geocode.search(base, body.q, near)
+        found = geocode.search(base, body.q, near, lang=body.lang)
     except geocode.GeocodeError as error:
         raise Refused(503, str(error)) from None
     return GeocodeReply(places=[Place(name=p.name, lat=p.lat, lon=p.lon) for p in found])
@@ -744,6 +746,8 @@ LoopRadius = Annotated[float, Meta(ge=0.5, le=200, extra={"error": "loop_radius 
 LoopUnit = Literal["mi", "min"]
 LoopPoints = Annotated[int, Meta(ge=4, le=8, extra={"error": "loop_points must be 4-8"})]
 LoopReuse = Annotated[float, Meta(ge=1, le=10, extra={"error": "loop_reuse must be 1-10"})]
+MapLabels = Annotated[Literal["local", "english"], Meta(description="local: names as OpenStreetMap's map prints them; "
+                                                        "english: Latin/English names above the local ones, and place search in English.")]
 
 
 class PlannerPrefs(Reply):
@@ -761,6 +765,7 @@ class PlannerPrefs(Reply):
     loop_unit: LoopUnit = "mi"
     loop_points: LoopPoints = 6
     loop_reuse: LoopReuse = 3.0
+    map_labels: MapLabels = "local"
 
 
 class PrefsReply(Reply):
@@ -783,6 +788,10 @@ def _defaults(request: Request) -> PlannerPrefs:
     "strengths, and the loop settings. What you have not set yourself is the server's (config.yaml routing).",
 )
 def get_prefs(request: Request, body: NoInput) -> PrefsReply:
+    return _prefs_reply(request)
+
+
+def _prefs_reply(request: Request) -> PrefsReply:
     stored = saved_routes.get_prefs(get_store(request), actor_from(request).user.id)
     if not stored:
         return PrefsReply(prefs=_defaults(request), saved=False)
@@ -808,6 +817,7 @@ class SetPrefs(RequestType):
     loop_unit: LoopUnit | None = None
     loop_points: LoopPoints | None = None
     loop_reuse: LoopReuse | None = None
+    map_labels: MapLabels | None = None
     secondary_is_main: LegacySecondary = None
     allow_unpaved: LegacyUnpaved = None
 
@@ -827,11 +837,35 @@ def set_prefs(request: Request, body: SetPrefs) -> PrefsReply:
                          loop_radius=body.loop_radius if body.loop_radius is not None else defaults.loop_radius,
                          loop_unit=body.loop_unit or defaults.loop_unit,
                          loop_points=body.loop_points or defaults.loop_points,
-                         loop_reuse=body.loop_reuse if body.loop_reuse is not None else defaults.loop_reuse)
+                         loop_reuse=body.loop_reuse if body.loop_reuse is not None else defaults.loop_reuse,
+                         map_labels=body.map_labels or _stored_labels(request))
     stored = msgspec.to_builtins(prefs)
     if not saved_routes.set_prefs(get_store(request), actor_from(request).user.id, stored):
         raise Refused.internal("planner prefs: the signed-in account has no record")
     return PrefsReply(prefs=prefs, saved=True)
+
+
+def _stored_labels(request: Request) -> str:
+    stored = saved_routes.get_prefs(get_store(request), actor_from(request).user.id) or {}
+    return stored.get("map_labels") if stored.get("map_labels") in ("local", "english") else "local"
+
+
+class SetMapLabels(RequestType):
+    map_labels: MapLabels
+
+
+@route(
+    "POST /api/planner/map-labels", summary="Change your map's labels",
+    tag="Planner",
+    description="Saves map_labels alone; the rest of your planner defaults stay as they are (the server's where you have saved none).",
+)
+def set_map_labels(request: Request, body: SetMapLabels) -> PrefsReply:
+    store, user_id = get_store(request), actor_from(request).user.id
+    stored = dict(saved_routes.get_prefs(store, user_id) or {})
+    stored["map_labels"] = body.map_labels
+    if not saved_routes.set_prefs(store, user_id, stored):
+        raise Refused.internal("planner prefs: the signed-in account has no record")
+    return _prefs_reply(request)
 
 
 # --- recent places --------------------------------------------------------------
