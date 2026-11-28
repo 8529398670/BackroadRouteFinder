@@ -298,6 +298,8 @@ routes:
   # Sharing a route: its link (/r/<token>) and who may view it.
   share: "Share"
   copy_link: "Copy link"
+  rename: "Rename"
+  rename_title: "Rename route"
   share_title: "Share “{name}”"
   share_link: "Anyone signed in with the link can view it"
   share_link_help: "The link: {url}"

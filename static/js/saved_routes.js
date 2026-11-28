@@ -225,6 +225,54 @@ const SavedRoutes = {
     const nameCell = Dom.editable( route.name , {
       label: I18n.get( "routes.name_label" ),
       maxLength: 80,
+      save: async ( value ) => { await this.rename( route , name , value ); name = value; },
+    } );
+    const summary = route.summary || {};
+    const actions = Dom.rowActions( route.name , [
+      Dom.el( "button" , {
+        class: "btn btn-sm btn-outline-primary",
+        attrs: { type: "button" },
+        children: [ Dom.el( "i" , { class: "bi bi-map" , attrs: { "aria-hidden": "true" } } ) , Dom.el( "span" , { class: "ms-1" , text: I18n.get( "routes.open" ) } ) ],
+        on: { click: () => Planner.open( route , shared ) },
+      } ),
+      Dom.el( "button" , {
+        class: "btn btn-sm btn-outline-primary",
+        attrs: { type: "button" },
+        children: [ Dom.el( "i" , { class: "bi bi-sign-turn-right" , attrs: { "aria-hidden": "true" } } ) , Dom.el( "span" , { class: "ms-1" , text: I18n.get( "routes.navigate" ) } ) ],
+        on: { click: () => Planner.open( route , shared , true ) },
+      } ),
+    ] );
+    tbody.appendChild( Dom.el( "tr" , { children: [
+      Dom.el( "td" , { text: route.name } ),
+      Dom.el( "td" , { text: this.stopsText( route ) } ),
+      Dom.el( "td" , { text: shared.owner_name } ),
+      Dom.el( "td" , { class: "text-nowrap" , text: Format.duration( summary.seconds || 0 ) + " · " + Format.distance( summary.meters || 0 ) } ),
+      Dom.el( "td" , { class: "text-end" , children: [ actions ] } ),
+    ] } ) );
+  },
+
+  stopsText( route ) {
+    const short = ( point ) => ( point.label || "" ).split( "," )[ 0 ];
+    const loop = route.options && route.options.loop;
+    if ( loop ) {
+      const center = route.waypoints[ 0 ] ? short( route.waypoints[ 0 ] ) : loop.center_lat.toFixed( 3 ) + ", " + loop.center_lon.toFixed( 3 );
+      const radius = Format.fill( "plan.loop_radius_text" , { n: loop.radius , unit: I18n.get( loop.unit === "min" ? "plan.unit_min" : "plan.unit_mi" ) } );
+      return Format.fill( "routes.loop" , { center: center , radius: radius } );
+    }
+    const first = route.waypoints[ 0 ];
+    const last = route.waypoints[ route.waypoints.length - 1 ];
+    const more = route.waypoints.length - 2;
+    return more > 0
+      ? Format.fill( "routes.stops_more" , { from: short( first ) , to: short( last ) , n: more } )
+      : Format.fill( "routes.stops" , { from: short( first ) , to: short( last ) } );
+  },
+
+  row( route ) {
+    const tbody = Dom.get( "routes-table" ).querySelector( "tbody" );
+    let name = route.name;
+    const nameCell = Dom.editable( route.name , {
+      label: I18n.get( "routes.name_label" ),
+      maxLength: 80,
       save: async ( value ) => {
         const previous = name;
         await Api.post( "/api/saved-routes/" + route.id + "/rename" , { name: value , expect: previous } );
@@ -250,6 +298,12 @@ const SavedRoutes = {
         attrs: { type: "button" },
         children: [ Dom.el( "i" , { class: "bi bi-sign-turn-right" , attrs: { "aria-hidden": "true" } } ) , Dom.el( "span" , { class: "ms-1" , text: I18n.get( "routes.navigate" ) } ) ],
         on: { click: () => Planner.open( route , null , true ) },
+      } ),
+      Dom.el( "button" , {
+        class: "btn btn-sm btn-outline-secondary",
+        attrs: { type: "button" , "data-write": "" },
+        children: [ Dom.el( "i" , { class: "bi bi-pencil" , attrs: { "aria-hidden": "true" } } ) , Dom.el( "span" , { class: "ms-1" , text: I18n.get( "routes.rename" ) } ) ],
+        on: { click: () => this.renameAsk( route , name ) },
       } ),
       Dom.el( "button" , {
         class: "btn btn-sm btn-outline-secondary",
@@ -283,6 +337,34 @@ const SavedRoutes = {
       Dom.el( "td" , { children: [ Dom.when( route.updated_at ) ] } ),
       Dom.el( "td" , { class: "text-end" , children: [ actions ] } ),
     ] } ) );
+  },
+
+  // Renaming, from the name in the row or its Rename button. expect keeps a
+  // name changed elsewhere meanwhile from being overwritten.
+  async rename( route , previous , value ) {
+    await Api.post( "/api/saved-routes/" + route.id + "/rename" , { name: value , expect: previous } );
+    Undo.record( {
+      label: I18n.get( "undo.route_rename" ),
+      toast: true,
+      undo: async () => { await Api.post( "/api/saved-routes/" + route.id + "/rename" , { name: previous , expect: value } ); await this.refresh(); },
+      redo: async () => { await Api.post( "/api/saved-routes/" + route.id + "/rename" , { name: value , expect: previous } ); await this.refresh(); },
+    } );
+  },
+
+  async renameAsk( route , current ) {
+    let renamed = false;
+    const answer = await Dom.form( {
+      title: I18n.get( "routes.rename_title" ),
+      submit: I18n.get( "routes.rename" ),
+      fields: [ { name: "name" , label: I18n.get( "plan.save_name" ) , value: current , required: true , maxLength: 80 } ],
+      save: async ( values ) => {
+        const value = String( values.name || "" ).trim();
+        if ( !value || value === current ) return;
+        await this.rename( route , current , value );
+        renamed = true;
+      },
+    } );
+    if ( answer !== null && renamed ) await this.refresh();
   },
 
   async remove( route ) {
