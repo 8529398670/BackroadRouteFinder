@@ -92,11 +92,18 @@ def score(summary: Summary, penalty: float = 0.0) -> float:
 
 def with_shape(snapped: list[Snap], shape: list[tuple[int, Snap]]) -> list[Snap]:
     """The points driven through, with each shape point (a nudge: leg, point)
-    after waypoint leg. Shape points on one leg keep the order given."""
+    after waypoint leg. Shape points on one leg keep the order given.
+
+    Each shape point is marked soft (Snap.soft: the route may fold away a
+    spur out to it), in place, since callers know their nudges by identity."""
     out: list[Snap] = []
     for index, point in enumerate(snapped):
         out.append(point)
-        out.extend(at for leg, at in shape if leg == index)
+        for leg, at in shape:
+            if leg == index:
+                if not at.soft:
+                    object.__setattr__(at, "soft", True)
+                out.append(at)
     return out
 
 

@@ -16,6 +16,13 @@
 const Navigate = {
   STORAGE: "navigate-trip",
   MUTE: "navigate-muted",
+  // "north" (north always up) or "heading" (the way the car is going up).
+  ORIENT: "navigate-orientation",
+  // Below this speed (m/s) the GPS heading is noise; the line's own direction is used.
+  HEADING_MIN_SPEED: 1.5,
+  // Heading-up puts the car this share of the map's height below the middle,
+  // so more of the road ahead shows.
+  AHEAD_SHARE: 0.25,
   AUTO: "navigate-auto-reroute",
   // Off the line by more than this (plus the fix's own uncertainty, up to
   // OFF_SLACK_M) for OFF_FIXES fixes in a row is off route.
@@ -39,6 +46,7 @@ const Navigate = {
   rerouting: false,
   spoken: {},
   following: true,
+  bearing: 0,
   arrived: false,
   active: false,
   wake: null,
@@ -57,6 +65,8 @@ const Navigate = {
     auto.checked = window.localStorage.getItem( this.AUTO ) !== "off";
     auto.addEventListener( "change" , () => window.localStorage.setItem( this.AUTO , auto.checked ? "on" : "off" ) );
     this.renderMute();
+    Dom.get( "nav-orient" ).addEventListener( "click" , () => this.setOrientation( this.orientation() === "heading" ? "north" : "heading" ) );
+    this.renderOrientation();
     window.addEventListener( "gps" , ( event ) => { if ( this.active ) this.onFix( event.detail ); } );
     window.addEventListener( "gps-error" , ( event ) => { if ( this.active ) this.showGps( event.detail.message , true ); } );
     window.addEventListener( "nav" , ( event ) => {
@@ -124,7 +134,7 @@ const Navigate = {
     if ( window.speechSynthesis ) window.speechSynthesis.cancel();
     this.release();
     this.render();
-    Nav.go( Nav.pathOf( "plan" ) );
+    Nav.go( Nav.pathOf( "routes" ) );
   },
 
   // The route's own steps, or (a route planned before steps existed) just
@@ -165,9 +175,14 @@ const Navigate = {
 
   // --- the screen ------------------------------------------------------------------
 
+  // Navigation is started from a route (saved, or the planner's); with no
+  // trip there is nothing to show here, so go to the saved routes.
   show() {
     this.render();
-    if ( !this.active ) return;
+    if ( !this.active ) {
+      Nav.go( Nav.pathOf( "routes" ) );
+      return;
+    }
     this.ensureMap();
     window.setTimeout( () => {
       this.map.invalidateSize();
@@ -181,7 +196,11 @@ const Navigate = {
 
   ensureMap() {
     if ( this.map ) return;
-    this.map = L.map( "nav-map" , { zoomControl: true , attributionControl: true } );
+    // rotate: leaflet-rotate, for heading-up; turned by setBearing only, never by hand.
+    this.map = L.map( "nav-map" , {
+      zoomControl: true , attributionControl: true,
+      rotate: true , bearing: 0 , rotateControl: false , touchRotate: false , shiftKeyRotate: false,
+    } );
     L.tileLayer( "https://tile.openstreetmap.org/{z}/{x}/{y}.png" , {
       maxZoom: 19,
       referrerPolicy: "strict-origin-when-cross-origin",
@@ -234,7 +253,6 @@ const Navigate = {
   },
 
   render() {
-    Dom.show( Dom.get( "nav-empty" ) , !this.active );
     Dom.show( Dom.get( "nav-live" ) , this.active );
     if ( !this.active ) return;
     Dom.text( Dom.get( "nav-title" ) , this.trip.title || I18n.get( "navigate.heading" ) );
@@ -298,6 +316,71 @@ const Navigate = {
     button.title = label;
   },
 
+  orientation() {
+    return window.localStorage.getItem( this.ORIENT ) === "heading" ? "heading" : "north";
+  },
+
+  setOrientation( mode ) {
+    window.localStorage.setItem( this.ORIENT , mode );
+    this.renderOrientation();
+    if ( !this.map ) return;
+    if ( mode === "north" ) this.map.setBearing( 0 );
+    if ( Gps.last ) {
+      this.follow( Gps.last );
+      this.me.update( Gps.last );
+    }
+  },
+
+  renderOrientation() {
+    const heading = this.orientation() === "heading";
+    const button = Dom.get( "nav-orient" );
+    button.setAttribute( "aria-pressed" , String( heading ) );
+    button.querySelector( "i" ).className = "bi " + ( heading ? "bi-cursor-fill" : "bi-compass" );
+    const label = I18n.get( heading ? "navigate.heading_up" : "navigate.north_up" );
+    button.setAttribute( "aria-label" , label );
+    button.title = label;
+  },
+
+  // The way the car is going, in degrees from north: the GPS's own heading
+  // when moving, else the line's direction where the car is on it, else the last.
+  headingOf( fix ) {
+    if ( typeof fix.heading === "number" && typeof fix.speed === "number" && fix.speed > this.HEADING_MIN_SPEED ) return fix.heading;
+    if ( this.line.length > 1 ) {
+      const i = Math.min( Geo.indexAt( this.cum , this.along ) , this.line.length - 2 );
+      const a = this.line[ i ];
+      const b = this.line[ i + 1 ];
+      const lat = ( a[ 0 ] + b[ 0 ] ) / 2 * Math.PI / 180;
+      const dx = ( b[ 1 ] - a[ 1 ] ) * Math.cos( lat );
+      const dy = b[ 0 ] - a[ 0 ];
+      if ( dx !== 0 || dy !== 0 ) return ( Math.atan2( dx , dy ) * 180 / Math.PI + 360 ) % 360;
+    }
+    return this.bearing;
+  },
+
+  // Keep the car in view: north-up centres it; heading-up turns the map so
+  // the way ahead is up and puts the car below the middle.
+  follow( fix , animate ) {
+    if ( !this.following || !this.map ) return;
+    const zoom = Math.max( this.map.getZoom() , 16 );
+    if ( this.orientation() !== "heading" ) {
+      if ( this.map.getBearing() !== 0 ) this.map.setBearing( 0 );
+      this.map.setView( [ fix.lat , fix.lon ] , zoom , { animate: Boolean( animate ) } );
+      return;
+    }
+    this.bearing = this.headingOf( fix );
+    // leaflet-rotate turns the map clockwise by its bearing, so the heading
+    // is up when the map is turned back by it.
+    this.map.setBearing( ( 360 - this.bearing ) % 360 );
+    // Metres per pixel at this zoom, then the point that far ahead along the heading.
+    const cos = Math.cos( fix.lat * Math.PI / 180 );
+    const metresPerPixel = 40075016.686 * cos / Math.pow( 2 , zoom + 8 );
+    const ahead = this.map.getSize().y * this.AHEAD_SHARE * metresPerPixel;
+    const rad = this.bearing * Math.PI / 180;
+    const lat = fix.lat + ahead * Math.cos( rad ) / 111320;
+    const lon = fix.lon + ahead * Math.sin( rad ) / ( 111320 * cos );
+    this.map.setView( [ lat , lon ] , zoom , { animate: Boolean( animate ) } );
+  },
+
   showGps( message , bad ) {
     const box = Dom.get( "nav-gps-status" );
     box.className = "alert py-2 mb-2 small " + ( bad ? "alert-danger" : "alert-info" );
@@ -308,7 +391,7 @@ const Navigate = {
   recenter() {
     this.following = true;
     this.renderRecenter();
-    if ( Gps.last ) this.map.setView( [ Gps.last.lat , Gps.last.lon ] , Math.max( this.map.getZoom() , 16 ) );
+    if ( Gps.last ) this.follow( Gps.last );
   },
 
   // --- words and icons ---------------------------------------------------------------
@@ -353,8 +436,8 @@ const Navigate = {
     if ( !this.active || !this.line.length ) return;
     this.showGps( fix.accuracy > 100 ? Format.fill( "navigate.weak" , { m: Math.round( fix.accuracy ) } ) : "" , false );
     if ( !this.map ) return;
+    this.follow( fix , true );
     this.me.update( fix );
-    if ( this.following ) this.map.setView( [ fix.lat , fix.lon ] , Math.max( this.map.getZoom() , 16 ) , { animate: true } );
     if ( this.arrived ) return;
 
     // Ahead first (a little back, for a fix that wobbles), then the whole rest

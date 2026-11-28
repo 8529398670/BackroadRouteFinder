@@ -20,7 +20,8 @@ const RouteMap = {
   fitted: false,
 
   init( elementId , handlers ) {
-    this.map = L.map( elementId , { zoomControl: true , attributionControl: true } );
+    // rotateControl: leaflet-rotate (loaded for Navigate) would add a compass button here.
+    this.map = L.map( elementId , { zoomControl: true , attributionControl: true , rotateControl: false } );
     L.tileLayer( "https://tile.openstreetmap.org/{z}/{x}/{y}.png" , {
       maxZoom: 19,
       // The app's own pages send no Referer off-site (Referrer-Policy:

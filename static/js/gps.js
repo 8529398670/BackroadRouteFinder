@@ -93,7 +93,9 @@ const Gps = {
   },
 
   // The blue dot with its accuracy circle, on a Leaflet map. update(fix)
-  // moves it; a heading turns its arrow.
+  // moves it; a heading turns its arrow. On a rotated map (leaflet-rotate,
+  // the Navigate screen's heading-up) the icon stays upright on the screen,
+  // so the arrow turns by the heading plus the map's (clockwise) bearing.
   dot( map , onClick ) {
     const layer = L.layerGroup().addTo( map );
     let circle = null;
@@ -103,8 +105,14 @@ const Gps = {
         const at = [ fix.lat , fix.lon ];
         const arrow = fix.heading !== null && fix.speed !== null && fix.speed > 0.5;
         const html = arrow
-          ? "<span class=\"gps-dot-arrow\" style=\"transform: rotate(" + Math.round( fix.heading ) + "deg)\"><i class=\"bi bi-caret-up-fill\" aria-hidden=\"true\"></i></span>"
+          ? "<span class=\"gps-dot-arrow\"><i class=\"bi bi-caret-up-fill\" aria-hidden=\"true\"></i></span>"
           : "";
+        // The CSP (style-src 'self') drops a style="" written into the HTML, so
+        // the arrow is turned through the DOM once the icon is on the map.
+        const turn = () => {
+          const span = arrow && marker && marker.getElement() ? marker.getElement().querySelector( ".gps-dot-arrow" ) : null;
+          if ( span ) span.style.transform = "rotate(" + Math.round( fix.heading + ( map.getBearing ? map.getBearing() : 0 ) ) + "deg)";
+        };
         if ( !marker ) {
           circle = L.circle( at , { radius: fix.accuracy , color: "#0d6efd" , weight: 1 , opacity: 0.4 , fillOpacity: 0.12 , interactive: false } );
           marker = L.marker( at , {
@@ -116,10 +124,12 @@ const Gps = {
           if ( onClick ) marker.on( "click" , () => onClick( fix , marker ) );
           layer.addLayer( circle );
           layer.addLayer( marker );
+          turn();
         } else {
           circle.setLatLng( at ).setRadius( fix.accuracy );
           marker.setLatLng( at );
           marker.setIcon( L.divIcon( { className: "gps-dot" , html: html , iconSize: [ 20 , 20 ] , iconAnchor: [ 10 , 10 ] } ) );
+          turn();
           if ( onClick ) { marker.off( "click" ); marker.on( "click" , () => onClick( fix , marker ) ); }
         }
       },

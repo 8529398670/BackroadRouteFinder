@@ -386,7 +386,7 @@ def _snap_shape(graph, shape: list[ShapePoint], max_snap: float, options: costs.
     if not shape:
         return []
     try:
-        snaps = router.snap_all(graph, [(p.lat, p.lon) for p in shape], max_snap, options)
+        snaps = router.snap_all(graph, [(p.lat, p.lon) for p in shape], max_snap, options, soft=True)
     except router.PointOffNetwork as off:
         raise Refused(400, f"nudge {off.index + 1} is not near a road on the map ({off})", field="shape", index=off.index) from None
     return [(p.leg, at) for p, at in zip(shape, snaps)]

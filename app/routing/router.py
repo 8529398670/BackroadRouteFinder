@@ -21,9 +21,9 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from app.routing import costs, search
+from app.routing import classes, costs, search
 from app.routing.graph import Graph
-from app.routing.snap import OffNetwork, Snap, snap
+from app.routing.snap import OffNetwork, Snap, dead_ends, snap
 from app.routing.summarize import Summary, summarize
 
 ALT_FACTOR = 1.4
@@ -63,14 +63,16 @@ def shunned_by(graph: Graph, options: costs.Options | None):
     return lambda segments: costs.excluded_segments(graph, options, segments)
 
 
-def snap_all(graph: Graph, points: list[tuple[float, float]], max_snap_m: float, options: costs.Options | None = None) -> list[Snap]:
+def snap_all(graph: Graph, points: list[tuple[float, float]], max_snap_m: float, options: costs.Options | None = None,
+             soft: bool = False) -> list[Snap]:
     """Each point onto its road; with options, onto a road the rules do not
-    rule out wherever one is near enough."""
+    rule out wherever one is near enough. soft: points only there to steer
+    (nudges), which prefer a through road nearby (snap.snap)."""
     shunned = shunned_by(graph, options)
     snapped: list[Snap] = []
     for index, (lat, lon) in enumerate(points):
         try:
-            snapped.append(snap(graph, lat, lon, max_snap_m, shunned))
+            snapped.append(snap(graph, lat, lon, max_snap_m, shunned, soft=soft))
         except OffNetwork as error:
             raise PointOffNetwork(index, str(error)) from None
     return snapped
@@ -95,6 +97,7 @@ def _drive(searcher: search.Searcher, snapped: list[Snap], reuse_factor: float,
     earlier legs drove that many times over. base: extra (segments, factors)
     on top (alternatives)."""
     pieces: list[search.Piece] = []
+    joins: list[int] = []
     delay = 0.0
     base_segs = base[0] if base is not None else np.zeros(0, dtype=np.int64)
     base_fac = base[1] if base is not None else np.zeros(0)
@@ -111,9 +114,103 @@ def _drive(searcher: search.Searcher, snapped: list[Snap], reuse_factor: float,
             facs = np.multiply.reduceat(facs, first) if len(facs) else facs
             searcher.scale(unique, facs)
         leg_pieces, leg_delay = searcher.leg(start, end)
+        if number:
+            joins.append(len(pieces))
         pieces.extend(leg_pieces)
         delay += leg_delay
-    return pieces, delay
+    soft = [point.soft for point in snapped[1:-1]]
+    return _fold(searcher.graph, pieces, delay, joins, soft)
+
+
+# Pieces shorter than this (metres) are nothing driven.
+_EPS = 0.01
+
+
+def _edge(graph: Graph, piece: search.Piece) -> int:
+    s, a, b = piece
+    return int(graph.seg_fwd[s]) if b > a else int(graph.seg_rev[s])
+
+
+def _turn(graph: Graph, first: search.Piece, then: search.Piece) -> float | None:
+    """Seconds to go from one piece onto the next, or None where the map
+    has no such move. Two parts of one segment in one direction: 0."""
+    if first[0] == then[0] and (first[2] > first[1]) == (then[2] > then[1]) and abs(first[2] - then[1]) < _EPS:
+        return 0.0
+    a, b = _edge(graph, first), _edge(graph, then)
+    if a < 0 or b < 0:
+        return None
+    row = slice(int(graph.turns.ptr[a]), int(graph.turns.ptr[a + 1]))
+    hits = np.flatnonzero(np.asarray(graph.turns.to[row]) == b)
+    return float(graph.turns.seconds[row][hits[0]]) if len(hits) else None
+
+
+def _fold(graph: Graph, pieces: list[search.Piece], delay: float, joins: list[int],
+          soft: list[bool]) -> tuple[list[search.Piece], float]:
+    """Folds away spurs at soft points: where the route drives out to a
+    nudge or ring point and straight back the way it came (out to the end
+    of a driveway, turn round, back), it skips the out-and-back, if the map
+    allows the turn from the road in to the road out where the spur leaves
+    it. Never at a stop of the person's own, and never past the stops either
+    side. joins[i]: where leg i + 1 starts in pieces; soft[i]: is the point
+    there a soft one."""
+    if not any(soft):
+        return pieces, delay
+    bounds = [0, *joins, len(pieces)]
+    legs = [pieces[bounds[i]:bounds[i + 1]] for i in range(len(bounds) - 1)]
+    for i, is_soft in enumerate(soft):
+        if not is_soft:
+            continue
+        before = [p for p in legs[i] if abs(p[2] - p[1]) >= _EPS]
+        after = [p for p in legs[i + 1] if abs(p[2] - p[1]) >= _EPS]
+        if not before or not after:
+            continue
+        left, right = list(before), list(after)
+        folded = False
+        while left and right:
+            (s, a1, b1), (t, a2, b2) = left[-1], right[0]
+            if s != t or abs(b1 - a2) > 1.0 or (b1 > a1) == (b2 > a2):
+                break
+            back, out = abs(b1 - a1), abs(b2 - a2)
+            if abs(back - out) < _EPS:
+                left.pop()
+                right.pop(0)
+            elif out < back:
+                left[-1] = (s, a1, b2)
+                right.pop(0)
+            else:
+                left.pop()
+                right[0] = (s, a1, b2)
+            folded = True
+        if not folded or not left or not right:
+            continue  # nothing to fold, or the spur runs back past a stop
+        if not _spur(graph, before[len(left):]):
+            continue  # out and back along a through road: what the nudge asked for
+        turn = _turn(graph, left[-1], right[0])
+        if turn is None:
+            continue  # no way to turn there without the spur
+        delay += turn - _delays(graph, before) - _delays(graph, after) + _delays(graph, left) + _delays(graph, right)
+        legs[i], legs[i + 1] = left, right
+    out = [p for leg in legs for p in leg]
+    return out, max(delay, 0.0)
+
+
+def _spur(graph: Graph, out: list[search.Piece]) -> bool:
+    """Is the stretch driven out to a soft point (before the fold) a spur:
+    all service roads, or ending on a road with a dead end. Out and back
+    along through roads is the only way to reach a point there, so a nudge
+    put there means it."""
+    if not out:
+        return False
+    segments = np.array(sorted({p[0] for p in out}), dtype=np.int64)
+    if (np.asarray(graph.seg_class[segments]) == classes.SERVICE).all():
+        return True
+    last = out[-1][0]
+    return bool(dead_ends(graph, np.array([int(graph.seg_a[last]), int(graph.seg_b[last])])).any())
+
+
+def _delays(graph: Graph, pieces: list[search.Piece]) -> float:
+    """The turns within one stretch of pieces, in seconds."""
+    return sum(_turn(graph, p, q) or 0.0 for p, q in zip(pieces[:-1], pieces[1:]))
 
 
 _cache: OrderedDict[tuple, tuple[float, Result]] = OrderedDict()
@@ -122,7 +219,7 @@ _cache_lock = threading.Lock()
 
 def _key(graph: Graph, snapped: list[Snap], options: costs.Options, compare_fastest: bool, chosen: bool,
          reuse_factor: float, alternatives: int) -> tuple:
-    points = tuple((s.segment, round(s.along, 1)) for s in snapped)
+    points = tuple((s.segment, round(s.along, 1), s.soft) for s in snapped)
     return (str(graph.folder), graph.meta.get("built_at"), points, options.penalty, tuple(sorted(options.rules.items())),
             tuple(sorted(options.factors.items())), compare_fastest, chosen, round(reuse_factor, 3), alternatives)
 

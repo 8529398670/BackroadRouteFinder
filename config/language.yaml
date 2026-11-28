@@ -30,7 +30,6 @@ nav:
   # Foot of the sidebar, for admins.
   version: "Version {version}"
   plan: "Plan a route"
-  navigate: "Navigate"
   routes: "Saved routes"
   my_settings: "Settings"
   account: "Account"
@@ -204,6 +203,10 @@ plan:
   source_unusable_owner: "Add a key in Settings"
   source_unusable: "Not set up"
   alternatives_label: "Routes to offer"
+  alternatives_help: "How many routes to plan, best first. Pick between them under the map."
+  # The one button that opens the stops, options, sources and routes-to-offer panel on a phone.
+  settings_button: "Route settings"
+  settings_short: "Settings"
   alternatives_found: "Found {n} of {asked}: there were no more on different enough roads."
   alternatives_slow: "Above 12 takes longer, because our map plans each extra route itself. Other sources still get one request per plan and send at most about 3 routes each, so no extra quota is used."
   choice_name: "Route {n} · {source}"
@@ -401,8 +404,6 @@ gps:
 navigate:
   heading: "Navigate"
   map_label: "Map of the route being driven, following your position."
-  empty_heading: "Nothing to navigate yet"
-  empty: "Plan a route and press Navigate, or press Navigate on one of your saved routes."
   waiting: "Waiting for your position…"
   weak: "Weak GPS signal (about {m} m)."
   recenter: "Recenter"
@@ -410,6 +411,9 @@ navigate:
   stop: "End"
   mute: "Mute voice"
   unmute: "Turn voice on"
+  # The map's orientation toggle; the label names the mode it is in now.
+  north_up: "North up"
+  heading_up: "Direction of travel up"
   auto_reroute: "Reroute automatically"
   eta: "arrive {time}"
   then: "Then {what}"

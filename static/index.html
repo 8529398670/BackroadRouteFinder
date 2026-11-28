@@ -64,7 +64,6 @@
         <nav id="sidebar-nav" class="nav nav-pills flex-column w-100 gap-1" data-i18n-attr="aria-label:nav.sidebar_label">
           <!-- The planner first: it is what the app is for. -->
           <a class="nav-link" href="/plan" data-nav="plan"><i class="bi bi-signpost-split" aria-hidden="true"></i><span data-i18n="nav.plan"></span></a>
-          <a class="nav-link" href="/navigate" data-nav="navigate"><i class="bi bi-sign-turn-right" aria-hidden="true"></i><span data-i18n="nav.navigate"></span></a>
           <a class="nav-link" href="/routes" data-nav="routes"><i class="bi bi-bookmark-star" aria-hidden="true"></i><span data-i18n="nav.routes"></span></a>
           <a class="nav-link" href="/settings" data-nav="my-settings"><i class="bi bi-gear" aria-hidden="true"></i><span data-i18n="nav.my_settings"></span></a>
           <!-- Account: its second line names who is signed in (App.labelAccount). -->
@@ -158,12 +157,18 @@
           <p id="plan-map-status" class="alert alert-warning mb-0" role="status" hidden></p>
           <!-- Someone else's route, opened from its link (planner.js renderLink). -->
           <p id="plan-shared" class="alert alert-info small py-2 mb-2" role="status" hidden></p>
-          <div class="btn-toolbar gap-2 mb-2" role="toolbar" data-i18n-attr="aria-label:plan.options_heading">
-            <div class="dropdown">
+          <div class="btn-toolbar flex-nowrap flex-lg-wrap gap-1 gap-sm-2 mb-2 plan-toolbar" role="toolbar" data-i18n-attr="aria-label:plan.options_heading">
+            <!-- Below lg the four menus live in one panel (#plan-settings); planner.js
+                 moves each menu's body between its dropdown and the panel. -->
+            <button class="btn btn-outline-secondary d-lg-none plan-settings-button" type="button" data-bs-toggle="offcanvas" data-bs-target="#plan-settings" aria-controls="plan-settings" data-i18n-attr="title:plan.settings_button">
+              <i class="bi bi-sliders" aria-hidden="true"></i> <span data-i18n="plan.settings_short"></span>
+            </button>
+            <div class="dropdown d-none d-lg-block">
               <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false" id="plan-menu-stops-toggle">
                 <i class="bi bi-geo-alt" aria-hidden="true"></i> <span data-i18n="plan.stops_heading"></span>
               </button>
               <div class="dropdown-menu plan-menu plan-menu-scroll p-3 shadow" id="plan-menu-stops" aria-labelledby="plan-menu-stops-toggle">
+                <div id="plan-body-stops">
                 <div class="form-check form-switch mb-2">
                   <input class="form-check-input" type="checkbox" role="switch" id="plan-loop" />
                   <label class="form-check-label fw-semibold" for="plan-loop" data-i18n="plan.loop"></label>
@@ -221,13 +226,15 @@
                   <button id="plan-reverse" type="button" class="btn btn-sm btn-outline-secondary"><i class="bi bi-arrow-down-up" aria-hidden="true"></i> <span data-i18n="plan.reverse"></span></button>
                   <button id="plan-clear" type="button" class="btn btn-sm btn-outline-secondary"><i class="bi bi-x-lg" aria-hidden="true"></i> <span data-i18n="plan.clear"></span></button>
                 </div>
+                </div>
               </div>
             </div>
-            <div class="dropdown">
+            <div class="dropdown d-none d-lg-block">
               <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false" id="plan-menu-how-toggle">
                 <i class="bi bi-sliders" aria-hidden="true"></i> <span data-i18n="plan.options_heading"></span>
               </button>
               <div class="dropdown-menu plan-menu plan-menu-wide plan-menu-scroll p-3 shadow" id="plan-menu-how" aria-labelledby="plan-menu-how-toggle">
+                <div id="plan-body-how">
                 <!-- Two columns from lg up: the strength on the left, the road types on the right. -->
                 <div class="row g-3">
                 <div class="col-12 col-lg-6">
@@ -265,30 +272,73 @@
                 </fieldset>
                 </div>
                 </div>
+                </div>
               </div>
             </div>
-            <div class="dropdown">
+            <div class="dropdown d-none d-lg-block">
               <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false" id="plan-menu-sources-toggle">
                 <i class="bi bi-hdd-stack" aria-hidden="true"></i> <span data-i18n="plan.sources_heading"></span>
               </button>
               <div class="dropdown-menu plan-menu plan-menu-scroll p-3 shadow" id="plan-menu-sources" aria-labelledby="plan-menu-sources-toggle">
+                <div id="plan-body-sources">
                 <p class="small text-body-secondary" data-i18n="plan.sources_help"></p>
                 <div id="plan-sources" class="d-flex flex-column gap-1 mb-2"></div>
+                </div>
+              </div>
+            </div>
+            <div class="dropdown d-none d-lg-block">
+              <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false" id="plan-menu-alternatives-toggle">
+                <i class="bi bi-collection" aria-hidden="true"></i> <span data-i18n="plan.alternatives_label"></span>
+                <span id="plan-alternatives-count" class="badge text-bg-secondary ms-1"></span>
+              </button>
+              <div class="dropdown-menu plan-menu p-3 shadow" id="plan-menu-alternatives" aria-labelledby="plan-menu-alternatives-toggle">
+                <div id="plan-body-alternatives">
+                  <label for="plan-alternatives" class="form-label small text-body-secondary" data-i18n="plan.alternatives_help"></label>
+                  <select id="plan-alternatives" class="form-select form-select-sm"></select>
+                  <p id="plan-alternatives-note" class="form-text mb-0" role="status" hidden></p>
+                </div>
               </div>
             </div>
             <!-- What dragging the route does: nudge it, or switch onto another route at a fork (planner.js). -->
             <div class="btn-group" role="group" data-i18n-attr="aria-label:plan.edit_mode_label">
               <input type="radio" class="btn-check" name="plan-edit-mode" id="plan-mode-nudge" value="nudge" autocomplete="off" checked disabled />
-              <label class="btn btn-outline-secondary" for="plan-mode-nudge" data-i18n-attr="title:plan.mode_nudge_help"><i class="bi bi-arrows-move" aria-hidden="true"></i> <span data-i18n="plan.mode_nudge"></span></label>
+              <label class="btn btn-outline-secondary" for="plan-mode-nudge" data-i18n-attr="title:plan.mode_nudge_help"><i class="bi bi-arrows-move" aria-hidden="true"></i> <span class="d-none d-sm-inline" data-i18n="plan.mode_nudge"></span></label>
               <input type="radio" class="btn-check" name="plan-edit-mode" id="plan-mode-forks" value="forks" autocomplete="off" disabled />
-              <label class="btn btn-outline-secondary" for="plan-mode-forks" data-i18n-attr="title:plan.mode_forks_help"><i class="bi bi-signpost-split" aria-hidden="true"></i> <span data-i18n="plan.mode_forks"></span></label>
+              <label class="btn btn-outline-secondary" for="plan-mode-forks" data-i18n-attr="title:plan.mode_forks_help"><i class="bi bi-signpost-split" aria-hidden="true"></i> <span class="d-none d-sm-inline" data-i18n="plan.mode_forks"></span></label>
             </div>
             <!-- Locking part of the route, and taking nudges and locks away (planner.js). -->
-            <button id="plan-lock" type="button" class="btn btn-outline-secondary" aria-pressed="false" disabled><i class="bi bi-plus-lg" aria-hidden="true"></i> <span data-i18n="plan.lock_point"></span></button>
-            <button id="plan-reset-shape" type="button" class="btn btn-outline-danger" hidden><i class="bi bi-x-circle" aria-hidden="true"></i> <span data-i18n="plan.reset_shape"></span></button>
+            <button id="plan-lock" type="button" class="btn btn-outline-secondary" aria-pressed="false" data-i18n-attr="title:plan.lock_point" disabled><i class="bi bi-plus-lg" aria-hidden="true"></i> <span class="d-none d-sm-inline" data-i18n="plan.lock_point"></span></button>
+            <button id="plan-reset-shape" type="button" class="btn btn-outline-danger" data-i18n-attr="title:plan.reset_shape" hidden><i class="bi bi-x-circle" aria-hidden="true"></i> <span class="d-none d-sm-inline" data-i18n="plan.reset_shape"></span></button>
             <div class="btn-group ms-auto" role="group" data-i18n-attr="aria-label:plan.history_label">
               <button id="plan-undo" type="button" class="btn btn-outline-secondary" data-i18n-attr="title:plan.undo_button,aria-label:plan.undo_button" disabled><i class="bi bi-arrow-counterclockwise" aria-hidden="true"></i></button>
               <button id="plan-redo" type="button" class="btn btn-outline-secondary" data-i18n-attr="title:plan.redo_button,aria-label:plan.redo_button" disabled><i class="bi bi-arrow-clockwise" aria-hidden="true"></i></button>
+            </div>
+          </div>
+          <!-- The route settings on a phone: the toolbar's four menus as one panel. -->
+          <div class="offcanvas offcanvas-start" tabindex="-1" id="plan-settings" aria-labelledby="plan-settings-title">
+            <div class="offcanvas-header border-bottom">
+              <h2 class="offcanvas-title h5" id="plan-settings-title" data-i18n="plan.settings_button"></h2>
+              <button type="button" class="btn-close" data-bs-dismiss="offcanvas" data-i18n-attr="aria-label:nav.close"></button>
+            </div>
+            <div class="offcanvas-body p-0">
+              <div class="accordion accordion-flush" id="plan-settings-accordion">
+                <div class="accordion-item">
+                  <h3 class="accordion-header"><button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#plan-slot-stops" aria-expanded="true" aria-controls="plan-slot-stops"><i class="bi bi-geo-alt me-2" aria-hidden="true"></i><span data-i18n="plan.stops_heading"></span></button></h3>
+                  <div id="plan-slot-stops" class="accordion-collapse collapse show" data-bs-parent="#plan-settings-accordion"><div class="accordion-body" data-slot="stops"></div></div>
+                </div>
+                <div class="accordion-item">
+                  <h3 class="accordion-header"><button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#plan-slot-how" aria-expanded="false" aria-controls="plan-slot-how"><i class="bi bi-sliders me-2" aria-hidden="true"></i><span data-i18n="plan.options_heading"></span></button></h3>
+                  <div id="plan-slot-how" class="accordion-collapse collapse" data-bs-parent="#plan-settings-accordion"><div class="accordion-body" data-slot="how"></div></div>
+                </div>
+                <div class="accordion-item">
+                  <h3 class="accordion-header"><button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#plan-slot-sources" aria-expanded="false" aria-controls="plan-slot-sources"><i class="bi bi-hdd-stack me-2" aria-hidden="true"></i><span data-i18n="plan.sources_heading"></span></button></h3>
+                  <div id="plan-slot-sources" class="accordion-collapse collapse" data-bs-parent="#plan-settings-accordion"><div class="accordion-body" data-slot="sources"></div></div>
+                </div>
+                <div class="accordion-item">
+                  <h3 class="accordion-header"><button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#plan-slot-alternatives" aria-expanded="false" aria-controls="plan-slot-alternatives"><i class="bi bi-collection me-2" aria-hidden="true"></i><span data-i18n="plan.alternatives_label"></span></button></h3>
+                  <div id="plan-slot-alternatives" class="accordion-collapse collapse" data-bs-parent="#plan-settings-accordion"><div class="accordion-body" data-slot="alternatives"></div></div>
+                </div>
+              </div>
             </div>
           </div>
           <div class="row g-3">
@@ -311,11 +361,6 @@
                 <div class="card-body">
                   <h3 class="card-title" data-i18n="plan.result_heading"></h3>
                   <div id="plan-problems" class="small alert alert-warning py-2" role="status" hidden></div>
-                  <div class="d-flex align-items-center gap-2 mb-2">
-                    <label for="plan-alternatives" class="small text-body-secondary" data-i18n="plan.alternatives_label"></label>
-                    <select id="plan-alternatives" class="form-select form-select-sm w-auto"></select>
-                  </div>
-                  <p id="plan-alternatives-note" class="form-text mt-0 mb-2" role="status" hidden></p>
                   <p id="plan-shape-status" class="small text-body-secondary mb-2" hidden></p>
                   <div id="plan-summary"></div>
                   <details class="mt-3">
@@ -351,16 +396,6 @@
              (navigate.js, gps.js). -->
         <section class="view view-full" data-view="navigate" data-path="/navigate" id="navigate-panel">
           <h2 class="visually-hidden" data-i18n="navigate.heading"></h2>
-          <section id="nav-empty" class="card">
-            <div class="card-body">
-              <h3 class="card-title h5" data-i18n="navigate.empty_heading"></h3>
-              <p data-i18n="navigate.empty"></p>
-              <div class="d-flex flex-wrap gap-2">
-                <a href="/plan" class="btn btn-primary"><i class="bi bi-signpost-split" aria-hidden="true"></i> <span data-i18n="nav.plan"></span></a>
-                <a href="/routes" class="btn btn-outline-secondary"><i class="bi bi-bookmark-star" aria-hidden="true"></i> <span data-i18n="nav.routes"></span></a>
-              </div>
-            </div>
-          </section>
           <div id="nav-live" hidden>
             <div id="nav-gps-status" class="alert alert-info py-2 mb-2 small" role="status" hidden></div>
             <div id="nav-off-route" class="alert alert-warning py-2 mb-2 d-flex flex-wrap align-items-center gap-2" role="alert" hidden>
@@ -393,6 +428,7 @@
                   <label class="form-check-label small" for="nav-auto" data-i18n="navigate.auto_reroute"></label>
                 </div>
                 <button type="button" class="btn btn-outline-secondary" data-bs-toggle="offcanvas" data-bs-target="#nav-steps-panel" aria-controls="nav-steps-panel"><i class="bi bi-list-ol" aria-hidden="true"></i> <span data-i18n="navigate.steps"></span></button>
+                <button id="nav-orient" type="button" class="btn btn-outline-secondary" aria-pressed="false"><i class="bi bi-compass" aria-hidden="true"></i></button>
                 <button id="nav-mute" type="button" class="btn btn-outline-secondary" aria-pressed="false"><i class="bi bi-volume-up-fill" aria-hidden="true"></i></button>
                 <button id="nav-stop" type="button" class="btn btn-danger"><i class="bi bi-stop-circle" aria-hidden="true"></i> <span data-i18n="navigate.stop"></span></button>
               </div>
@@ -1366,6 +1402,7 @@
   <script src="/js/fresh.js"></script>
   <script src="/js/live.js"></script>
   <script src="/vendor/leaflet.js"></script>
+  <script src="/vendor/leaflet-rotate.js"></script>
   <script src="/js/format.js"></script>
   <script src="/js/gps.js"></script>
   <script src="/js/map.js"></script>

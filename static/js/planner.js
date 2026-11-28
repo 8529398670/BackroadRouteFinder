@@ -107,6 +107,7 @@ const Planner = {
     } );
     window.addEventListener( "resize" , () => RouteMap.resize() );
     this.initLocate();
+    this.initSettingsPanel();
 
     Dom.get( "plan-add-stop" ).addEventListener( "click" , () => this.addStop() );
     Dom.get( "plan-reverse" ).addEventListener( "click" , () => this.reverse() );
@@ -380,6 +381,8 @@ const Planner = {
       const menu = bootstrap.Dropdown.getInstance( toggle );
       if ( menu ) menu.hide();
     } );
+    const panel = bootstrap.Offcanvas.getInstance( Dom.get( "plan-settings" ) );
+    if ( panel ) panel.hide();
   },
 
   addStop() {
@@ -996,6 +999,29 @@ const Planner = {
     this.renderAlternativesNote();
   },
 
+  // The toolbar's four menus (stops, options, sources, routes to offer) are
+  // dropdowns from lg up; on a phone they are one panel (#plan-settings) of
+  // accordion sections. Each menu's body is one node, moved between the two,
+  // so every control keeps its id and listeners.
+  SETTINGS_SECTIONS: [ "stops" , "how" , "sources" , "alternatives" ],
+
+  initSettingsPanel() {
+    const wide = window.matchMedia( "(min-width: 992px)" );
+    const place = () => {
+      this.SETTINGS_SECTIONS.forEach( ( name ) => {
+        const body = Dom.get( "plan-body-" + name );
+        const home = wide.matches ? Dom.get( "plan-menu-" + name ) : document.querySelector( "#plan-settings [data-slot=" + name + "]" );
+        if ( body && home && body.parentNode !== home ) home.appendChild( body );
+      } );
+      if ( wide.matches ) {
+        const panel = bootstrap.Offcanvas.getInstance( Dom.get( "plan-settings" ) );
+        if ( panel ) panel.hide();
+      }
+    };
+    place();
+    wide.addEventListener( "change" , place );
+  },
+
   // Under "Routes to offer": how many came back when fewer than asked for,
   // and that a big number is slow (but spends no more of other engines' quota).
   renderAlternativesNote() {
@@ -1004,6 +1030,7 @@ const Planner = {
     const lines = [];
     if ( this.result && found < asked ) lines.push( Format.fill( "plan.alternatives_found" , { n: found , asked: asked } ) );
     if ( asked > this.ALTERNATIVES_SLOW ) lines.push( I18n.get( "plan.alternatives_slow" ) );
+    Dom.text( Dom.get( "plan-alternatives-count" ) , String( asked ) );
     const note = Dom.get( "plan-alternatives-note" );
     note.textContent = lines.join( " " );
     Dom.show( note , lines.length > 0 );

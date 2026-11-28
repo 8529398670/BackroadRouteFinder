@@ -35,7 +35,7 @@ from scipy.sparse.csgraph import dijkstra
 from app.routing import costs, grid
 from app.routing.graph import Graph
 from app.routing.search import NoRoute
-from app.routing.snap import OffNetwork, Snap, snap
+from app.routing.snap import OffNetwork, Snap, dead_ends, snap
 
 METRES_PER_MILE = 1609.344
 EARTH_RADIUS_M = 6_371_008.8
@@ -92,7 +92,9 @@ def _ring_miles(graph: Graph, center: Snap, miles: float, count: int, shunned) -
     for k in range(count):
         lat, lon = _offset(center.lat, center.lon, radius, 360.0 * k / count)
         try:
-            out.append((k, snap(graph, lat, lon, reach, shunned)))
+            # A ring point is only there to steer: onto a through road, up to
+            # a quarter of the snap reach further than the nearest road.
+            out.append((k, snap(graph, lat, lon, reach, shunned, soft=True, margin=reach / 4)))
         except OffNetwork:
             continue
     return out
@@ -141,7 +143,9 @@ def _ring_minutes(graph: Graph, center: Snap, minutes: float, count: int, option
     b = int(np.searchsorted(nodes, int(graph.seg_b[s])))
     times = dijkstra(matrix, directed=True, indices=[a, b], limit=target * SEARCH_LIMIT, min_only=False)
     times = np.minimum(times[0] + to_a, times[1] + to_b)
-    reached = np.flatnonzero(np.isfinite(times) & (times < costs.EXCLUDED_WEIGHT))
+    # Not a dead end (a driveway's far end, a cul-de-sac): the route would
+    # drive down it and straight back.
+    reached = np.flatnonzero(np.isfinite(times) & (times < costs.EXCLUDED_WEIGHT) & ~dead_ends(graph, nodes))
     if len(reached) == 0:
         return []
     lat = np.asarray(graph.node_lat[nodes[reached]])
@@ -159,7 +163,7 @@ def _ring_minutes(graph: Graph, center: Snap, minutes: float, count: int, option
         if times[reached[best]] < target * 0.4:
             continue  # nothing reaches out that far this way: a gap in the ring
         try:
-            out.append((k, snap(graph, float(lat[best]), float(lon[best]), MIN_SNAP_M, shunned)))
+            out.append((k, snap(graph, float(lat[best]), float(lon[best]), MIN_SNAP_M, shunned, soft=True)))
         except OffNetwork:
             continue
     return out
@@ -191,7 +195,7 @@ def _edited(graph: Graph, ring: list[tuple[int, Snap]], edits: dict[int, tuple[f
             out.pop(k, None)
             continue
         try:
-            out[k] = snap(graph, to[0], to[1], max_snap_m, shunned)
+            out[k] = snap(graph, to[0], to[1], max_snap_m, shunned, soft=True)
         except OffNetwork as error:
             raise NoRoute(f"a moved ring point is not near a road on the map ({error})") from None
     return sorted(out.items())

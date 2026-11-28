@@ -22,7 +22,9 @@ strengths; "never" still holds.
 
 Service roads (alleys, access roads) count double whatever the rules, so
 routes do not cut through parking lots and business parks to save ten
-seconds.
+seconds; with backroads on, as much as the strongest avoided road type
+(service_factor), or else a slow service road beside an avoided main road
+costs the same and the route wanders down it.
 
 Turns (turns.py) cost their seconds on top, never multiplied: a stop sign
 takes as long on a backroad as anywhere.
@@ -204,9 +206,22 @@ def excluded_segments(graph: Graph, options: Options, segments: np.ndarray | Non
     return _matching(graph, options, NEVER, segments)
 
 
+def service_factor(options: Options) -> float:
+    """What a second on a service road counts: SERVICE_FACTOR, and with
+    backroads on at least as much as the strongest avoided road type, so a
+    service road (an access road, a driveway out to a tower) never comes out
+    cheaper than the main road it runs beside."""
+    out = SERVICE_FACTOR
+    if options.penalty > 1.0:
+        for name in classes.CATEGORIES:
+            if name not in ("service", "track") and options.rule(name) == AVOID:
+                out = max(out, options.strength(name))
+    return out
+
+
 def segment_weights(graph: Graph, options: Options, segments: np.ndarray | None = None) -> np.ndarray:
     """One weight per segment (direction does not change it)."""
     weight = _column(graph.seg_seconds, segments).astype(np.float64) * segment_factors(graph, options, segments)
-    weight = weight * np.where(_column(graph.seg_class, segments) == classes.SERVICE, SERVICE_FACTOR, 1.0)
+    weight = weight * np.where(_column(graph.seg_class, segments) == classes.SERVICE, service_factor(options), 1.0)
     weight = np.where(excluded_segments(graph, options, segments), weight + EXCLUDED_WEIGHT, weight)
     return np.maximum(weight, MIN_WEIGHT)
